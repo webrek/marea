@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["crates/marea-syntax", "crates/marea-cli"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+authors = ["Antonio Hernández <ahernandez@faypublicidad.com>"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"

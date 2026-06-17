@@ -1,0 +1,11 @@
+[package]
+name = "marea-syntax"
+description = "Lexer, AST y parser del lenguaje Marea."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "marea_syntax"
+path = "src/lib.rs"

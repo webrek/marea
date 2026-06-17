@@ -1,0 +1,7 @@
+// El clásico, en Marea.
+
+@client
+fn main() {
+    let saludo = "¡Hola, Marea! 🌊";
+    print(saludo);
+}
