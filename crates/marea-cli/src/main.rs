@@ -46,6 +46,16 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        "build" => {
+            let out_dir = args.get(3).map(String::as_str).unwrap_or("marea-out");
+            match marea_syntax::parse(&src) {
+                Ok(module) => build(&module, out_dir),
+                Err(e) => {
+                    eprintln!("{}", e.render(&src));
+                    ExitCode::FAILURE
+                }
+            }
+        }
         other => {
             eprintln!("error: comando desconocido '{}'", other);
             print_usage();
@@ -54,9 +64,34 @@ fn main() -> ExitCode {
     }
 }
 
+fn build(module: &marea_syntax::Module, out_dir: &str) -> ExitCode {
+    let project = marea_codegen::emit(module);
+    if let Err(e) = std::fs::create_dir_all(out_dir) {
+        eprintln!("error: no se pudo crear '{}': {}", out_dir, e);
+        return ExitCode::FAILURE;
+    }
+    let files = [
+        ("runtime.ts", project.runtime),
+        ("server.ts", project.server),
+        ("client.ts", project.client),
+        ("demo.ts", project.demo),
+    ];
+    for (name, contents) in files {
+        let path = format!("{}/{}", out_dir, name);
+        if let Err(e) = std::fs::write(&path, contents) {
+            eprintln!("error: no se pudo escribir '{}': {}", path, e);
+            return ExitCode::FAILURE;
+        }
+        println!("  escrito {}", path);
+    }
+    println!("\nlisto. Para correr la demo end-to-end:\n  node {}/demo.ts", out_dir);
+    ExitCode::SUCCESS
+}
+
 fn print_usage() {
     eprintln!("Marea — compilador del lenguaje (v0)\n");
     eprintln!("uso:");
-    eprintln!("  marea tokens <archivo.mar>   muestra los tokens");
-    eprintln!("  marea parse  <archivo.mar>   muestra el AST");
+    eprintln!("  marea tokens <archivo.mar>          muestra los tokens");
+    eprintln!("  marea parse  <archivo.mar>          muestra el AST");
+    eprintln!("  marea build  <archivo.mar> [dir]    transpila a TypeScript");
 }

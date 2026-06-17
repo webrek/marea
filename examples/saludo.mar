@@ -1,0 +1,16 @@
+// Demostración de la frontera de red.
+//
+// 'saludar' corre en el SERVIDOR. 'main' corre en el CLIENTE y la llama como
+// si fuera local — el compilador genera el RPC por debajo. No escribimos
+// ninguna "capa de API".
+
+@server
+fn saludar(nombre: String) -> String {
+    return concat("Hola desde el servidor, ", nombre);
+}
+
+@client
+fn main() {
+    let mensaje = saludar("Marea");
+    print(mensaje);
+}
