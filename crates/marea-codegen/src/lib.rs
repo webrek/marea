@@ -51,7 +51,9 @@ pub fn emit(module: &Module) -> Project {
         Some(sig) => format!("marea-store.{sig}.json"),
         None => "marea-store.json".to_string(),
     };
-    let runtime = RUNTIME_TS.replace("__MAREA_STORE_DEFAULT__", &store_file);
+    let runtime = RUNTIME_TS
+        .replace("__MAREA_STORE_DEFAULT__", &store_file)
+        .replace("__MAREA_STORE_SCHEMA__", &store_schema_literal(module));
 
     Project {
         runtime,
@@ -92,6 +94,75 @@ fn type_signature(ty: &Type, module: &Module) -> String {
         }
         Type::Union { .. } => "union".to_string(),
     }
+}
+
+/// Literal JS del esquema del store (`{ table, columns: [{name,kind}] }`) para
+/// el runtime, o `"null"` si no hay store. Los backends SQL/Mongo derivan de aquí
+/// la tabla y las columnas.
+fn store_schema_literal(module: &Module) -> String {
+    let store_ty = match module.items.iter().find_map(|it| match it {
+        Item::Store { ty, .. } => Some(ty),
+        _ => None,
+    }) {
+        Some(t) => t,
+        None => return "null".to_string(),
+    };
+    let (table, columns) = resolve_store_fields(store_ty, module);
+    let cols: Vec<String> = columns
+        .iter()
+        .map(|(n, k)| format!("{{ name: {}, kind: {} }}", js_string(n), js_string(k)))
+        .collect();
+    format!(
+        "{{ table: {}, columns: [{}] }}",
+        js_string(&table),
+        cols.join(", ")
+    )
+}
+
+/// Resuelve el store a (nombre de tabla, columnas [(campo, kind)]). Un store de
+/// registro produce una columna por campo; uno escalar/lista/unión, una sola
+/// columna JSON `__doc`.
+fn resolve_store_fields(ty: &Type, module: &Module) -> (String, Vec<(String, String)>) {
+    let (name, record_fields): (Option<String>, Option<&[FieldDef]>) = match ty {
+        Type::Record { fields, .. } => (None, Some(fields)),
+        Type::Name { name, .. } => {
+            let aliased = module.items.iter().find_map(|it| match it {
+                Item::Type(t) if &t.name == name => Some(&t.aliased),
+                _ => None,
+            });
+            match aliased {
+                Some(Type::Record { fields, .. }) => (Some(name.clone()), Some(fields)),
+                _ => (Some(name.clone()), None),
+            }
+        }
+        _ => (None, None),
+    };
+    let table = name.unwrap_or_else(|| "store".to_string()).to_lowercase();
+    match record_fields {
+        Some(fields) => (
+            table,
+            fields
+                .iter()
+                .map(|f| (f.name.clone(), type_kind(&f.ty)))
+                .collect(),
+        ),
+        None => (table, vec![("__doc".to_string(), "json".to_string())]),
+    }
+}
+
+/// Tipo de columna de un campo, para el esquema del backend.
+fn type_kind(ty: &Type) -> String {
+    match ty {
+        Type::Name { name, .. } => match name.as_str() {
+            "Int" => "int",
+            "Float" => "real",
+            "Bool" => "bool",
+            "String" => "text",
+            _ => "json",
+        },
+        _ => "json",
+    }
+    .to_string()
 }
 
 /// Harness web para correr un módulo WebAssembly de Marea en el navegador:
@@ -503,12 +574,12 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
         Expr::Call { callee, args, .. } => {
             let a: Vec<String> = args.iter().map(|x| emit_expr(x, reactive)).collect();
             let callee_ts = emit_expr(callee, reactive);
+            // Builtins SÍNCRONOS (no se 'await'). Los de estado (guardar/todos/
+            // actualizar/borrar) son async (pegan a la BD) y SÍ se awaitan.
             let is_sync_builtin = matches!(
                 callee.as_ref(),
                 Expr::Ident { name, .. }
-                    if matches!(name.as_str(),
-                        "print" | "concat" | "render" | "len" | "aTexto"
-                        | "guardar" | "todos" | "actualizar" | "borrar")
+                    if matches!(name.as_str(), "print" | "concat" | "render" | "len" | "aTexto")
             );
             if is_sync_builtin {
                 format!("{}({})", callee_ts, a.join(", "))

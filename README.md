@@ -150,6 +150,48 @@ cargo test
 cargo clippy --all-targets
 ```
 
+## Persistencia: un `store` con backends intercambiables
+
+El estado del servidor se declara con `store T;` y se opera con cuatro builtins
+(CRUD): `guardar(x)`, `todos()`, `actualizar(i, x)` y `borrar(i)`. El código
+`.mar` no sabe **dónde** vive ese estado: el backend se elige al correr, con
+variables de entorno, sin tocar el lenguaje.
+
+```mar
+type Post = { autor: String, texto: String, likes: Int };
+store Post;
+
+@server fn publicar(a: String, t: String) { guardar(Post { autor: a, texto: t, likes: 0 }); }
+@server fn feed() -> List<Post> { return todos(); }
+```
+
+```sh
+# Por defecto: archivo JSON (cero dependencias)
+node /tmp/x/demo.ts
+
+# SQLite (módulo integrado de Node, cero dependencias)
+MAREA_DB=sqlite MAREA_DB_URL=marea.sqlite node /tmp/x/demo.ts
+
+# PostgreSQL / MySQL / MongoDB (requieren su driver instalado)
+MAREA_DB=postgres MAREA_DB_URL=postgres://user:pass@host/db node /tmp/x/demo.ts   # npm i pg
+MAREA_DB=mysql    MAREA_DB_URL=mysql://user:pass@host/db    node /tmp/x/demo.ts   # npm i mysql2
+MAREA_DB=mongodb  MAREA_DB_URL=mongodb://host/db            node /tmp/x/demo.ts   # npm i mongodb
+```
+
+El codegen deriva el esquema (tabla + columnas tipadas) del tipo del `store`: un
+registro produce una columna por campo; un escalar/lista/unión se guarda como una
+sola columna JSON `__doc`. Los drivers externos (`pg`, `mysql2`, `mongodb`) se
+cargan con `import()` perezoso, así que un programa sin base de datos —o con
+`file`/`sqlite`— no necesita instalarlos.
+
+| `MAREA_DB` | Backend         | Dependencia        | `MAREA_DB_URL`              |
+| ---------- | --------------- | ------------------ | -------------------------- |
+| `file` (def) | Archivo JSON  | ninguna            | (usa `MAREA_STORE`)        |
+| `sqlite`   | `node:sqlite`   | ninguna            | ruta del archivo `.sqlite` |
+| `postgres` | `pg`            | `npm i pg`         | cadena de conexión         |
+| `mysql`    | `mysql2/promise`| `npm i mysql2`     | cadena de conexión         |
+| `mongodb`  | `mongodb`       | `npm i mongodb`    | cadena de conexión         |
+
 ## Hoja de ruta
 
 - [x] **v0** — Lexer + AST + Parser + CLI
@@ -163,6 +205,8 @@ cargo clippy --all-targets
 - [x] **LSP** — Servidor de lenguaje: diagnósticos en vivo, symbols, completion, definition, hover
 - [x] **Recuperación de errores** — el parser reporta múltiples diagnósticos (no fail-fast)
 - [x] **glue DOM (web)** — `marea build-web` genera una app WASM para el navegador
+- [x] **Persistencia** — `store T;` con backends intercambiables: archivo JSON,
+      SQLite, PostgreSQL, MySQL y MongoDB (elegidos por `MAREA_DB`, sin cambiar el `.mar`)
 
 ## Licencia
 

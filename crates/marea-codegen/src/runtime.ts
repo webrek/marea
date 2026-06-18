@@ -233,68 +233,282 @@ export function __index(xs: unknown[], i: number): unknown {
   return xs[i];
 }
 
-// --- estado del servidor: un store PERSISTENTE A DISCO. Se carga del archivo
-// la PRIMERA vez que se usa (carga perezosa: un programa sin store nunca toca el
-// disco) y se reescribe en cada mutación. El nombre por defecto incluye la firma
-// del esquema de 'store T;' (lo sustituye el codegen), así dos apps con esquemas
-// distintos NO comparten archivo ni se contaminan. Override con MAREA_STORE.
-const __STORE_FILE = process.env.MAREA_STORE ?? "__MAREA_STORE_DEFAULT__";
+// --- estado del servidor con BACKEND DE PERSISTENCIA CONECTABLE ---
+//
+// El store guarda registros del tipo de 'store T;'. El BACKEND se elige con la
+// variable MAREA_DB: file (por defecto) | sqlite | postgres | mysql | mongodb.
+// El esquema (tabla + columnas) lo inyecta el codegen desde 'store T;'. Todos
+// los backends comparten la misma interfaz, así que el código .mar no cambia al
+// pasar de un archivo JSON a una base de datos real.
+//
+// Modelo: el arreglo en memoria es la copia de trabajo (índices estables); cada
+// mutación lo persiste completo (saveAll). Simple y correcto; una versión de
+// producción usaría operaciones incrementales por id.
 
+interface __Schema {
+  table: string;
+  columns: { name: string; kind: "text" | "int" | "real" | "bool" | "json" }[];
+}
+const __STORE_SCHEMA: __Schema | null = __MAREA_STORE_SCHEMA__;
+
+interface __Backend {
+  load(): Promise<unknown[]>;
+  saveAll(items: unknown[]): Promise<void>;
+}
+
+// Cuando el store no guarda registros (p.ej. `store Int;` o `store String;`) el
+// esquema tiene una sola columna '__doc' de tipo json: ahí cabe el valor entero.
+function __isDoc(): boolean {
+  const cols = (__STORE_SCHEMA as __Schema).columns;
+  return cols.length === 1 && cols[0].name === "__doc";
+}
+
+// --- conversión registro <-> fila (para los backends SQL) ---
+function __toRow(rec: any): unknown[] {
+  if (__isDoc()) return [JSON.stringify(rec ?? null)];
+  return (__STORE_SCHEMA as __Schema).columns.map((c) => {
+    const v = rec?.[c.name];
+    if (c.kind === "bool") return v ? 1 : 0;
+    if (c.kind === "json") return JSON.stringify(v ?? null);
+    return v ?? null;
+  });
+}
+function __fromRow(row: any): unknown {
+  if (__isDoc()) return JSON.parse(row?.__doc ?? "null");
+  const rec: any = {};
+  for (const c of (__STORE_SCHEMA as __Schema).columns) {
+    const v = row?.[c.name];
+    rec[c.name] = c.kind === "bool" ? v != 0 : c.kind === "json" ? JSON.parse(v ?? "null") : v;
+  }
+  return rec;
+}
+function __sqlType(kind: string): string {
+  if (kind === "int" || kind === "bool") return "INTEGER";
+  if (kind === "real") return "REAL";
+  return "TEXT";
+}
+function __cols(): string {
+  return (__STORE_SCHEMA as __Schema).columns.map((c) => c.name).join(", ");
+}
+function __createSql(): string {
+  const s = __STORE_SCHEMA as __Schema;
+  const defs = s.columns.map((c) => `${c.name} ${__sqlType(c.kind)}`).join(", ");
+  return `CREATE TABLE IF NOT EXISTS ${s.table} (${defs})`;
+}
+
+// --- backend: archivo JSON (por defecto, cero dependencias) ---
+function __fileBackend(): __Backend {
+  const file = process.env.MAREA_STORE ?? "__MAREA_STORE_DEFAULT__";
+  return {
+    async load() {
+      let data: string;
+      try {
+        data = fs.readFileSync(file, "utf8");
+      } catch {
+        return [];
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(data);
+      } catch {
+        throw new Error(`[marea] store corrupto (JSON inválido) en ${file}`);
+      }
+      if (!Array.isArray(parsed)) {
+        throw new Error(`[marea] ${file} existe pero no es un arreglo`);
+      }
+      return parsed;
+    },
+    async saveAll(items) {
+      fs.writeFileSync(file, JSON.stringify(items));
+    },
+  };
+}
+
+// --- backend: SQLite (módulo integrado node:sqlite, cero dependencias) ---
+function __sqliteBackend(): __Backend {
+  const path = process.env.MAREA_DB_URL ?? "marea.sqlite";
+  let db: any = null;
+  async function open() {
+    if (db) return db;
+    const { DatabaseSync } = await import("node:sqlite");
+    db = new DatabaseSync(path);
+    db.exec(__createSql());
+    return db;
+  }
+  return {
+    async load() {
+      const d = await open();
+      return d.prepare(`SELECT ${__cols()} FROM ${(__STORE_SCHEMA as __Schema).table}`).all().map(__fromRow);
+    },
+    async saveAll(items) {
+      const d = await open();
+      const t = (__STORE_SCHEMA as __Schema).table;
+      const ph = (__STORE_SCHEMA as __Schema).columns.map(() => "?").join(", ");
+      const ins = d.prepare(`INSERT INTO ${t} (${__cols()}) VALUES (${ph})`);
+      d.exec("BEGIN");
+      d.exec(`DELETE FROM ${t}`);
+      for (const it of items) ins.run(...(__toRow(it) as any[]));
+      d.exec("COMMIT");
+    },
+  };
+}
+
+// --- backend: PostgreSQL (driver 'pg', import perezoso; requiere MAREA_DB_URL) ---
+function __postgresBackend(): __Backend {
+  let pool: any = null;
+  async function open() {
+    if (pool) return pool;
+    const pg = await import("pg");
+    pool = new pg.Pool({ connectionString: process.env.MAREA_DB_URL });
+    await pool.query(__createSql());
+    return pool;
+  }
+  return {
+    async load() {
+      const p = await open();
+      const r = await p.query(`SELECT ${__cols()} FROM ${(__STORE_SCHEMA as __Schema).table}`);
+      return r.rows.map(__fromRow);
+    },
+    async saveAll(items) {
+      const p = await open();
+      const s = __STORE_SCHEMA as __Schema;
+      const c = await p.connect();
+      try {
+        await c.query("BEGIN");
+        await c.query(`DELETE FROM ${s.table}`);
+        for (const it of items) {
+          const ph = s.columns.map((_, i) => `$${i + 1}`).join(", ");
+          await c.query(`INSERT INTO ${s.table} (${__cols()}) VALUES (${ph})`, __toRow(it) as any[]);
+        }
+        await c.query("COMMIT");
+      } catch (e) {
+        await c.query("ROLLBACK");
+        throw e;
+      } finally {
+        c.release();
+      }
+    },
+  };
+}
+
+// --- backend: MySQL (driver 'mysql2/promise', import perezoso; MAREA_DB_URL) ---
+function __mysqlBackend(): __Backend {
+  let pool: any = null;
+  async function open() {
+    if (pool) return pool;
+    const mysql = await import("mysql2/promise");
+    pool = mysql.createPool(process.env.MAREA_DB_URL ?? "");
+    await pool.query(__createSql());
+    return pool;
+  }
+  return {
+    async load() {
+      const p = await open();
+      const [rows] = await p.query(`SELECT ${__cols()} FROM ${(__STORE_SCHEMA as __Schema).table}`);
+      return (rows as any[]).map(__fromRow);
+    },
+    async saveAll(items) {
+      const p = await open();
+      const s = __STORE_SCHEMA as __Schema;
+      const ph = s.columns.map(() => "?").join(", ");
+      const c = await p.getConnection();
+      try {
+        await c.beginTransaction();
+        await c.query(`DELETE FROM ${s.table}`);
+        for (const it of items) {
+          await c.query(`INSERT INTO ${s.table} (${__cols()}) VALUES (${ph})`, __toRow(it) as any[]);
+        }
+        await c.commit();
+      } catch (e) {
+        await c.rollback();
+        throw e;
+      } finally {
+        c.release();
+      }
+    },
+  };
+}
+
+// --- backend: MongoDB (driver 'mongodb', import perezoso; MAREA_DB_URL) ---
+function __mongoBackend(): __Backend {
+  let coll: any = null;
+  async function open() {
+    if (coll) return coll;
+    const { MongoClient } = await import("mongodb");
+    const client = new MongoClient(process.env.MAREA_DB_URL ?? "");
+    await client.connect();
+    coll = client.db().collection((__STORE_SCHEMA as __Schema).table);
+    return coll;
+  }
+  return {
+    async load() {
+      const c = await open();
+      // Documentos directos; quitamos el _id que Mongo agrega.
+      const docs = (await c.find({}, { projection: { _id: 0 } }).toArray()) as any[];
+      return __isDoc() ? docs.map((d) => d.__doc) : (docs as unknown[]);
+    },
+    async saveAll(items) {
+      const c = await open();
+      await c.deleteMany({});
+      if (items.length === 0) return;
+      const docs = __isDoc()
+        ? items.map((x) => ({ __doc: x }))
+        : items.map((x) => ({ ...(x as object) }));
+      await c.insertMany(docs);
+    },
+  };
+}
+
+function __makeBackend(): __Backend {
+  const which = process.env.MAREA_DB ?? "file";
+  switch (which) {
+    case "sqlite":
+      return __sqliteBackend();
+    case "postgres":
+      return __postgresBackend();
+    case "mysql":
+      return __mysqlBackend();
+    case "mongodb":
+      return __mongoBackend();
+    default:
+      return __fileBackend();
+  }
+}
+
+let __backend: __Backend | null = null;
 let __store: unknown[] | null = null;
 
-function __loadStore(): unknown[] {
-  let data: string;
-  try {
-    data = fs.readFileSync(__STORE_FILE, "utf8");
-  } catch {
-    return []; // sin archivo aún: store vacío.
+async function __ensureStore(): Promise<unknown[]> {
+  if (__store === null) {
+    if (__backend === null) __backend = __makeBackend();
+    __store = await __backend.load();
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(data);
-  } catch {
-    throw new Error(`[marea] store corrupto (JSON inválido) en ${__STORE_FILE}`);
-  }
-  if (!Array.isArray(parsed)) {
-    // No sobrescribir silenciosamente un archivo que no es un store.
-    throw new Error(`[marea] ${__STORE_FILE} existe pero no es un arreglo`);
-  }
-  return parsed;
-}
-
-function __ensureStore(): unknown[] {
-  if (__store === null) __store = __loadStore();
   return __store;
 }
-
-function __persist(): void {
-  try {
-    fs.writeFileSync(__STORE_FILE, JSON.stringify(__store));
-  } catch (e) {
-    console.error("[marea] no se pudo persistir el store:", e);
-  }
+async function __persist(): Promise<void> {
+  if (__backend) await __backend.saveAll(__store ?? []);
 }
 
-export function guardar(x: unknown): void {
-  __ensureStore().push(x);
-  __persist();
+export async function guardar(x: unknown): Promise<void> {
+  (await __ensureStore()).push(x);
+  await __persist();
 }
-export function todos(): unknown[] {
-  return __ensureStore().slice();
+export async function todos(): Promise<unknown[]> {
+  return (await __ensureStore()).slice();
 }
 // Reemplaza el elemento en el índice 'i' (CRUD: update).
-export function actualizar(i: number, x: unknown): void {
-  const s = __ensureStore();
+export async function actualizar(i: number, x: unknown): Promise<void> {
+  const s = await __ensureStore();
   if (i >= 0 && i < s.length) {
     s[i] = x;
-    __persist();
+    await __persist();
   }
 }
 // Elimina el elemento en el índice 'i' (CRUD: delete).
-export function borrar(i: number): void {
-  const s = __ensureStore();
+export async function borrar(i: number): Promise<void> {
+  const s = await __ensureStore();
   if (i >= 0 && i < s.length) {
     s.splice(i, 1);
-    __persist();
+    await __persist();
   }
 }

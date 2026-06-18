@@ -161,12 +161,14 @@ fn web_entry_no_string_no_decodifica() {
 }
 
 #[test]
-fn store_builtins_no_se_awaitan() {
+fn store_builtins_son_async_y_se_awaitan() {
     let p = build("@server fn g(x: Int) { guardar(x); } @server fn t() -> List<Int> { return todos(); }");
-    assert!(p.runtime.contains("export function guardar"), "{}", p.runtime);
-    assert!(p.runtime.contains("export function todos"), "{}", p.runtime);
-    // guardar/todos son síncronos: sin await.
-    assert!(p.server.contains("guardar(x)") && !p.server.contains("(await guardar"), "{}", p.server);
+    // Con backends de BD, las operaciones del store son asíncronas (I/O).
+    assert!(p.runtime.contains("export async function guardar"), "{}", p.runtime);
+    assert!(p.runtime.contains("export async function todos"), "{}", p.runtime);
+    // El call site las espera.
+    assert!(p.server.contains("(await guardar(x))"), "{}", p.server);
+    assert!(p.server.contains("(await todos())"), "{}", p.server);
 }
 
 #[test]
@@ -183,6 +185,41 @@ fn indexado_usa_bounds_check() {
     let p = build("@client fn f(xs: List) { let a = xs[0]; print(a); }");
     assert!(p.client.contains("__index(xs, 0)"), "{}", p.client);
     assert!(p.runtime.contains("export function __index"), "{}", p.runtime);
+}
+
+#[test]
+fn store_inyecta_esquema_de_columnas() {
+    let p = build("type Post = { texto: String, likes: Int };\nstore Post;\n@server fn g() { guardar(Post { texto: \"a\", likes: 0 }); }");
+    // El esquema inyectado describe tabla + columnas tipadas para los backends SQL.
+    assert!(p.runtime.contains("table: \"post\""), "{}", p.runtime);
+    assert!(p.runtime.contains("{ name: \"texto\", kind: \"text\" }"), "{}", p.runtime);
+    assert!(p.runtime.contains("{ name: \"likes\", kind: \"int\" }"), "{}", p.runtime);
+    assert!(!p.runtime.contains("__MAREA_STORE_SCHEMA__"), "placeholder sin sustituir");
+}
+
+#[test]
+fn store_escalar_usa_columna_doc() {
+    let p = build("store Int;\n@server fn g(x: Int) { guardar(x); }");
+    // Un store no-registro guarda el valor entero como una sola columna JSON.
+    assert!(p.runtime.contains("{ name: \"__doc\", kind: \"json\" }"), "{}", p.runtime);
+}
+
+#[test]
+fn sin_store_el_esquema_es_null() {
+    let p = build("@client fn f() { print(\"hola\"); }");
+    assert!(p.runtime.contains("const __STORE_SCHEMA: __Schema | null = null;"), "{}", p.runtime);
+}
+
+#[test]
+fn store_tiene_backends_de_base_de_datos() {
+    let p = build("store Int;\n@server fn g(x: Int) { guardar(x); }");
+    // Los cinco backends conviven; el driver se elige con MAREA_DB.
+    for marca in ["__sqliteBackend", "__postgresBackend", "__mysqlBackend", "__mongoBackend", "MAREA_DB"] {
+        assert!(p.runtime.contains(marca), "falta {marca} en runtime");
+    }
+    // Los drivers externos se importan de forma perezosa (no rompen si no están).
+    assert!(p.runtime.contains("await import(\"node:sqlite\")"), "{}", p.runtime);
+    assert!(p.runtime.contains("await import(\"pg\")"), "{}", p.runtime);
 }
 
 #[test]
