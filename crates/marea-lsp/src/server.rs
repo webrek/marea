@@ -190,6 +190,8 @@ where
     R: lsp_types::request::Request,
     T: Serialize,
 {
+    // Captura el id ANTES de extract (en JsonError se pierde el request).
+    let id = req.id.clone();
     match req.extract::<R::Params>(R::METHOD) {
         Ok((id, params)) => {
             respond(connection, id, handler(params))?;
@@ -197,7 +199,15 @@ where
         }
         Err(ExtractError::MethodMismatch(req)) => Ok(Err(req)),
         Err(ExtractError::JsonError { method, error }) => {
-            Err(format!("parámetros inválidos para {method}: {error}").into())
+            // Params malformados: responde un error POR PETICIÓN y sigue vivo.
+            // Antes esto tumbaba todo el servidor.
+            let resp = Response::new_err(
+                id,
+                lsp_server::ErrorCode::InvalidParams as i32,
+                format!("parámetros inválidos para {method}: {error}"),
+            );
+            connection.sender.send(Message::Response(resp))?;
+            Ok(Ok(()))
         }
     }
 }

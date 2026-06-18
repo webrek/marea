@@ -94,3 +94,11 @@ fn runtime_lleva_el_nucleo_reactivo() {
     assert!(p.runtime.contains("export function __effect"));
     assert!(p.runtime.contains("export function __memo"));
 }
+
+#[test]
+fn builtins_no_se_awaitan() {
+    // Un 'await' espurio en print rompía el rastreo reactivo dentro de effect.
+    let p = build("@client fn main() { reactive mut a = 1; effect { print(a); } a = 2; }");
+    assert!(p.client.contains("print(a.get())"), "{}", p.client);
+    assert!(!p.client.contains("(await print("), "{}", p.client);
+}

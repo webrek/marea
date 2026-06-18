@@ -237,3 +237,16 @@ fn indexado_es_load_calculado() {
         "wat: {w}"
     );
 }
+
+#[test]
+fn indexar_lista_param_emite_memoria() {
+    // Antes: i32.load sin (memory) declarada -> WAT inválido.
+    let w = wat("fn cabeza(xs: List) -> Int { return xs[0]; }").unwrap();
+    assert!(w.contains(r#"(memory (export "memory") 1)"#), "wat: {w}");
+}
+
+#[test]
+fn int_fuera_de_rango_i32_es_error() {
+    let err = wat("fn big() -> Int { return 5000000000; }").unwrap_err();
+    assert!(err.contains("i32"), "mensaje: {err}");
+}

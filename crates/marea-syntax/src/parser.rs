@@ -647,7 +647,10 @@ impl Parser {
         while !self.check(&TokenKind::RBrace) && !self.at_eof() {
             let pattern = self.parse_pattern()?;
             self.expect(&TokenKind::FatArrow, "'=>' tras el patrón")?;
-            let body = self.parse_expr()?;
+            // El cuerpo de la rama es un contexto delimitado: un `Ident {` aquí
+            // SÍ es un literal de registro (aunque el match esté en una posición
+            // donde el flag no_struct_literal esté activo, p.ej. otro escrutinio).
+            let body = self.allow_struct_literal(|p| p.parse_expr())?;
             let span = pattern.span().to(body.span());
             arms.push(MatchArm { pattern, body, span });
             if !self.eat(&TokenKind::Comma) {

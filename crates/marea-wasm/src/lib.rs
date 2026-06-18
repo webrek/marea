@@ -210,7 +210,10 @@ fn is_string_type(t: &Type) -> bool {
     matches!(t, Type::Name { name, .. } if name == "String")
 }
 
-/// ¿El módulo construye en algún punto un literal de lista? (Necesita el heap.)
+/// ¿El módulo TOCA el heap en algún punto? — construir un registro/lista, o
+/// ACCEDER a memoria (indexar `xs[i]` / leer un campo `r.c`), o recibir/devolver
+/// un valor de tipo puntero (String/List/registro). Cualquiera exige emitir la
+/// memoria lineal con el allocador.
 fn constructs_list(module: &Module) -> bool {
     fn in_block(b: &Block) -> bool {
         b.stmts.iter().any(|s| match s {
@@ -225,11 +228,12 @@ fn constructs_list(module: &Module) -> bool {
     fn in_expr(e: &Expr) -> bool {
         match e {
             Expr::List { .. } => true,
+            // Acceder a memoria también la requiere (i32.load), aunque no se
+            // construya nada en esta función (p.ej. indexar un parámetro lista).
+            Expr::Index { .. } | Expr::Member { .. } => true,
             Expr::Unary { expr, .. } => in_expr(expr),
             Expr::Binary { left, right, .. } => in_expr(left) || in_expr(right),
             Expr::Call { args, .. } => args.iter().any(in_expr),
-            Expr::Member { object, .. } => in_expr(object),
-            Expr::Index { object, index, .. } => in_expr(object) || in_expr(index),
             Expr::Record { fields, .. } => fields.iter().any(|f| in_expr(&f.value)),
             Expr::If {
                 cond,
@@ -419,10 +423,14 @@ fn collect_locals_expr(
 ) -> Result<(), String> {
     match e {
         Expr::If {
+            cond,
             then_branch,
             else_branch,
             ..
         } => {
+            // La condición se emite ANTES de las ramas (emit_stmt); si construye
+            // un registro/lista, su temporal $__recN debe contarse aquí primero.
+            collect_locals_expr(cond, out, rec_counter)?;
             collect_locals(then_branch, out, rec_counter)?;
             if let Some(eb) = else_branch {
                 match eb.as_ref() {
@@ -562,7 +570,16 @@ fn let_type_name(l: &LetStmt, ctx: &Ctx) -> Option<String> {
 /// la pila (un valor entero, o un puntero a memoria si es String o registro).
 fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String, String> {
     match e {
-        Expr::Int { value, .. } => Ok(format!("(i32.const {value})")),
+        Expr::Int { value, .. } => {
+            // El backend WASM usa i32; un literal fuera de rango produciría WAT
+            // que wat2wasm rechaza. Mejor un error claro.
+            if *value < i64::from(i32::MIN) || *value > i64::from(i32::MAX) {
+                return Err(format!(
+                    "el entero {value} no cabe en i32 (rango del backend WASM por ahora)"
+                ));
+            }
+            Ok(format!("(i32.const {value})"))
+        }
         Expr::Bool { value, .. } => Ok(format!("(i32.const {})", if *value { 1 } else { 0 })),
         // Un literal de cadena es el puntero a su registro estático en memoria.
         Expr::Str { value, .. } => Ok(format!("(i32.const {})", ctx.strings.offset_of(value))),

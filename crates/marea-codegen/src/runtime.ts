@@ -124,10 +124,24 @@ export function __effect(fn: () => void | Promise<void>): void {
   const run: Sub = () => {
     const prev = __currentSub;
     __currentSub = run;
-    try {
-      void fn();
-    } finally {
+    // Restaura el suscriptor cuando el cuerpo termina. Si el cuerpo es síncrono
+    // (lo normal: leer signals + builtins), la suscripción ya ocurrió aquí; si
+    // devuelve una promesa, se restaura al resolverse (las lecturas previas al
+    // primer 'await' quedan rastreadas).
+    const restore = () => {
       __currentSub = prev;
+    };
+    let result: void | Promise<void>;
+    try {
+      result = fn();
+    } catch (e) {
+      restore();
+      throw e;
+    }
+    if (result instanceof Promise) {
+      result.then(restore, restore);
+    } else {
+      restore();
     }
   };
   run();

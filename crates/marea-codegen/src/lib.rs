@@ -349,11 +349,23 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
             map_binop(*op),
             emit_expr(right, reactive)
         ),
-        // Toda llamada se 'await': uniforme para builtins, locales y cruces de
-        // frontera (los stubs RPC son async).
+        // Las llamadas a funciones del usuario y stubs RPC son async (se
+        // 'await'); los builtins síncronos (print/concat/render) NO se awaitan,
+        // porque un 'await' espurio rompe el rastreo de dependencias reactivas
+        // (el cuerpo del effect se suspendería y __currentSub se restauraría
+        // antes de leer los signals).
         Expr::Call { callee, args, .. } => {
             let a: Vec<String> = args.iter().map(|x| emit_expr(x, reactive)).collect();
-            format!("(await {}({}))", emit_expr(callee, reactive), a.join(", "))
+            let callee_ts = emit_expr(callee, reactive);
+            let is_sync_builtin = matches!(
+                callee.as_ref(),
+                Expr::Ident { name, .. } if name == "print" || name == "concat" || name == "render"
+            );
+            if is_sync_builtin {
+                format!("{}({})", callee_ts, a.join(", "))
+            } else {
+                format!("(await {}({}))", callee_ts, a.join(", "))
+            }
         }
         Expr::Member { object, field, .. } => format!("{}.{}", emit_expr(object, reactive), field),
         // if/match en posición de expresión: IIFE async (sin síntesis de valor).

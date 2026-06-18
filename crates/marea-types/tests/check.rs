@@ -436,3 +436,36 @@ fn indexar_un_no_lista_es_error() {
     let errs = check_src("@client fn f() { let n = 5; let a = n[0]; print(a); }");
     assert!(has_code(&errs, "E_INDEX_NOT_LIST"), "códigos: {:?}", codes(&errs));
 }
+
+// ============================ REGRESIÓN (bug hunt) ============================
+
+#[test]
+fn alias_ciclico_no_paniquea() {
+    // Antes: stack overflow. Ahora: reporta E_CYCLIC_TYPE sin crashear.
+    let errs = check_src("type A = B;\ntype B = A;\nfn f(p: A) {}");
+    assert!(has_code(&errs, "E_CYCLIC_TYPE"), "códigos: {:?}", codes(&errs));
+}
+
+#[test]
+fn alias_autoreferente_no_paniquea() {
+    let errs = check_src("type A = A;\nfn g(p: A) {}");
+    assert!(has_code(&errs, "E_CYCLIC_TYPE"));
+}
+
+#[test]
+fn reasignar_inmutable_es_error() {
+    let errs = check_src("@client fn f() { let x = 1; x = 2; print(x); }");
+    assert!(has_code(&errs, "E_ASSIGN_IMMUTABLE"), "códigos: {:?}", codes(&errs));
+}
+
+#[test]
+fn reasignar_mut_es_valido() {
+    let errs = check_src("@client fn f() { let mut x = 1; x = 2; print(x); }");
+    assert!(!has_code(&errs, "E_ASSIGN_IMMUTABLE"), "códigos: {:?}", codes(&errs));
+}
+
+#[test]
+fn edge_llamando_client_es_error() {
+    let errs = check_src("@client fn c() {}\n@edge fn e() { c(); }");
+    assert!(has_code(&errs, "E_CALL_CLIENT_FROM_SERVER"), "códigos: {:?}", codes(&errs));
+}

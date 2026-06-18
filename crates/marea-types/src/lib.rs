@@ -68,8 +68,13 @@ struct Checker {
     fns: HashMap<String, FnSig>,
     /// Alias de tipo por nombre (Fase A): `type T = ...`.
     aliases: HashMap<String, Type>,
-    /// Pila de scopes léxicos de variables (Fase B).
-    scopes: Vec<HashMap<String, Ty>>,
+    /// Alias detectados como cíclicos (Fase A): cortan la resolución recursiva
+    /// en Fase B para no desbordar la pila.
+    cyclic: std::collections::HashSet<String>,
+    /// Pila de scopes léxicos de variables (Fase B). El bool es la mutabilidad
+    /// (`true` si se declaró `mut`/`reactive`); se usa para rechazar reasignar
+    /// un binding inmutable.
+    scopes: Vec<HashMap<String, (Ty, bool)>>,
     /// Ubicación de la función que se está chequeando (Fase B).
     current_location: Option<Location>,
     /// Tipo de retorno declarado de la función actual.
@@ -83,6 +88,7 @@ impl Checker {
         Checker {
             fns: HashMap::new(),
             aliases: HashMap::new(),
+            cyclic: std::collections::HashSet::new(),
             scopes: Vec::new(),
             current_location: None,
             current_return: Ty::Unit,
@@ -143,6 +149,11 @@ impl Checker {
             }
         }
 
+        // Detección de alias cíclicos (`type A = B; type B = A`) ANTES de
+        // registrar firmas: el registro llama a ty_from_syntax, que sin la marca
+        // de ciclo recurriría infinitamente (stack overflow).
+        self.detect_cyclic_types(&type_spans);
+
         // Registra las firmas (solo la primera de cada nombre).
         for item in &module.items {
             if let Item::Fn(f) = item {
@@ -168,9 +179,6 @@ impl Checker {
                 );
             }
         }
-
-        // Detección de alias cíclicos (`type A = B; type B = A`).
-        self.detect_cyclic_types(&type_spans);
     }
 
     fn detect_cyclic_types(&mut self, type_spans: &HashMap<String, Span>) {
@@ -178,6 +186,8 @@ impl Checker {
         for name in &names {
             let mut visiting = std::collections::HashSet::new();
             if self.alias_cycles(name, &mut visiting) {
+                // Marca el alias como cíclico para cortar la recursión en Fase B.
+                self.cyclic.insert(name.clone());
                 if let Some(span) = type_spans.get(name) {
                     self.error(TypeError::new(
                         "E_CYCLIC_TYPE",
@@ -275,10 +285,11 @@ impl Checker {
                 ));
             }
             let pty = self.ty_from_syntax(&p.ty);
+            // Los parámetros son inmutables.
             self.scopes
                 .last_mut()
                 .unwrap()
-                .insert(p.name.clone(), pty);
+                .insert(p.name.clone(), (pty, false));
         }
 
         // Valida el tipo de retorno declarado.
@@ -343,7 +354,11 @@ impl Checker {
                         l.span,
                     ));
                 }
-                self.scopes.last_mut().unwrap().insert(l.name.clone(), bind_ty);
+                // `mut` o `reactive` => reasignable.
+                self.scopes
+                    .last_mut()
+                    .unwrap()
+                    .insert(l.name.clone(), (bind_ty, l.mutable || l.reactive));
             }
             Stmt::Return { value, span } => {
                 let ret_ty = match value {
@@ -379,7 +394,16 @@ impl Checker {
                         format!("'{name}' no está definido"),
                         *name_span,
                     )),
-                    Some(var_ty) => {
+                    Some((var_ty, mutable)) => {
+                        if !mutable {
+                            self.error(TypeError::new(
+                                "E_ASSIGN_IMMUTABLE",
+                                format!(
+                                    "no se puede reasignar '{name}': es inmutable (usa 'let mut' o 'reactive')"
+                                ),
+                                *name_span,
+                            ));
+                        }
                         if !self.is_subtype(&value_ty, &var_ty) {
                             self.error(TypeError::new(
                                 "E_ASSIGN_TYPE_MISMATCH",
@@ -431,7 +455,7 @@ impl Checker {
     fn resolve_ident(&mut self, name: &str, span: Span) -> Ty {
         // Variable en algún scope (del más interno al más externo).
         for scope in self.scopes.iter().rev() {
-            if let Some(ty) = scope.get(name) {
+            if let Some((ty, _)) = scope.get(name) {
                 return ty.clone();
             }
         }
@@ -634,12 +658,14 @@ impl Checker {
         }
 
         // @server llamando @client: prohibido.
-        if from == Some(Location::Server) && to == Some(Location::Client) {
+        // Ni @server ni @edge pueden empujar ejecución al navegador (@client).
+        if matches!(from, Some(Location::Server) | Some(Location::Edge))
+            && to == Some(Location::Client)
+        {
+            let lado = if from == Some(Location::Edge) { "@edge" } else { "@server" };
             self.error(TypeError::new(
                 "E_CALL_CLIENT_FROM_SERVER",
-                format!(
-                    "una función @server no puede llamar a '{callee_name}' (@client)"
-                ),
+                format!("una función {lado} no puede llamar a '{callee_name}' (@client)"),
                 span,
             ));
             return;
@@ -815,7 +841,7 @@ impl Checker {
                         self.scopes.push(HashMap::new());
                         if let Some(sn) = &scrut_name {
                             let narrowed = self.narrow_variant(name);
-                            self.scopes.last_mut().unwrap().insert(sn.clone(), narrowed);
+                            self.scopes.last_mut().unwrap().insert(sn.clone(), (narrowed, false));
                         }
                         self.check_expr(&arm.body);
                         self.scopes.pop();
@@ -825,7 +851,7 @@ impl Checker {
                         has_catch_all = true;
                         let residual = self.residual_narrow(&variants, &covered, &scrut_ty);
                         self.scopes.push(HashMap::new());
-                        self.scopes.last_mut().unwrap().insert(name.clone(), residual);
+                        self.scopes.last_mut().unwrap().insert(name.clone(), (residual, false));
                         self.check_expr(&arm.body);
                         self.scopes.pop();
                     }
@@ -836,7 +862,7 @@ impl Checker {
                     let residual = self.residual_narrow(&variants, &covered, &scrut_ty);
                     self.scopes.push(HashMap::new());
                     if let Some(sn) = &scrut_name {
-                        self.scopes.last_mut().unwrap().insert(sn.clone(), residual);
+                        self.scopes.last_mut().unwrap().insert(sn.clone(), (residual, false));
                     }
                     self.check_expr(&arm.body);
                     self.scopes.pop();
@@ -1016,6 +1042,10 @@ impl Checker {
         if name == "Record" {
             return Some(None);
         }
+        // Un alias cíclico no es resoluble: cortamos antes de recurrir.
+        if self.cyclic.contains(name) {
+            return None;
+        }
         let alias = self.aliases.get(name)?;
         match alias {
             Type::Record { fields, .. } => Some(Some(
@@ -1094,6 +1124,11 @@ impl Checker {
             Type::Name { name, .. } => {
                 if let Some(prim) = builtins::type_lookup(name) {
                     return prim;
+                }
+                // Un alias cíclico no resuelve: lo tratamos como Unknown para no
+                // recurrir infinitamente (el E_CYCLIC_TYPE ya se reportó).
+                if self.cyclic.contains(name) {
+                    return Ty::Unknown;
                 }
                 // Alias a registro → registro; alias a otra cosa → su Ty;
                 // de lo contrario, Named opaco.

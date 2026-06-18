@@ -270,3 +270,10 @@ fn igualdad_no_es_asignacion() {
     let Item::Fn(f) = &m.items[0] else { panic!() };
     assert!(matches!(&f.body.stmts[0], Stmt::Expr(Expr::Binary { .. })));
 }
+
+#[test]
+fn registro_en_rama_de_match() {
+    // El cuerpo de la rama es contexto delimitado: 'P { .. }' es un registro.
+    let m = parse("type P = { x: Int };\n@client fn f(u: Int) { let r = match u { _ => P { x: 1 } }; print(r); }").unwrap();
+    assert!(matches!(&m.items[1], Item::Fn(_)));
+}
