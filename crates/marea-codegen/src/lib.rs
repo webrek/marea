@@ -302,6 +302,19 @@ fn emit_expr(e: &Expr) -> String {
                 emit_control(e, 1)
             )
         }
+        // Literal de registro -> objeto JS.
+        Expr::Record { fields, .. } => {
+            let parts: Vec<String> = fields
+                .iter()
+                .map(|f| format!("{}: {}", f.name, emit_expr(&f.value)))
+                .collect();
+            format!("{{ {} }}", parts.join(", "))
+        }
+        // Literal de lista -> arreglo JS.
+        Expr::List { elements, .. } => {
+            let parts: Vec<String> = elements.iter().map(emit_expr).collect();
+            format!("[{}]", parts.join(", "))
+        }
     }
 }
 
@@ -344,6 +357,14 @@ fn map_type(t: &Type) -> String {
             .map(map_type)
             .collect::<Vec<_>>()
             .join(" | "),
+        // Tipo registro -> type-literal TS preciso.
+        Type::Record { fields, .. } => {
+            let parts: Vec<String> = fields
+                .iter()
+                .map(|f| format!("{}: {}", f.name, map_type(&f.ty)))
+                .collect();
+            format!("{{ {} }}", parts.join("; "))
+        }
     }
 }
 
@@ -386,6 +407,13 @@ fn type_to_src(t: &Type) -> String {
             .map(type_to_src)
             .collect::<Vec<_>>()
             .join(" | "),
+        Type::Record { fields, .. } => {
+            let parts: Vec<String> = fields
+                .iter()
+                .map(|f| format!("{}: {}", f.name, type_to_src(&f.ty)))
+                .collect();
+            format!("{{ {} }}", parts.join(", "))
+        }
     }
 }
 

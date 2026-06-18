@@ -158,3 +158,74 @@ fn ubicacion_invalida_es_error() {
     let err = parse("@servidor fn v() {}").unwrap_err();
     assert!(err.message.contains("ubicación desconocida"));
 }
+
+// --- registros y listas (Fase 0: contrato AST + desambiguación) ---
+
+#[test]
+fn parse_tipo_registro() {
+    let m = parse("type Punto = { x: Int, y: Int };").unwrap();
+    let Item::Type(td) = &m.items[0] else {
+        panic!("se esperaba un type")
+    };
+    let Type::Record { fields, .. } = &td.aliased else {
+        panic!("se esperaba un tipo registro")
+    };
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].name, "x");
+    assert_eq!(fields[1].name, "y");
+}
+
+#[test]
+fn parse_literal_de_registro() {
+    let m = parse(r#"@client fn f() { let u = Punto { x: 1, y: 2 }; print(u); }"#).unwrap();
+    let Item::Fn(f) = &m.items[0] else { panic!() };
+    let Stmt::Let(l) = &f.body.stmts[0] else {
+        panic!("se esperaba un let")
+    };
+    let Expr::Record { type_name, fields, .. } = &l.value else {
+        panic!("se esperaba un literal de registro")
+    };
+    assert_eq!(type_name.as_deref(), Some("Punto"));
+    assert_eq!(fields.len(), 2);
+}
+
+#[test]
+fn parse_literal_de_lista() {
+    let m = parse("@client fn f() { let xs = [1, 2, 3]; print(xs); }").unwrap();
+    let Item::Fn(f) = &m.items[0] else { panic!() };
+    let Stmt::Let(l) = &f.body.stmts[0] else { panic!() };
+    let Expr::List { elements, .. } = &l.value else {
+        panic!("se esperaba una lista")
+    };
+    assert_eq!(elements.len(), 3);
+}
+
+#[test]
+fn regresion_if_no_es_registro() {
+    // 'if ready {' debe abrir un bloque, NO leerse como 'ready { ... }' registro.
+    let m = parse("@client fn f(ready: Bool) { if ready { ping(); } }").unwrap();
+    let Item::Fn(f) = &m.items[0] else { panic!() };
+    assert!(matches!(&f.body.stmts[0], Stmt::Expr(Expr::If { .. })));
+}
+
+#[test]
+fn registro_dentro_de_parentesis_y_member() {
+    // El flag se resetea dentro de '(' : el registro se parsea y luego '.x'.
+    let m = parse("@client fn f() { let v = (Punto { x: 1, y: 2 }).x; print(v); }").unwrap();
+    let Item::Fn(f) = &m.items[0] else { panic!() };
+    let Stmt::Let(l) = &f.body.stmts[0] else { panic!() };
+    assert!(matches!(&l.value, Expr::Member { .. }));
+}
+
+#[test]
+fn registro_como_argumento_de_llamada() {
+    // El flag se resetea dentro de los argumentos: 'make(Punto { .. })' parsea.
+    let m = parse("@client fn f() { make(Punto { x: 1, y: 2 }); }").unwrap();
+    assert!(matches!(&m.items[0], Item::Fn(_)));
+}
+
+#[test]
+fn campo_repetido_en_literal_es_error() {
+    let err = parse("@client fn f() { let u = Punto { x: 1, x: 2 }; print(u); }").unwrap_err();
+    assert!(err.message.contains("repetido"), "mensaje: {}", err.message);
+}

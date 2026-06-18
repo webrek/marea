@@ -62,12 +62,32 @@ pub enum Type {
     },
     /// `User | NotFound | Error`
     Union { variants: Vec<Type>, span: Span },
+    /// `{ name: String, age: Int }` — registro estructural.
+    Record { fields: Vec<FieldDef>, span: Span },
+}
+
+/// Un campo en la declaración de un registro: `name: String`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldDef {
+    pub name: String,
+    pub ty: Type,
+    pub span: Span,
 }
 
 impl Type {
     pub fn span(&self) -> Span {
         match self {
-            Type::Name { span, .. } | Type::Union { span, .. } => *span,
+            Type::Name { span, .. }
+            | Type::Union { span, .. }
+            | Type::Record { span, .. } => *span,
+        }
+    }
+
+    /// Si es un registro estructural, devuelve sus campos.
+    pub fn as_record(&self) -> Option<&[FieldDef]> {
+        match self {
+            Type::Record { fields, .. } => Some(fields),
+            _ => None,
         }
     }
 }
@@ -118,6 +138,25 @@ pub enum Expr {
         arms: Vec<MatchArm>,
         span: Span,
     },
+    /// Literal de registro: `User { name: "x", age: 1 }`.
+    /// `type_name` es el nombre que precede a `{` (el parser siempre pone Some;
+    /// el Option deja espacio para inferencia de tipo destino más adelante).
+    Record {
+        type_name: Option<String>,
+        type_name_span: Option<Span>,
+        fields: Vec<FieldInit>,
+        span: Span,
+    },
+    /// Literal de lista: `[1, 2, 3]`.
+    List { elements: Vec<Expr>, span: Span },
+}
+
+/// Inicialización de un campo en un literal de registro: `name: "x"`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldInit {
+    pub name: String,
+    pub value: Expr,
+    pub span: Span,
 }
 
 impl Expr {
@@ -133,7 +172,9 @@ impl Expr {
             | Expr::Call { span, .. }
             | Expr::Member { span, .. }
             | Expr::If { span, .. }
-            | Expr::Match { span, .. } => *span,
+            | Expr::Match { span, .. }
+            | Expr::Record { span, .. }
+            | Expr::List { span, .. } => *span,
         }
     }
 }

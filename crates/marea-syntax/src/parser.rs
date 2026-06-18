@@ -15,11 +15,39 @@ type PResult<T> = Result<T, SyntaxError>;
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    /// Cuando es `true`, un `Ident` seguido de `{` NO se lee como literal de
+    /// registro (se deja el `{` para abrir un bloque). Se activa al parsear la
+    /// condición de un `if` o el escrutinio de un `match`, y se resetea dentro
+    /// de contextos delimitados `( )`, `[ ]` y argumentos de llamada.
+    no_struct_literal: bool,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, pos: 0 }
+        Parser {
+            tokens,
+            pos: 0,
+            no_struct_literal: false,
+        }
+    }
+
+    /// Ejecuta `f` con `no_struct_literal = true` y restaura el valor previo.
+    fn with_no_struct_literal<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+        let prev = self.no_struct_literal;
+        self.no_struct_literal = true;
+        let result = f(self);
+        self.no_struct_literal = prev;
+        result
+    }
+
+    /// Ejecuta `f` con `no_struct_literal = false` (contexto delimitado donde el
+    /// `{` SÍ puede iniciar un literal de registro) y restaura el valor previo.
+    fn allow_struct_literal<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+        let prev = self.no_struct_literal;
+        self.no_struct_literal = false;
+        let result = f(self);
+        self.no_struct_literal = prev;
+        result
     }
 
     /// Punto de entrada: tokens -> módulo.
@@ -200,6 +228,9 @@ impl Parser {
     }
 
     fn parse_type_primary(&mut self) -> PResult<Type> {
+        if self.check(&TokenKind::LBrace) {
+            return self.parse_record_type();
+        }
         let (name, name_span) = self.expect_ident("un tipo")?;
         let mut args = Vec::new();
         let mut end = name_span;
@@ -219,6 +250,39 @@ impl Parser {
             name,
             args,
             span: name_span.to(end),
+        })
+    }
+
+    /// Tipo registro estructural: `{ campo: Tipo, ... }`.
+    fn parse_record_type(&mut self) -> PResult<Type> {
+        let open = self.expect(&TokenKind::LBrace, "'{' del tipo registro")?;
+        let mut fields = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        if !self.check(&TokenKind::RBrace) {
+            loop {
+                let (name, name_span) = self.expect_ident("nombre de campo")?;
+                self.expect(&TokenKind::Colon, "':' tras el nombre del campo")?;
+                let ty = self.parse_type()?;
+                let span = name_span.to(ty.span());
+                if !seen.insert(name.clone()) {
+                    return Err(SyntaxError::new(
+                        format!("campo '{name}' repetido en el tipo registro"),
+                        name_span,
+                    ));
+                }
+                fields.push(FieldDef { name, ty, span });
+                if !self.eat(&TokenKind::Comma) {
+                    break;
+                }
+                if self.check(&TokenKind::RBrace) {
+                    break;
+                }
+            }
+        }
+        let close = self.expect(&TokenKind::RBrace, "'}' para cerrar el tipo registro")?;
+        Ok(Type::Record {
+            fields,
+            span: open.span.to(close.span),
         })
     }
 
@@ -362,7 +426,8 @@ impl Parser {
                     let mut args = Vec::new();
                     if !self.check(&TokenKind::RParen) {
                         loop {
-                            args.push(self.parse_expr()?);
+                            // Dentro de la llamada el `{` SÍ puede iniciar un registro.
+                            args.push(self.allow_struct_literal(|p| p.parse_expr())?);
                             if !self.eat(&TokenKind::Comma) {
                                 break;
                             }
@@ -415,14 +480,45 @@ impl Parser {
                 Ok(Expr::Bool { value, span: tok.span })
             }
             TokenKind::Ident(name) => {
-                self.advance();
-                Ok(Expr::Ident { name, span: tok.span })
+                // `Ident {` es un literal de registro, salvo en posición de
+                // condición/escrutinio (donde `{` abre un bloque).
+                let next_is_brace = matches!(
+                    self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                    Some(TokenKind::LBrace)
+                );
+                if next_is_brace && !self.no_struct_literal {
+                    self.parse_record_literal(name, tok.span)
+                } else {
+                    self.advance();
+                    Ok(Expr::Ident { name, span: tok.span })
+                }
             }
             TokenKind::LParen => {
                 self.advance();
-                let inner = self.parse_expr()?;
+                // Dentro de paréntesis el `{` SÍ puede iniciar un registro.
+                let inner = self.allow_struct_literal(|p| p.parse_expr())?;
                 self.expect(&TokenKind::RParen, "')'")?;
                 Ok(inner)
+            }
+            TokenKind::LBracket => {
+                self.advance();
+                let mut elements = Vec::new();
+                if !self.check(&TokenKind::RBracket) {
+                    loop {
+                        elements.push(self.allow_struct_literal(|p| p.parse_expr())?);
+                        if !self.eat(&TokenKind::Comma) {
+                            break;
+                        }
+                        if self.check(&TokenKind::RBracket) {
+                            break;
+                        }
+                    }
+                }
+                let close = self.expect(&TokenKind::RBracket, "']' para cerrar la lista")?;
+                Ok(Expr::List {
+                    elements,
+                    span: tok.span.to(close.span),
+                })
             }
             TokenKind::If => self.parse_if(),
             TokenKind::Match => self.parse_match(),
@@ -430,9 +526,52 @@ impl Parser {
         }
     }
 
+    /// Literal de registro: `User { name: "x", age: 1 }`. El identificador y el
+    /// `{` aún no se consumieron al entrar.
+    fn parse_record_literal(
+        &mut self,
+        type_name: String,
+        name_span: crate::span::Span,
+    ) -> PResult<Expr> {
+        self.advance(); // consume el identificador del tipo
+        self.expect(&TokenKind::LBrace, "'{' del literal de registro")?;
+        let mut fields = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        if !self.check(&TokenKind::RBrace) {
+            loop {
+                let (name, fname_span) = self.expect_ident("nombre de campo")?;
+                self.expect(&TokenKind::Colon, "':' tras el nombre del campo")?;
+                // El valor del campo es un contexto delimitado: registros OK.
+                let value = self.allow_struct_literal(|p| p.parse_expr())?;
+                let span = fname_span.to(value.span());
+                if !seen.insert(name.clone()) {
+                    return Err(SyntaxError::new(
+                        format!("campo '{name}' repetido en el literal de registro"),
+                        fname_span,
+                    ));
+                }
+                fields.push(FieldInit { name, value, span });
+                if !self.eat(&TokenKind::Comma) {
+                    break;
+                }
+                if self.check(&TokenKind::RBrace) {
+                    break;
+                }
+            }
+        }
+        let close = self.expect(&TokenKind::RBrace, "'}' para cerrar el literal de registro")?;
+        Ok(Expr::Record {
+            type_name: Some(type_name),
+            type_name_span: Some(name_span),
+            fields,
+            span: name_span.to(close.span),
+        })
+    }
+
     fn parse_if(&mut self) -> PResult<Expr> {
         let kw = self.expect(&TokenKind::If, "'if'")?;
-        let cond = self.parse_expr()?;
+        // En la condición, un `Ident {` abre el bloque, no un registro.
+        let cond = self.with_no_struct_literal(|p| p.parse_expr())?;
         let then_branch = self.parse_block()?;
         let mut span = kw.span.to(then_branch.span);
 
@@ -460,7 +599,8 @@ impl Parser {
 
     fn parse_match(&mut self) -> PResult<Expr> {
         let kw = self.expect(&TokenKind::Match, "'match'")?;
-        let scrutinee = self.parse_expr()?;
+        // En el escrutinio, un `Ident {` abre las ramas, no un registro.
+        let scrutinee = self.with_no_struct_literal(|p| p.parse_expr())?;
         self.expect(&TokenKind::LBrace, "'{' para abrir las ramas del match")?;
 
         let mut arms = Vec::new();

@@ -323,6 +323,12 @@ fn emit_expr(e: &Expr, strings: &Strings) -> Result<String, String> {
             Err("WASM aún no soporta 'if' en posición de expresión".to_string())
         }
         Expr::Match { .. } => Err("WASM aún no soporta 'match'".to_string()),
+        Expr::Record { .. } => {
+            Err("WASM: registros en construcción (Paso 1-WASM)".to_string())
+        }
+        Expr::List { .. } => {
+            Err("WASM aún no soporta listas (requieren memoria lineal)".to_string())
+        }
     }
 }
 
@@ -379,6 +385,18 @@ fn collect_strings_expr(e: &Expr, out: &mut Vec<String>, seen: &mut HashSet<Stri
                 collect_strings_expr(&arm.body, out, seen);
             }
         }
+        // Recursar en registros y listas: sus literales String DEBEN quedar en
+        // el data section o 'offset_of' devolvería basura.
+        Expr::Record { fields, .. } => {
+            for f in fields {
+                collect_strings_expr(&f.value, out, seen);
+            }
+        }
+        Expr::List { elements, .. } => {
+            for el in elements {
+                collect_strings_expr(el, out, seen);
+            }
+        }
         Expr::Int { .. } | Expr::Float { .. } | Expr::Bool { .. } | Expr::Ident { .. } => {}
     }
 }
@@ -411,6 +429,9 @@ fn check_value_type(t: &Type) -> Result<(), String> {
             "el backend WASM soporta Int/Bool/String por ahora, no '{name}'"
         )),
         Type::Union { .. } => Err("el backend WASM aún no soporta tipos unión".to_string()),
+        Type::Record { .. } => {
+            Err("el backend WASM aún no soporta tipos registro inline".to_string())
+        }
     }
 }
 
