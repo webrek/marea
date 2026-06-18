@@ -118,7 +118,14 @@ crates/
   marea-cli/      # binario `marea`
 examples/         # programas .mar de muestra (+ check_fail/ que deben fallar)
 docs/GRAMMAR.md   # la gramática de v0
+docs/COMPARACION.md  # la misma app en 5 stacks (Marea vs React/tRPC, LiveView, Leptos, Livewire)
 ```
+
+¿Por qué un lenguaje nuevo y no una librería? La respuesta en código está en
+**[docs/COMPARACION.md](docs/COMPARACION.md)**: la misma app ("X-mini": timeline
+con likes, servidor↔cliente, persistencia) escrita lado a lado en cinco stacks,
+con el recuento honesto de archivos, líneas y **dónde vive cada frontera** (en el
+lenguaje, en un framework, o en tu pegamento).
 
 ## Uso
 
