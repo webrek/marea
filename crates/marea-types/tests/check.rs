@@ -584,3 +584,9 @@ fn atexto_es_string() {
     let errs = check_src("@client fn f() { let s: String = aTexto(42); print(s); }");
     assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
 }
+
+#[test]
+fn atexto_de_no_escalar_es_error() {
+    let errs = check_src("type P = { a: Int };\n@client fn f() { let s = aTexto(P { a: 1 }); print(s); }");
+    assert!(has_code(&errs, "E_ARG_TYPE"), "códigos: {:?}", codes(&errs));
+}

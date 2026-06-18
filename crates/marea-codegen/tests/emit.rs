@@ -177,3 +177,18 @@ fn store_persiste_a_disco() {
     assert!(p.runtime.contains("writeFileSync"), "{}", p.runtime);
     assert!(p.runtime.contains("MAREA_STORE"), "{}", p.runtime);
 }
+
+#[test]
+fn indexado_usa_bounds_check() {
+    let p = build("@client fn f(xs: List) { let a = xs[0]; print(a); }");
+    assert!(p.client.contains("__index(xs, 0)"), "{}", p.client);
+    assert!(p.runtime.contains("export function __index"), "{}", p.runtime);
+}
+
+#[test]
+fn store_file_lleva_la_firma_del_esquema() {
+    let p = build("type Post = { a: Int };\nstore Post;\n@server fn g() { guardar(Post { a: 1 }); }");
+    // El archivo por defecto incluye nombre+campos para no colisionar entre apps.
+    assert!(p.runtime.contains("marea-store.Post-a.json"), "{}", p.runtime);
+    assert!(!p.runtime.contains("__MAREA_STORE_DEFAULT__"), "placeholder sin sustituir");
+}

@@ -726,6 +726,25 @@ impl Checker {
             if matches!(name.as_str(), "guardar" | "todos" | "actualizar" | "borrar") {
                 return self.check_state_builtin(name, args, span);
             }
+            if name == "aTexto" {
+                // aTexto sólo tiene sentido sobre escalares; un Record/List daría
+                // '[object Object]'/'1,2,3' (basura mostrada al usuario).
+                let arg_tys: Vec<Ty> = args.iter().map(|a| self.check_expr(a)).collect();
+                if self.arity("aTexto", &arg_tys, 1, span) {
+                    let t = &arg_tys[0];
+                    if !t.is_scalar() && !matches!(t, Ty::Unknown) {
+                        self.error(TypeError::new(
+                            "E_ARG_TYPE",
+                            format!(
+                                "aTexto espera un valor escalar (Int/Float/Bool/String), no '{}'",
+                                t.display()
+                            ),
+                            args[0].span(),
+                        ));
+                    }
+                }
+                return Ty::String;
+            }
         }
 
         // Llamadas sobre miembros de un objeto abierto (`db.users.find`) son

@@ -23,8 +23,8 @@ pub struct Project {
 }
 
 /// Builtins provistos por el runtime; no se transpilan ni se registran.
-const BUILTINS: &str = "{ __register, __rpc, print, concat, render, len, aTexto, guardar, todos, \
-     actualizar, borrar, __marea_is, __signal, __memo, __effect }";
+const BUILTINS: &str = "{ __register, __rpc, print, concat, render, len, aTexto, __index, \
+     guardar, todos, actualizar, borrar, __marea_is, __signal, __memo, __effect }";
 
 /// Una función con `@server` o `@edge` corre "remota": handler + stub RPC.
 fn is_remote(f: &FnDecl) -> bool {
@@ -45,11 +45,52 @@ pub fn emit(module: &Module) -> Project {
         // Los `type` y `let` de nivel superior se ignoran en esta fase.
     }
 
+    // El archivo del store por defecto lleva la firma del esquema de `store T;`,
+    // para que dos apps con esquemas distintos no compartan archivo.
+    let store_file = match store_signature(module) {
+        Some(sig) => format!("marea-store.{sig}.json"),
+        None => "marea-store.json".to_string(),
+    };
+    let runtime = RUNTIME_TS.replace("__MAREA_STORE_DEFAULT__", &store_file);
+
     Project {
-        runtime: RUNTIME_TS.to_string(),
+        runtime,
         server: emit_server(&remote),
         client: emit_client(&remote, &local),
         demo: emit_demo(&local),
+    }
+}
+
+/// Firma del esquema del `store T;` del módulo (nombre + campos), para nombrar
+/// el archivo de persistencia. `None` si no hay store.
+fn store_signature(module: &Module) -> Option<String> {
+    let store_ty = module.items.iter().find_map(|it| match it {
+        Item::Store { ty, .. } => Some(ty),
+        _ => None,
+    })?;
+    Some(type_signature(store_ty, module))
+}
+
+fn type_signature(ty: &Type, module: &Module) -> String {
+    match ty {
+        Type::Record { fields, .. } => {
+            let names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+            format!("rec-{}", names.join("-"))
+        }
+        Type::Name { name, .. } => {
+            // Resuelve un alias a registro para incluir sus campos en la firma.
+            let aliased = module.items.iter().find_map(|it| match it {
+                Item::Type(t) if &t.name == name => Some(&t.aliased),
+                _ => None,
+            });
+            if let Some(Type::Record { fields, .. }) = aliased {
+                let names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+                format!("{name}-{}", names.join("-"))
+            } else {
+                name.clone()
+            }
+        }
+        Type::Union { .. } => "union".to_string(),
     }
 }
 
@@ -504,9 +545,13 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
             let parts: Vec<String> = elements.iter().map(|x| emit_expr(x, reactive)).collect();
             format!("[{}]", parts.join(", "))
         }
-        // Indexado -> acceso por índice JS.
+        // Indexado -> acceso con verificación de rango (lanza si está fuera).
         Expr::Index { object, index, .. } => {
-            format!("{}[{}]", emit_expr(object, reactive), emit_expr(index, reactive))
+            format!(
+                "__index({}, {})",
+                emit_expr(object, reactive),
+                emit_expr(index, reactive)
+            )
         }
     }
 }

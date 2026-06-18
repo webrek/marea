@@ -224,25 +224,48 @@ export function len(xs: unknown[]): number {
 export function aTexto(x: unknown): string {
   return String(x);
 }
-
-// --- estado del servidor: un store PERSISTENTE A DISCO. Se carga del archivo
-// al iniciar el proceso y se reescribe en cada 'guardar', así los datos
-// sobreviven a reinicios del servidor. La ruta es MAREA_STORE o './marea-store.json'.
-// Las funciones @server comparten este store a través de las llamadas RPC.
-const __STORE_FILE = process.env.MAREA_STORE ?? "marea-store.json";
-
-function __loadStore(): unknown[] {
-  try {
-    const data = fs.readFileSync(__STORE_FILE, "utf8");
-    const parsed = JSON.parse(data);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    // Sin archivo aún (o ilegible): store vacío.
-    return [];
+// Indexado de lista con verificación de rango: un índice fuera de rango lanza
+// un error claro en vez de devolver 'undefined' (que reventaría más tarde).
+export function __index(xs: unknown[], i: number): unknown {
+  if (i < 0 || i >= xs.length) {
+    throw new Error(`índice fuera de rango: ${i} (longitud ${xs.length})`);
   }
+  return xs[i];
 }
 
-const __store: unknown[] = __loadStore();
+// --- estado del servidor: un store PERSISTENTE A DISCO. Se carga del archivo
+// la PRIMERA vez que se usa (carga perezosa: un programa sin store nunca toca el
+// disco) y se reescribe en cada mutación. El nombre por defecto incluye la firma
+// del esquema de 'store T;' (lo sustituye el codegen), así dos apps con esquemas
+// distintos NO comparten archivo ni se contaminan. Override con MAREA_STORE.
+const __STORE_FILE = process.env.MAREA_STORE ?? "__MAREA_STORE_DEFAULT__";
+
+let __store: unknown[] | null = null;
+
+function __loadStore(): unknown[] {
+  let data: string;
+  try {
+    data = fs.readFileSync(__STORE_FILE, "utf8");
+  } catch {
+    return []; // sin archivo aún: store vacío.
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(data);
+  } catch {
+    throw new Error(`[marea] store corrupto (JSON inválido) en ${__STORE_FILE}`);
+  }
+  if (!Array.isArray(parsed)) {
+    // No sobrescribir silenciosamente un archivo que no es un store.
+    throw new Error(`[marea] ${__STORE_FILE} existe pero no es un arreglo`);
+  }
+  return parsed;
+}
+
+function __ensureStore(): unknown[] {
+  if (__store === null) __store = __loadStore();
+  return __store;
+}
 
 function __persist(): void {
   try {
@@ -253,23 +276,25 @@ function __persist(): void {
 }
 
 export function guardar(x: unknown): void {
-  __store.push(x);
+  __ensureStore().push(x);
   __persist();
 }
 export function todos(): unknown[] {
-  return __store.slice();
+  return __ensureStore().slice();
 }
 // Reemplaza el elemento en el índice 'i' (CRUD: update).
 export function actualizar(i: number, x: unknown): void {
-  if (i >= 0 && i < __store.length) {
-    __store[i] = x;
+  const s = __ensureStore();
+  if (i >= 0 && i < s.length) {
+    s[i] = x;
     __persist();
   }
 }
 // Elimina el elemento en el índice 'i' (CRUD: delete).
 export function borrar(i: number): void {
-  if (i >= 0 && i < __store.length) {
-    __store.splice(i, 1);
+  const s = __ensureStore();
+  if (i >= 0 && i < s.length) {
+    s.splice(i, 1);
     __persist();
   }
 }
