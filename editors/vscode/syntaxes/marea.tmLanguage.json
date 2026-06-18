@@ -1,0 +1,72 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Marea",
+  "scopeName": "source.marea",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#location" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#constants" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#fn-decl" },
+    { "include": "#fn-call" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.double-slash.marea", "match": "//.*$" },
+        {
+          "name": "comment.block.marea",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "location": {
+      "name": "storage.modifier.location.marea",
+      "match": "@(server|client|edge)\\b"
+    },
+    "keywords": {
+      "name": "keyword.control.marea",
+      "match": "\\b(fn|let|mut|reactive|type|if|else|match|return|import|effect)\\b"
+    },
+    "types": {
+      "name": "support.type.marea",
+      "match": "\\b(Int|Float|Bool|String|Record|List)\\b"
+    },
+    "constants": {
+      "name": "constant.language.marea",
+      "match": "\\b(true|false)\\b"
+    },
+    "strings": {
+      "name": "string.quoted.double.marea",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.marea",
+          "match": "\\\\(n|t|r|\\\\|\"|0)"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.float.marea", "match": "\\b[0-9][0-9_]*\\.[0-9][0-9_]*\\b" },
+        { "name": "constant.numeric.integer.marea", "match": "\\b[0-9][0-9_]*\\b" }
+      ]
+    },
+    "fn-decl": {
+      "match": "\\b(fn)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "keyword.control.marea" },
+        "2": { "name": "entity.name.function.marea" }
+      }
+    },
+    "fn-call": {
+      "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+      "name": "entity.name.function.call.marea"
+    }
+  }
+}

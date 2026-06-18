@@ -1,0 +1,72 @@
+{
+  "name": "marea-vscode",
+  "displayName": "Marea",
+  "description": "Soporte del lenguaje Marea: diagnósticos en vivo, símbolos, autocompletado, ir a la definición y hover.",
+  "version": "0.0.1",
+  "publisher": "webrek",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:marea"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "marea",
+        "aliases": [
+          "Marea",
+          "marea"
+        ],
+        "extensions": [
+          ".mar"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "marea",
+        "scopeName": "source.marea",
+        "path": "./syntaxes/marea.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Marea",
+      "properties": {
+        "marea.serverPath": {
+          "type": "string",
+          "default": "marea-lsp",
+          "description": "Ruta al binario del servidor de lenguaje 'marea-lsp'. Por defecto se busca en el PATH; durante el desarrollo apúntalo a target/debug/marea-lsp."
+        },
+        "marea.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Traza la comunicación entre VSCode y el servidor de lenguaje."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.4.0"
+  }
+}
