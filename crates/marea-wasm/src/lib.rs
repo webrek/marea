@@ -619,6 +619,11 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String, String> {
                 .iter()
                 .map(|a| emit_expr(a, ctx))
                 .collect::<Result<Vec<_>, String>>()?;
+            // 'len(xs)' es un builtin: la longitud vive en la palabra 0 de la
+            // lista, así que es un i32.load del puntero (no una llamada).
+            if name == "len" && parts.len() == 1 {
+                return Ok(format!("(i32.load {})", parts[0]));
+            }
             if parts.is_empty() {
                 Ok(format!("(call ${name})"))
             } else {

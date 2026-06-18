@@ -503,3 +503,9 @@ fn redefinir_builtin_es_error() {
     let errs = check_src("@client fn print(x: Int) { return; }");
     assert!(has_code(&errs, "E_REDEFINE_BUILTIN"), "códigos: {:?}", codes(&errs));
 }
+
+#[test]
+fn len_de_lista_es_int() {
+    let errs = check_src("@client fn f() { let xs = [1, 2, 3]; let n: Int = len(xs); print(n); }");
+    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+}

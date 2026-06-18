@@ -1,0 +1,42 @@
+// Plataforma X — un timeline sencillo, escrito en Marea.
+//
+// Ejercita casi todo el lenguaje: structs (Post), listas, la frontera de red
+// (@server provee el feed, @client lo pide como si fuera local), 'len' +
+// indexado + recursión para recorrer (Marea no tiene bucles), y strings.
+
+type Post = {
+    autor: String,
+    texto: String,
+};
+
+// El "servidor" provee el feed (sin persistencia real todavía).
+@server
+fn feed() -> List<Post> {
+    return [
+        Post { autor: "ada", texto: "Hola mundo en Marea" },
+        Post { autor: "alan", texto: "La maquina universal" },
+        Post { autor: "grace", texto: "Encontre el primer bug" },
+    ];
+}
+
+// Formatea un post como "autor: texto".
+fn linea(p: Post) -> String {
+    return concat(concat(p.autor, ": "), p.texto);
+}
+
+// Recorre el timeline por índice (recursión, no bucle).
+@client
+fn mostrarDesde(posts: List<Post>, i: Int) {
+    if i < len(posts) {
+        print(linea(posts[i]));
+        mostrarDesde(posts, i + 1);
+    }
+}
+
+@client
+fn main() {
+    // Cruce de frontera: el cliente pide el feed al servidor por RPC.
+    let posts = feed();
+    print("=== Timeline ===");
+    mostrarDesde(posts, 0);
+}

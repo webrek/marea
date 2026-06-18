@@ -257,3 +257,10 @@ fn if_else_terminal_emite_unreachable() {
     let w = wat("fn abs(n: Int) -> Int { if n > 0 { return n; } else { return 0 - n; } }").unwrap();
     assert!(w.contains("(unreachable)"), "wat: {w}");
 }
+
+#[test]
+fn len_es_load_de_la_longitud() {
+    let w = wat("fn n(xs: List) -> Int { return len(xs); }").unwrap();
+    // len(xs) = i32.load del puntero (la longitud vive en la palabra 0).
+    assert!(w.contains("(i32.load (local.get $xs))"), "wat: {w}");
+}

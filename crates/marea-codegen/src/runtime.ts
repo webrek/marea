@@ -217,3 +217,6 @@ export function concat(a: string, b: string): string {
 export function render(x: unknown): void {
   console.log("[render]", x);
 }
+export function len(xs: unknown[]): number {
+  return xs.length;
+}

@@ -30,6 +30,12 @@ pub fn lookup(name: &str) -> Option<Ty> {
             ret: Box::new(Ty::Unit),
             location: None,
         }),
+        // Longitud de una lista.
+        "len" => Some(Ty::Fn {
+            params: vec![Ty::List(Box::new(Ty::Unknown))],
+            ret: Box::new(Ty::Int),
+            location: None,
+        }),
         // Objeto abierto: cualquier miembro o llamada se resuelve a Unknown.
         "db" => Some(Ty::Unknown),
         // Variante nominal usable como etiqueta en uniones / patrones.
