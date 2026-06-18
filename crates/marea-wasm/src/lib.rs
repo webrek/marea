@@ -361,8 +361,20 @@ fn emit_func(
 
     let body = emit_block(&f.body, 2, &mut ctx)?;
 
+    // Si la función declara un resultado pero el último statement no es un
+    // `return` plano (p.ej. termina en un `if/else` con return en ambas ramas),
+    // el validador WASM no deduce que la caída es inalcanzable y exigiría un i32.
+    // Un `(unreachable)` final lo marca como inalcanzable y produce WAT válido.
+    let needs_unreachable = f.return_type.is_some()
+        && !matches!(f.body.stmts.last(), Some(Stmt::Return { .. }));
+    let tail = if needs_unreachable {
+        "\n    (unreachable)"
+    } else {
+        ""
+    };
+
     Ok(format!(
-        "  (func ${name} (export \"{name}\"){params}{result}{locals_decl}\n{body}\n  )",
+        "  (func ${name} (export \"{name}\"){params}{result}{locals_decl}\n{body}{tail}\n  )",
         name = f.name,
     ))
 }

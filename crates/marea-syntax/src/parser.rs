@@ -12,6 +12,12 @@ use crate::token::{Token, TokenKind};
 
 type PResult<T> = Result<T, SyntaxError>;
 
+/// Profundidad máxima de anidamiento de expresiones, para no desbordar la pila
+/// nativa ante entradas como `((((...))))` y devolver un error ordinario.
+/// Conservador para caber holgado en el hilo de 2 MB de los tests (cada nivel
+/// son varios frames anidados); de sobra para cualquier expresión real.
+const MAX_DEPTH: usize = 128;
+
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
@@ -20,6 +26,8 @@ pub struct Parser {
     /// condición de un `if` o el escrutinio de un `match`, y se resetea dentro
     /// de contextos delimitados `( )`, `[ ]` y argumentos de llamada.
     no_struct_literal: bool,
+    /// Profundidad de recursión actual del parser de expresiones.
+    depth: usize,
 }
 
 impl Parser {
@@ -28,6 +36,7 @@ impl Parser {
             tokens,
             pos: 0,
             no_struct_literal: false,
+            depth: 0,
         }
     }
 
@@ -429,6 +438,22 @@ impl Parser {
     }
 
     fn parse_unary(&mut self) -> PResult<Expr> {
+        // Todo nivel de anidamiento de expresión pasa por aquí (paréntesis,
+        // listas y unarios); contamos la profundidad para no desbordar la pila.
+        self.depth += 1;
+        if self.depth > MAX_DEPTH {
+            self.depth -= 1;
+            return Err(SyntaxError::new(
+                "expresión demasiado anidada",
+                self.peek().span,
+            ));
+        }
+        let result = self.parse_unary_inner();
+        self.depth -= 1;
+        result
+    }
+
+    fn parse_unary_inner(&mut self) -> PResult<Expr> {
         let (op, op_span) = match self.peek_kind() {
             TokenKind::Minus => (UnaryOp::Neg, self.peek().span),
             TokenKind::Bang => (UnaryOp::Not, self.peek().span),

@@ -277,3 +277,11 @@ fn registro_en_rama_de_match() {
     let m = parse("type P = { x: Int };\n@client fn f(u: Int) { let r = match u { _ => P { x: 1 } }; print(r); }").unwrap();
     assert!(matches!(&m.items[1], Item::Fn(_)));
 }
+
+#[test]
+fn anidamiento_profundo_no_paniquea() {
+    // Antes: stack overflow (SIGABRT). Ahora: SyntaxError ordinario.
+    let src = format!("fn f() -> Int {{ return {}1{}; }}", "(".repeat(2000), ")".repeat(2000));
+    let err = parse(&src).unwrap_err();
+    assert!(err.message.contains("anidada"), "mensaje: {}", err.message);
+}

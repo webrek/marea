@@ -102,3 +102,10 @@ fn builtins_no_se_awaitan() {
     assert!(p.client.contains("print(a.get())"), "{}", p.client);
     assert!(!p.client.contains("(await print("), "{}", p.client);
 }
+
+#[test]
+fn division_entera_trunca() {
+    // JS '/' daría flotante; debe truncar para no romper el contrato Int.
+    let p = build("fn d() -> Int { return 7 / 2; }");
+    assert!(p.client.contains("Math.trunc"), "{}", p.client);
+}

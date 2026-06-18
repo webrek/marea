@@ -250,3 +250,10 @@ fn int_fuera_de_rango_i32_es_error() {
     let err = wat("fn big() -> Int { return 5000000000; }").unwrap_err();
     assert!(err.contains("i32"), "mensaje: {err}");
 }
+
+#[test]
+fn if_else_terminal_emite_unreachable() {
+    // Ambas ramas con return: el validador WASM exige marcar la caída inalcanzable.
+    let w = wat("fn abs(n: Int) -> Int { if n > 0 { return n; } else { return 0 - n; } }").unwrap();
+    assert!(w.contains("(unreachable)"), "wat: {w}");
+}

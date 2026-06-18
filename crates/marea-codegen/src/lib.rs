@@ -343,12 +343,16 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
         }
         Expr::Binary {
             op, left, right, ..
-        } => format!(
-            "({} {} {})",
-            emit_expr(left, reactive),
-            map_binop(*op),
-            emit_expr(right, reactive)
-        ),
+        } => {
+            let l = emit_expr(left, reactive);
+            let r = emit_expr(right, reactive);
+            match op {
+                // División entera: trunca hacia cero, igual que i32.div_s de WASM.
+                // JS '/' daría flotante (7/2=3.5) y rompería el contrato Int.
+                BinOp::Div => format!("Math.trunc({l} / {r})"),
+                _ => format!("({} {} {})", l, map_binop(*op), r),
+            }
+        }
         // Las llamadas a funciones del usuario y stubs RPC son async (se
         // 'await'); los builtins síncronos (print/concat/render) NO se awaitan,
         // porque un 'await' espurio rompe el rastreo de dependencias reactivas

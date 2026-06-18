@@ -88,15 +88,49 @@ export function __marea_is(value: unknown, tag: string): boolean {
   return false;
 }
 
-// --- núcleo reactivo (signals de grano fino) ---
+// --- núcleo reactivo (signals de grano fino, sin glitches) ---
 //
-// Una variable 'reactive mut' es un signal (fuente); una 'reactive' derivada es
-// un memo; 'effect { ... }' se re-ejecuta cuando cambia algo que leyó. El
-// rastreo de dependencias es automático: leer un signal/memo dentro de un effect
-// o memo lo suscribe.
+// 'reactive mut' es un signal (fuente); 'reactive' es un memo (derivado perezoso);
+// 'effect { ... }' se re-ejecuta cuando cambia algo que leyó. El rastreo de
+// dependencias es automático: leer un signal/memo dentro de una reacción la
+// suscribe. Al asignar un signal: se invalidan (marcan sucias) las reacciones
+// dependientes y LUEGO se drenan los effects pendientes una sola vez, leyendo
+// valores frescos — así no hay glitches (estados intermedios incoherentes). Un
+// ciclo reactivo (un effect que reescribe lo que lee) se detecta y aborta con
+// un error claro en vez de colgarse.
 
-type Sub = () => void;
-let __currentSub: Sub | null = null;
+interface Reaction {
+  invalidate(): void;
+}
+
+interface EffectReaction extends Reaction {
+  execute(): void;
+}
+
+let __currentSub: Reaction | null = null;
+const __pending = new Set<EffectReaction>();
+let __flushing = false;
+
+function __flush(): void {
+  if (__flushing) return;
+  __flushing = true;
+  let guard = 0;
+  try {
+    while (__pending.size > 0) {
+      if (++guard > 1000) {
+        __pending.clear();
+        throw new Error(
+          "ciclo reactivo detectado: un effect reescribe una reactiva que lee"
+        );
+      }
+      const r = __pending.values().next().value as EffectReaction;
+      __pending.delete(r);
+      r.execute();
+    }
+  } finally {
+    __flushing = false;
+  }
+}
 
 export interface Cell<T> {
   get(): T;
@@ -105,42 +139,72 @@ export interface Cell<T> {
 
 export function __signal<T>(initial: T): Cell<T> {
   let value = initial;
-  const subs = new Set<Sub>();
+  const subs = new Set<Reaction>();
   return {
-    get() {
+    get(): T {
       if (__currentSub) subs.add(__currentSub);
       return value;
     },
-    set(v: T) {
+    set(v: T): void {
       if (v === value) return;
       value = v;
-      // Copia para tolerar resuscripciones durante la notificación.
-      for (const s of [...subs]) s();
+      for (const r of [...subs]) r.invalidate();
+      __flush();
     },
   };
 }
 
 export function __effect(fn: () => void | Promise<void>): void {
-  const run: Sub = () => {
+  const reaction: EffectReaction = {
+    execute() {
+      const prev = __currentSub;
+      __currentSub = reaction;
+      // La suscripción ocurre en la porción síncrona del cuerpo (por eso los
+      // builtins NO se awaitan: un await partiría el rastreo).
+      try {
+        void fn();
+      } finally {
+        __currentSub = prev;
+      }
+    },
+    invalidate() {
+      __pending.add(reaction);
+    },
+  };
+  reaction.execute();
+}
+
+export function __memo<T>(fn: () => T): Cell<T> {
+  const subs = new Set<Reaction>();
+  let value: T;
+  let dirty = true;
+  const reaction: Reaction = {
+    invalidate() {
+      if (!dirty) {
+        dirty = true;
+        for (const r of [...subs]) r.invalidate();
+      }
+    },
+  };
+  const recompute = () => {
     const prev = __currentSub;
-    __currentSub = run;
-    // La suscripción a los signals ocurre en la PORCIÓN SÍNCRONA del cuerpo
-    // (las lecturas reactivas), así que restauramos el suscriptor de forma
-    // síncrona en cuanto fn() devuelve. Por eso los builtins NO se awaitan
-    // (codegen): un await partiría el cuerpo y perdería el rastreo.
+    __currentSub = reaction;
     try {
-      void fn();
+      value = fn();
+      dirty = false;
     } finally {
       __currentSub = prev;
     }
   };
-  run();
-}
-
-export function __memo<T>(fn: () => T): Cell<T> {
-  const cell = __signal<T>(undefined as unknown as T);
-  __effect(() => cell.set(fn()));
-  return { get: cell.get, set: cell.set };
+  return {
+    get(): T {
+      if (dirty) recompute();
+      if (__currentSub) subs.add(__currentSub);
+      return value;
+    },
+    // Un memo es derivado: no se asigna directamente.
+    set(_v: T): void {},
+  };
 }
 
 // --- builtins del lenguaje ---

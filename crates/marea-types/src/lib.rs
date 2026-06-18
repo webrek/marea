@@ -1205,6 +1205,10 @@ impl Checker {
             (Ty::Named(n), Ty::Union(vs)) => vs.contains(n),
             // Una unión es subtipo de otra si todas sus variantes están contenidas.
             (Ty::Union(a), Ty::Union(b)) => a.iter().all(|v| b.contains(v)),
+            // Listas: covariantes en el elemento. `List<?>` (lista vacía o de
+            // elemento desconocido) es subtipo de cualquier `List<T>` porque el
+            // elemento Unknown es subtipo de todo.
+            (Ty::List(ea), Ty::List(eb)) => self.is_subtype(ea, eb),
             // Registros estructurales: ancho + profundidad.
             (Ty::Record(sa), Ty::Record(sb)) => sb.iter().all(|(n, tb)| {
                 sa.iter()

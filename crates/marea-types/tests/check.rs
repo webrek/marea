@@ -469,3 +469,9 @@ fn edge_llamando_client_es_error() {
     let errs = check_src("@client fn c() {}\n@edge fn e() { c(); }");
     assert!(has_code(&errs, "E_CALL_CLIENT_FROM_SERVER"), "códigos: {:?}", codes(&errs));
 }
+
+#[test]
+fn lista_vacia_es_subtipo_de_list() {
+    let errs = check_src("@client fn f() { let xs: List<Int> = []; print(xs); }");
+    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+}
