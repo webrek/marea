@@ -497,3 +497,9 @@ fn match_como_expresion_infiere_tipo() {
     );
     assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
 }
+
+#[test]
+fn redefinir_builtin_es_error() {
+    let errs = check_src("@client fn print(x: Int) { return; }");
+    assert!(has_code(&errs, "E_REDEFINE_BUILTIN"), "códigos: {:?}", codes(&errs));
+}

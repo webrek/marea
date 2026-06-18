@@ -111,6 +111,16 @@ impl Checker {
         for item in &module.items {
             match item {
                 Item::Fn(f) => {
+                    // No se puede redefinir un builtin (print/concat/render/db/
+                    // NotFound): además de confundir, generaría TS inválido por
+                    // colisión con el import del runtime.
+                    if builtins::lookup(&f.name).is_some() {
+                        self.error(TypeError::new(
+                            "E_REDEFINE_BUILTIN",
+                            format!("no se puede redefinir el builtin '{}'", f.name),
+                            f.span,
+                        ));
+                    }
                     if let Some(prev) = fn_spans.get(&f.name) {
                         self.error(
                             TypeError::new(

@@ -14,33 +14,6 @@ use std::collections::HashSet;
 /// El runtime TypeScript embebido (transporte RPC + builtins).
 pub const RUNTIME_TS: &str = include_str!("runtime.ts");
 
-/// Recoge los nombres de variables declaradas con `reactive` en una función
-/// (incluidas ramas y efectos), para que sus lecturas emitan `.get()`.
-fn collect_reactive(block: &Block, out: &mut HashSet<String>) {
-    for stmt in &block.stmts {
-        match stmt {
-            Stmt::Let(l) if l.reactive => {
-                out.insert(l.name.clone());
-            }
-            Stmt::Effect { body, .. } => collect_reactive(body, out),
-            Stmt::Expr(Expr::If {
-                then_branch,
-                else_branch,
-                ..
-            }) => {
-                collect_reactive(then_branch, out);
-                if let Some(eb) = else_branch {
-                    match eb.as_ref() {
-                        ElseBranch::Block(b) => collect_reactive(b, out),
-                        ElseBranch::If(_) => {}
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
 /// Los cuatro archivos TypeScript que produce el transpilador.
 pub struct Project {
     pub runtime: String,
@@ -141,9 +114,9 @@ fn emit_fn_def(f: &FnDecl, export: bool) -> String {
     } else {
         "async function"
     };
-    let mut reactive = HashSet::new();
-    collect_reactive(&f.body, &mut reactive);
-    let body = emit_block_inner(&f.body, 1, &reactive);
+    // El conjunto de variables reactivas se construye incrementalmente por
+    // bloque (respetando el alcance léxico), arrancando vacío.
+    let body = emit_block_inner(&f.body, 1, &HashSet::new());
     format!(
         "{}\n{} {}({}) {{\n{}\n}}\n",
         signature_comment(f),
@@ -184,12 +157,25 @@ fn ts_params(f: &FnDecl) -> String {
 // --- sentencias ---
 
 fn emit_block_inner(block: &Block, indent: usize, reactive: &HashSet<String>) -> String {
-    block
-        .stmts
-        .iter()
-        .map(|s| emit_stmt(s, indent, reactive))
-        .collect::<Vec<_>>()
-        .join("\n")
+    // `current` arranca con las reactivas del alcance externo y se actualiza al
+    // procesar cada sentencia: un `reactive` añade el nombre; un `let`/binding
+    // no-reactivo del mismo nombre lo SOMBREA (lo quita) para el resto del
+    // bloque. Así una lectura del nombre sombreado no emite `.get()` erróneo.
+    let mut current = reactive.clone();
+    let mut lines = Vec::with_capacity(block.stmts.len());
+    for stmt in &block.stmts {
+        // La sentencia se emite con el alcance ANTERIOR a su propio binding
+        // (el RHS de `let n = ...` ve la `n` externa, no la que declara).
+        lines.push(emit_stmt(stmt, indent, &current));
+        if let Stmt::Let(l) = stmt {
+            if l.reactive {
+                current.insert(l.name.clone());
+            } else {
+                current.remove(&l.name);
+            }
+        }
+    }
+    lines.join("\n")
 }
 
 fn emit_stmt(stmt: &Stmt, indent: usize, reactive: &HashSet<String>) -> String {

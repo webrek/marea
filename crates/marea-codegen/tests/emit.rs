@@ -122,3 +122,14 @@ fn match_como_expresion_retorna_valor() {
     // El IIFE debe RETORNAR el valor de la rama, no quedar en undefined.
     assert!(p.client.contains("return \"c\""), "{}", p.client);
 }
+
+#[test]
+fn local_sombrea_a_reactiva() {
+    // Un 'let n' no-reactivo dentro de un bloque sombrea a la reactiva externa:
+    // su lectura NO debe emitir .get().
+    let p = build("@client fn main() { reactive mut n = 0; effect { let n = 99; print(n); } n = n + 1; }");
+    assert!(p.client.contains("const n = 99"), "{}", p.client);
+    assert!(p.client.contains("print(n)") && !p.client.contains("print(n.get())"), "{}", p.client);
+    // La reactiva externa sigue siendo signal.
+    assert!(p.client.contains("const n = __signal(0)"), "{}", p.client);
+}
