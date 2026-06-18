@@ -159,3 +159,12 @@ fn web_entry_no_string_no_decodifica() {
     assert!(glue.contains("String(exports.vista())"), "glue: {glue}");
     assert!(!glue.contains("decodificarCadena(exports.vista())"), "glue: {glue}");
 }
+
+#[test]
+fn store_builtins_no_se_awaitan() {
+    let p = build("@server fn g(x: Int) { guardar(x); } @server fn t() -> List<Int> { return todos(); }");
+    assert!(p.runtime.contains("export function guardar"), "{}", p.runtime);
+    assert!(p.runtime.contains("export function todos"), "{}", p.runtime);
+    // guardar/todos son síncronos: sin await.
+    assert!(p.server.contains("guardar(x)") && !p.server.contains("(await guardar"), "{}", p.server);
+}

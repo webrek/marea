@@ -515,3 +515,13 @@ fn lista_heterogenea_es_error() {
     let errs = check_src(r#"fn f() -> Int { let xs = ["n", 99]; return len(xs[0]); }"#);
     assert!(has_code(&errs, "E_LIST_HETEROGENEOUS"), "códigos: {:?}", codes(&errs));
 }
+
+#[test]
+fn store_del_servidor_tipa() {
+    let errs = check_src(
+        "type P = { t: String };\n\
+         @server fn pub2(t: String) { guardar(P { t: t }); }\n\
+         @server fn feed() -> List<P> { return todos(); }",
+    );
+    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+}

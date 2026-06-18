@@ -220,3 +220,15 @@ export function render(x: unknown): void {
 export function len(xs: unknown[]): number {
   return xs.length;
 }
+
+// --- estado del servidor: un store en memoria (persiste entre peticiones del
+// mismo proceso). 'guardar' añade; 'todos' devuelve una copia. Como el runtime
+// del servidor es único por proceso, las funciones @server comparten este store
+// a través de las llamadas RPC.
+const __store: unknown[] = [];
+export function guardar(x: unknown): void {
+  __store.push(x);
+}
+export function todos(): unknown[] {
+  return __store.slice();
+}

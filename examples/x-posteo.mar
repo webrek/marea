@@ -1,0 +1,45 @@
+// Plataforma X con POSTEO real: el servidor guarda los posts en memoria
+// ('guardar') y los sirve ('todos'). Demuestra PERSISTENCIA de estado en el
+// servidor a través de varias llamadas RPC dentro del mismo proceso.
+
+type Post = {
+    autor: String,
+    texto: String,
+};
+
+// Cada 'publicar' es un cruce de frontera; el servidor acumula el post.
+@server
+fn publicar(autor: String, texto: String) {
+    guardar(Post { autor: autor, texto: texto });
+}
+
+// Devuelve todo lo que el servidor ha guardado.
+@server
+fn feed() -> List<Post> {
+    return todos();
+}
+
+fn linea(p: Post) -> String {
+    return concat(concat(p.autor, ": "), p.texto);
+}
+
+@client
+fn mostrarDesde(posts: List<Post>, i: Int) {
+    if i < len(posts) {
+        print(linea(posts[i]));
+        mostrarDesde(posts, i + 1);
+    }
+}
+
+@client
+fn main() {
+    // Postear (el servidor guarda cada uno por RPC).
+    publicar("ada", "Primer post en Marea");
+    publicar("alan", "La maquina piensa");
+    publicar("grace", "Encontre y arregle el bug");
+
+    // Leer el feed persistido en el servidor.
+    let posts = feed();
+    print("=== Timeline ===");
+    mostrarDesde(posts, 0);
+}

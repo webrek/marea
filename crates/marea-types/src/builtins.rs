@@ -36,6 +36,17 @@ pub fn lookup(name: &str) -> Option<Ty> {
             ret: Box::new(Ty::Int),
             location: None,
         }),
+        // Estado del servidor: 'guardar(x)' añade al store; 'todos()' lo lee.
+        "guardar" => Some(Ty::Fn {
+            params: vec![Ty::Unknown],
+            ret: Box::new(Ty::Unit),
+            location: None,
+        }),
+        "todos" => Some(Ty::Fn {
+            params: vec![],
+            ret: Box::new(Ty::List(Box::new(Ty::Unknown))),
+            location: None,
+        }),
         // Objeto abierto: cualquier miembro o llamada se resuelve a Unknown.
         "db" => Some(Ty::Unknown),
         // Variante nominal usable como etiqueta en uniones / patrones.

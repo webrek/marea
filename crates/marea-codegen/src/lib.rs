@@ -23,8 +23,8 @@ pub struct Project {
 }
 
 /// Builtins provistos por el runtime; no se transpilan ni se registran.
-const BUILTINS: &str =
-    "{ __register, __rpc, print, concat, render, len, __marea_is, __signal, __memo, __effect }";
+const BUILTINS: &str = "{ __register, __rpc, print, concat, render, len, guardar, todos, \
+     __marea_is, __signal, __memo, __effect }";
 
 /// Una función con `@server` o `@edge` corre "remota": handler + stub RPC.
 fn is_remote(f: &FnDecl) -> bool {
@@ -465,7 +465,8 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
             let is_sync_builtin = matches!(
                 callee.as_ref(),
                 Expr::Ident { name, .. }
-                    if name == "print" || name == "concat" || name == "render" || name == "len"
+                    if matches!(name.as_str(),
+                        "print" | "concat" | "render" | "len" | "guardar" | "todos")
             );
             if is_sync_builtin {
                 format!("{}({})", callee_ts, a.join(", "))
