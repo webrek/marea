@@ -1,0 +1,60 @@
+// X con LIKES: el store del servidor ahora es MUTABLE (CRUD) y persiste a disco.
+//   guardar  -> crear   (create)
+//   todos    -> leer     (read)
+//   actualizar -> editar (update)  ← lo nuevo: dar like reemplaza el post
+//   borrar   -> eliminar (delete)
+
+type Post = {
+    autor: String,
+    texto: String,
+    likes: Int,
+};
+
+store Post;
+
+@server
+fn publicar(autor: String, texto: String) {
+    guardar(Post { autor: autor, texto: texto, likes: 0 });
+}
+
+// Dar like: lee el post, lo reemplaza con uno de likes+1 (los registros son
+// inmutables, así que se construye uno nuevo).
+@server
+fn like(i: Int) {
+    let p = todos()[i];
+    actualizar(i, Post { autor: p.autor, texto: p.texto, likes: p.likes + 1 });
+}
+
+@server
+fn feed() -> List<Post> {
+    return todos();
+}
+
+fn linea(p: Post) -> String {
+    return concat(
+        concat(concat(p.autor, ": "), p.texto),
+        concat("  (", concat(aTexto(p.likes), " likes)"))
+    );
+}
+
+@client
+fn mostrarDesde(posts: List<Post>, i: Int) {
+    if i < len(posts) {
+        print(linea(posts[i]));
+        mostrarDesde(posts, i + 1);
+    }
+}
+
+@client
+fn main() {
+    publicar("ada", "Primer post en Marea");
+    publicar("grace", "El store ahora es mutable");
+
+    // Dar likes (cada uno persiste a disco).
+    like(0);
+    like(0);
+    like(1);
+
+    print("=== Timeline ===");
+    mostrarDesde(feed(), 0);
+}

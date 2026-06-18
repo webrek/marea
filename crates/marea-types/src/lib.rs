@@ -658,34 +658,64 @@ impl Checker {
             }
         };
 
-        if name == "guardar" {
-            if arg_tys.len() != 1 {
+        // Firma de cada builtin de estado: (aridad, posiciones de índice Int,
+        // posiciones de valor-del-store, ¿devuelve List<T>?).
+        let (expected, idx_args, elem_args, returns_list): (usize, &[usize], &[usize], bool) =
+            match name {
+                "todos" => (0, &[], &[], true),
+                "guardar" => (1, &[], &[0], false),
+                "borrar" => (1, &[0], &[], false),
+                "actualizar" => (2, &[0], &[1], false),
+                _ => (0, &[], &[], false),
+            };
+
+        let ret = if returns_list {
+            Ty::List(Box::new(elem.clone()))
+        } else {
+            Ty::Unit
+        };
+
+        if !self.arity(name, &arg_tys, expected, span) {
+            return ret;
+        }
+        // Los índices deben ser Int.
+        for &i in idx_args {
+            if !matches!(arg_tys[i], Ty::Int | Ty::Unknown) {
                 self.error(TypeError::new(
-                    "E_ARITY",
-                    format!("'guardar' espera 1 argumento, se recibieron {}", arg_tys.len()),
-                    span,
+                    "E_ARG_TYPE",
+                    format!("el índice debe ser Int, no '{}'", arg_tys[i].display()),
+                    args[i].span(),
                 ));
-            } else if !self.is_subtype(&arg_tys[0], &elem) {
+            }
+        }
+        // Los valores deben ser del tipo del store.
+        for &i in elem_args {
+            if !self.is_subtype(&arg_tys[i], &elem) {
                 self.error(TypeError::new(
                     "E_ARG_TYPE",
                     format!(
-                        "se guarda '{}' pero el store es de '{}'",
-                        arg_tys[0].display(),
+                        "el valor es '{}' pero el store es de '{}'",
+                        arg_tys[i].display(),
                         elem.display()
                     ),
-                    args[0].span(),
+                    args[i].span(),
                 ));
             }
-            Ty::Unit
+        }
+        ret
+    }
+
+    /// Chequea la aridad exacta de un builtin; devuelve `true` si coincide.
+    fn arity(&mut self, name: &str, args: &[Ty], expected: usize, span: Span) -> bool {
+        if args.len() != expected {
+            self.error(TypeError::new(
+                "E_ARITY",
+                format!("'{name}' espera {expected} argumento(s), se recibieron {}", args.len()),
+                span,
+            ));
+            false
         } else {
-            if !arg_tys.is_empty() {
-                self.error(TypeError::new(
-                    "E_ARITY",
-                    "'todos' no recibe argumentos".to_string(),
-                    span,
-                ));
-            }
-            Ty::List(Box::new(elem))
+            true
         }
     }
 
@@ -693,7 +723,7 @@ impl Checker {
         // Los builtins de ESTADO (`guardar`/`todos`) se chequean aparte: contra
         // el tipo del store y sólo dentro de @server/@edge.
         if let Expr::Ident { name, .. } = callee {
-            if name == "guardar" || name == "todos" {
+            if matches!(name.as_str(), "guardar" | "todos" | "actualizar" | "borrar") {
                 return self.check_state_builtin(name, args, span);
             }
         }

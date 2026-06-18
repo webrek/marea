@@ -559,3 +559,28 @@ fn store_tipado_correcto_no_es_error() {
     let errs = check_src("type Post = { a: String };\nstore Post;\n@server fn pub(a: String) { guardar(Post { a: a }); }\n@server fn feed() -> List<Post> { return todos(); }");
     assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
 }
+
+#[test]
+fn actualizar_y_borrar_tipados() {
+    // actualizar(i, x): i Int, x del tipo del store; borrar(i): i Int.
+    let ok = check_src("type P = { a: Int };\nstore P;\n@server fn f() { actualizar(0, P { a: 1 }); borrar(1); }");
+    assert!(ok.is_empty(), "no debería haber errores: {:?}", codes(&ok));
+    // Valor de tipo equivocado en actualizar.
+    let bad = check_src("type P = { a: Int };\nstore P;\n@server fn f() { actualizar(0, 99); }");
+    assert!(has_code(&bad, "E_ARG_TYPE"), "{:?}", codes(&bad));
+    // Índice no-Int en borrar.
+    let bad2 = check_src("type P = { a: Int };\nstore P;\n@server fn f() { borrar(\"x\"); }");
+    assert!(has_code(&bad2, "E_ARG_TYPE"), "{:?}", codes(&bad2));
+}
+
+#[test]
+fn actualizar_fuera_de_server_es_error() {
+    let errs = check_src("type P = { a: Int };\nstore P;\n@client fn f() { actualizar(0, P { a: 1 }); }");
+    assert!(has_code(&errs, "E_STATE_OFF_SERVER"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn atexto_es_string() {
+    let errs = check_src("@client fn f() { let s: String = aTexto(42); print(s); }");
+    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+}

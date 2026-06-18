@@ -221,6 +221,9 @@ export function render(x: unknown): void {
 export function len(xs: unknown[]): number {
   return xs.length;
 }
+export function aTexto(x: unknown): string {
+  return String(x);
+}
 
 // --- estado del servidor: un store PERSISTENTE A DISCO. Se carga del archivo
 // al iniciar el proceso y se reescribe en cada 'guardar', así los datos
@@ -241,14 +244,32 @@ function __loadStore(): unknown[] {
 
 const __store: unknown[] = __loadStore();
 
-export function guardar(x: unknown): void {
-  __store.push(x);
+function __persist(): void {
   try {
     fs.writeFileSync(__STORE_FILE, JSON.stringify(__store));
   } catch (e) {
     console.error("[marea] no se pudo persistir el store:", e);
   }
 }
+
+export function guardar(x: unknown): void {
+  __store.push(x);
+  __persist();
+}
 export function todos(): unknown[] {
   return __store.slice();
+}
+// Reemplaza el elemento en el índice 'i' (CRUD: update).
+export function actualizar(i: number, x: unknown): void {
+  if (i >= 0 && i < __store.length) {
+    __store[i] = x;
+    __persist();
+  }
+}
+// Elimina el elemento en el índice 'i' (CRUD: delete).
+export function borrar(i: number): void {
+  if (i >= 0 && i < __store.length) {
+    __store.splice(i, 1);
+    __persist();
+  }
 }

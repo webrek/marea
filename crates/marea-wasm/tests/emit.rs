@@ -274,5 +274,5 @@ fn fn_con_nombre_reservado_es_error() {
 #[test]
 fn estado_servidor_no_existe_en_wasm() {
     let err = wat("fn f() -> Int { return len(todos()); }").unwrap_err();
-    assert!(err.contains("estado del servidor"), "mensaje: {err}");
+    assert!(err.contains("runtime de TypeScript"), "mensaje: {err}");
 }

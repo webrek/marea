@@ -36,6 +36,12 @@ pub fn lookup(name: &str) -> Option<Ty> {
             ret: Box::new(Ty::Int),
             location: None,
         }),
+        // Convierte cualquier valor a su representación textual.
+        "aTexto" => Some(Ty::Fn {
+            params: vec![Ty::Unknown],
+            ret: Box::new(Ty::String),
+            location: None,
+        }),
         // Estado del servidor: 'guardar(x)' añade al store; 'todos()' lo lee.
         "guardar" => Some(Ty::Fn {
             params: vec![Ty::Unknown],
@@ -45,6 +51,16 @@ pub fn lookup(name: &str) -> Option<Ty> {
         "todos" => Some(Ty::Fn {
             params: vec![],
             ret: Box::new(Ty::List(Box::new(Ty::Unknown))),
+            location: None,
+        }),
+        "actualizar" => Some(Ty::Fn {
+            params: vec![Ty::Int, Ty::Unknown],
+            ret: Box::new(Ty::Unit),
+            location: None,
+        }),
+        "borrar" => Some(Ty::Fn {
+            params: vec![Ty::Int],
+            ret: Box::new(Ty::Unit),
             location: None,
         }),
         // Objeto abierto: cualquier miembro o llamada se resuelve a Unknown.
