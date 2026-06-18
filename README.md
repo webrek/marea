@@ -56,6 +56,10 @@ Lo que ya funciona:
   frontera `@client`→`@server` válido; `@server`→`@client` prohibido) + la regla
   estrella: un retorno unión `User | NotFound` es **opaco** y obliga a un `match`
   exhaustivo (con *narrowing* en la rama). Acumula todos los errores.
+- **Servidor de lenguaje** (`marea-lsp`): un LSP sobre stdio que da diagnósticos
+  en vivo (errores de parser y de tipos), document symbols, completado, ir a la
+  definición y hover. Reusa el mismo `parse` + `check` del compilador. Las deps
+  externas quedan aisladas aquí; los crates de compilador siguen 100% std.
 - **CLI** `marea` con `tokens`, `parse`, `check`, `build` y `build-wasm`.
 
 Lo que **todavía no** existe: chequeo de tipos y resolución de nombres robustos,
@@ -106,6 +110,7 @@ crates/
   marea-types/    # verificador de tipos (nombres, tipos, ubicación, unión)
   marea-codegen/  # transpilador a TypeScript + runtime RPC
   marea-wasm/     # backend a WebAssembly (WAT)
+  marea-lsp/      # servidor de lenguaje (LSP) — deps externas aisladas aquí
   marea-cli/      # binario `marea`
 examples/         # programas .mar de muestra (+ check_fail/ que deben fallar)
 docs/GRAMMAR.md   # la gramática de v0
@@ -151,7 +156,7 @@ cargo clippy --all-targets
 - [x] **v1.5** — Verificador de tipos (`marea check`): nombres, tipos, ubicación, unión+match
 - [x] **WASM (listas)** — Listas sobre memoria + indexado `xs[i]`, tipadas `List<T>`
 - [x] **v3 (reactividad)** — `reactive mut`/`reactive`/`effect` → signals/memo/effect en TS
-- [ ] **LSP** — Servidor de lenguaje para el editor
+- [x] **LSP** — Servidor de lenguaje: diagnósticos en vivo, symbols, completion, definition, hover
 - [ ] **glue DOM/red** — Pegamento mínimo para apps WASM completas
 
 ## Licencia
