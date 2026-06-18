@@ -270,3 +270,9 @@ fn fn_con_nombre_reservado_es_error() {
     let err = wat(r#"fn memory() -> Int { return 1; } fn s() -> String { return concat("a","b"); }"#).unwrap_err();
     assert!(err.contains("reservado"), "mensaje: {err}");
 }
+
+#[test]
+fn estado_servidor_no_existe_en_wasm() {
+    let err = wat("fn f() -> Int { return len(todos()); }").unwrap_err();
+    assert!(err.contains("estado del servidor"), "mensaje: {err}");
+}

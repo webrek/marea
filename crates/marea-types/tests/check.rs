@@ -525,3 +525,17 @@ fn store_del_servidor_tipa() {
     );
     assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
 }
+
+#[test]
+fn estado_fuera_de_server_es_error() {
+    // 'todos()'/'guardar()' desde @client tocarían el store del proceso
+    // equivocado: el typechecker lo rechaza.
+    let errs = check_src("@client fn main() { let d = todos(); print(len(d)); }");
+    assert!(has_code(&errs, "E_STATE_OFF_SERVER"), "códigos: {:?}", codes(&errs));
+}
+
+#[test]
+fn estado_en_server_es_valido() {
+    let errs = check_src("type P = { t: String };\n@server fn s() -> List<P> { guardar(P { t: \"a\" }); return todos(); }");
+    assert!(!has_code(&errs, "E_STATE_OFF_SERVER"), "códigos: {:?}", codes(&errs));
+}

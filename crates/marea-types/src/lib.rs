@@ -605,6 +605,29 @@ impl Checker {
     }
 
     fn check_call(&mut self, callee: &Expr, args: &[Expr], span: Span) -> Ty {
+        // Los builtins de ESTADO (`guardar`/`todos`) operan sobre el store del
+        // servidor; sólo valen dentro de una función @server (o @edge). Desde
+        // @client o una función sin ubicación tocarían el store del proceso
+        // equivocado (cliente ≠ servidor), con divergencia silenciosa. Hay que
+        // envolverlos en una fn @server y llamarla por RPC.
+        if let Expr::Ident { name, .. } = callee {
+            if (name == "guardar" || name == "todos")
+                && !matches!(
+                    self.current_location,
+                    Some(Location::Server) | Some(Location::Edge)
+                )
+            {
+                self.error(TypeError::new(
+                    "E_STATE_OFF_SERVER",
+                    format!(
+                        "'{name}' (estado del servidor) sólo puede usarse en una función @server; \
+                         envuélvelo en una y llámala por RPC"
+                    ),
+                    span,
+                ));
+            }
+        }
+
         // Llamadas sobre miembros de un objeto abierto (`db.users.find`) son
         // Unknown: chequeamos los argumentos pero no la firma.
         let callee_ty = self.check_expr(callee);

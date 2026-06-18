@@ -634,6 +634,13 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String, String> {
             if name == "len" && parts.len() == 1 {
                 return Ok(format!("(i32.load {})", parts[0]));
             }
+            // Los builtins de estado del servidor (guardar/todos) son del runtime
+            // de TypeScript; no existen en WASM y producirían WAT inválido.
+            if name == "guardar" || name == "todos" {
+                return Err(format!(
+                    "'{name}' (estado del servidor) no existe en el backend WASM; usa el backend de TypeScript"
+                ));
+            }
             if parts.is_empty() {
                 Ok(format!("(call ${name})"))
             } else {
