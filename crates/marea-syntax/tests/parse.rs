@@ -229,3 +229,27 @@ fn campo_repetido_en_literal_es_error() {
     let err = parse("@client fn f() { let u = Punto { x: 1, x: 2 }; print(u); }").unwrap_err();
     assert!(err.message.contains("repetido"), "mensaje: {}", err.message);
 }
+
+#[test]
+fn parse_indexado_de_lista() {
+    let m = parse("@client fn f(xs: List) { let a = xs[0]; print(a); }").unwrap();
+    let Item::Fn(f) = &m.items[0] else { panic!() };
+    let Stmt::Let(l) = &f.body.stmts[0] else { panic!() };
+    let Expr::Index { object, index, .. } = &l.value else {
+        panic!("se esperaba un indexado")
+    };
+    assert!(matches!(object.as_ref(), Expr::Ident { .. }));
+    assert!(matches!(index.as_ref(), Expr::Int { value: 0, .. }));
+}
+
+#[test]
+fn parse_lista_literal_indexada() {
+    // '[10, 20, 30][1]' = lista literal seguida de indexado.
+    let m = parse("@client fn f() { let a = [10, 20, 30][1]; print(a); }").unwrap();
+    let Item::Fn(f) = &m.items[0] else { panic!() };
+    let Stmt::Let(l) = &f.body.stmts[0] else { panic!() };
+    let Expr::Index { object, .. } = &l.value else {
+        panic!("se esperaba un indexado")
+    };
+    assert!(matches!(object.as_ref(), Expr::List { .. }));
+}

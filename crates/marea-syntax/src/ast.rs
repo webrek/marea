@@ -149,6 +149,8 @@ pub enum Expr {
     },
     /// Literal de lista: `[1, 2, 3]`.
     List { elements: Vec<Expr>, span: Span },
+    /// Indexado de lista: `xs[i]`.
+    Index { object: Box<Expr>, index: Box<Expr>, span: Span },
 }
 
 /// Inicialización de un campo en un literal de registro: `name: "x"`.
@@ -174,7 +176,8 @@ impl Expr {
             | Expr::If { span, .. }
             | Expr::Match { span, .. }
             | Expr::Record { span, .. }
-            | Expr::List { span, .. } => *span,
+            | Expr::List { span, .. }
+            | Expr::Index { span, .. } => *span,
         }
     }
 }

@@ -214,3 +214,26 @@ fn ensambla_con_wat2wasm() {
     let _ = std::fs::remove_file(&wat_path);
     let _ = std::fs::remove_file(&wasm_path);
 }
+
+// --- listas sobre memoria lineal ---
+
+#[test]
+fn lista_construye_con_longitud_y_elementos() {
+    let w = wat("fn f() -> Int { let xs = [10, 20, 30]; return xs[1]; }").unwrap();
+    // Reserva 4*(3+1) = 16 bytes.
+    assert!(w.contains("(call $__alloc (i32.const 16))"), "wat: {w}");
+    // Longitud en la palabra 0.
+    assert!(w.contains("(i32.store offset=0 (local.get $__rec0) (i32.const 3))"), "wat: {w}");
+    // Primer elemento en la palabra 1 (offset 4).
+    assert!(w.contains("(i32.store offset=4 (local.get $__rec0) (i32.const 10))"), "wat: {w}");
+}
+
+#[test]
+fn indexado_es_load_calculado() {
+    let w = wat("fn f(xs: List) -> Int { return xs[2]; }").unwrap();
+    // dirección = ptr + (idx+1)*4
+    assert!(
+        w.contains("(i32.load (i32.add (local.get $xs) (i32.mul (i32.add (i32.const 2) (i32.const 1)) (i32.const 4))))"),
+        "wat: {w}"
+    );
+}

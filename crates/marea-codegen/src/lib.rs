@@ -315,6 +315,10 @@ fn emit_expr(e: &Expr) -> String {
             let parts: Vec<String> = elements.iter().map(emit_expr).collect();
             format!("[{}]", parts.join(", "))
         }
+        // Indexado -> acceso por índice JS.
+        Expr::Index { object, index, .. } => {
+            format!("{}[{}]", emit_expr(object), emit_expr(index))
+        }
     }
 }
 

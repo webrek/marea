@@ -416,3 +416,23 @@ fn render_muestra_codigo_linea_y_cursor() {
     assert!(salida.contains("línea"), "{salida}");
     assert!(salida.contains('^'), "{salida}");
 }
+
+// ============================ LISTAS ============================
+
+#[test]
+fn lista_indexada_por_int_tipa() {
+    let errs = check_src("@client fn f() { let xs = [1, 2, 3]; let a: Int = xs[0]; print(a); }");
+    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+}
+
+#[test]
+fn indice_no_int_es_error() {
+    let errs = check_src("@client fn f() { let xs = [1, 2, 3]; let a = xs[true]; print(a); }");
+    assert!(has_code(&errs, "E_INDEX_NOT_INT"), "códigos: {:?}", codes(&errs));
+}
+
+#[test]
+fn indexar_un_no_lista_es_error() {
+    let errs = check_src("@client fn f() { let n = 5; let a = n[0]; print(a); }");
+    assert!(has_code(&errs, "E_INDEX_NOT_LIST"), "códigos: {:?}", codes(&errs));
+}

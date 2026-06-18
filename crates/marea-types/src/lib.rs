@@ -391,6 +391,7 @@ impl Checker {
                 self.check_record(type_name.as_deref(), *type_name_span, fields, *span)
             }
             Expr::List { elements, .. } => self.check_list(elements),
+            Expr::Index { object, index, .. } => self.check_index(object, index),
         }
     }
 
@@ -1000,9 +1001,48 @@ impl Checker {
 
     fn check_list(&mut self, elements: &[Expr]) -> Ty {
         let tys: Vec<Ty> = elements.iter().map(|e| self.check_expr(e)).collect();
-        // Homogéneo y conocido → podríamos llevar List<T>; v1.5 lo deja en Unknown.
-        let _ = tys;
-        Ty::Unknown
+        // Elemento = tipo del primero si todos coinciden (ignorando Unknown);
+        // lista vacía o heterogénea → elemento desconocido.
+        let elem = match tys.first() {
+            None => Ty::Unknown,
+            Some(first) => {
+                if tys
+                    .iter()
+                    .all(|t| matches!(t, Ty::Unknown) || t == first)
+                {
+                    first.clone()
+                } else {
+                    Ty::Unknown
+                }
+            }
+        };
+        Ty::List(Box::new(elem))
+    }
+
+    /// `xs[i]`: el objeto debe ser una lista y el índice un Int; el resultado es
+    /// el tipo del elemento.
+    fn check_index(&mut self, object: &Expr, index: &Expr) -> Ty {
+        let obj_ty = self.check_expr(object);
+        let idx_ty = self.check_expr(index);
+        if !matches!(idx_ty, Ty::Int | Ty::Unknown) {
+            self.error(TypeError::new(
+                "E_INDEX_NOT_INT",
+                format!("el índice debe ser Int, no '{}'", idx_ty.display()),
+                index.span(),
+            ));
+        }
+        match obj_ty {
+            Ty::List(elem) => *elem,
+            Ty::Unknown => Ty::Unknown,
+            other => {
+                self.error(TypeError::new(
+                    "E_INDEX_NOT_LIST",
+                    format!("no se puede indexar un valor de tipo '{}'", other.display()),
+                    object.span(),
+                ));
+                Ty::Unknown
+            }
+        }
     }
 
     // ----------------------- utilidades de tipos -----------------------
@@ -1010,6 +1050,14 @@ impl Checker {
     /// Traduce un `Type` sintáctico al `Ty` interno (sin validar existencia).
     fn ty_from_syntax(&self, t: &Type) -> Ty {
         match t {
+            Type::Name { name, args, .. } if name == "List" => {
+                // `List` o `List<T>`: el elemento es el argumento, o desconocido.
+                let elem = match args.first() {
+                    Some(a) => self.ty_from_syntax(a),
+                    None => Ty::Unknown,
+                };
+                Ty::List(Box::new(elem))
+            }
             Type::Name { name, .. } => {
                 if let Some(prim) = builtins::type_lookup(name) {
                     return prim;
@@ -1047,7 +1095,8 @@ impl Checker {
             Type::Name { name, args, span } => {
                 let known = builtins::type_lookup(name).is_some()
                     || self.aliases.contains_key(name)
-                    || name == "Record";
+                    || name == "Record"
+                    || name == "List";
                 if !known {
                     self.error(TypeError::new(
                         "E_UNKNOWN_TYPE",
@@ -1133,6 +1182,8 @@ fn is_serializable(ty: &Ty) -> bool {
         Ty::Union(_) => true,
         Ty::Named(_) => true,
         Ty::Record(fields) => fields.iter().all(|(_, t)| is_serializable(t)),
+        // Una lista es serializable si su elemento lo es.
+        Ty::List(elem) => is_serializable(elem),
         // Una función no cruza la frontera.
         Ty::Fn { .. } => false,
     }

@@ -67,7 +67,12 @@ struct Ctx<'a> {
 pub fn emit_wat(module: &Module) -> Result<String, String> {
     let strings = build_strings(module);
     let layouts = build_layouts(module)?;
-    let needs_mem = !strings.data.is_empty() || uses_string_types(module) || !layouts.is_empty();
+    // El runtime de memoria (con `$__alloc`) hace falta si hay cadenas, registros
+    // o construcción de listas (todas reservan en el heap).
+    let needs_mem = !strings.data.is_empty()
+        || uses_string_types(module)
+        || !layouts.is_empty()
+        || constructs_list(module);
 
     let mut funcs = Vec::new();
     for item in &module.items {
@@ -203,6 +208,53 @@ fn uses_string_types(module: &Module) -> bool {
 
 fn is_string_type(t: &Type) -> bool {
     matches!(t, Type::Name { name, .. } if name == "String")
+}
+
+/// ¿El módulo construye en algún punto un literal de lista? (Necesita el heap.)
+fn constructs_list(module: &Module) -> bool {
+    fn in_block(b: &Block) -> bool {
+        b.stmts.iter().any(|s| match s {
+            Stmt::Let(l) => in_expr(&l.value),
+            Stmt::Return { value: Some(v), .. } => in_expr(v),
+            Stmt::Return { .. } => false,
+            Stmt::Expr(e) => in_expr(e),
+        })
+    }
+    fn in_expr(e: &Expr) -> bool {
+        match e {
+            Expr::List { .. } => true,
+            Expr::Unary { expr, .. } => in_expr(expr),
+            Expr::Binary { left, right, .. } => in_expr(left) || in_expr(right),
+            Expr::Call { args, .. } => args.iter().any(in_expr),
+            Expr::Member { object, .. } => in_expr(object),
+            Expr::Index { object, index, .. } => in_expr(object) || in_expr(index),
+            Expr::Record { fields, .. } => fields.iter().any(|f| in_expr(&f.value)),
+            Expr::If {
+                cond,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                in_expr(cond)
+                    || in_block(then_branch)
+                    || match else_branch {
+                        Some(eb) => match eb.as_ref() {
+                            ElseBranch::Block(b) => in_block(b),
+                            ElseBranch::If(e) => in_expr(e),
+                        },
+                        None => false,
+                    }
+            }
+            Expr::Match { scrutinee, arms, .. } => {
+                in_expr(scrutinee) || arms.iter().any(|a| in_expr(&a.body))
+            }
+            _ => false,
+        }
+    }
+    module
+        .items
+        .iter()
+        .any(|item| matches!(item, Item::Fn(f) if in_block(&f.body)))
 }
 
 /// Emite memoria, literales, allocador bump y el builtin `concat`.
@@ -397,6 +449,20 @@ fn collect_locals_expr(
             }
         }
         Expr::Member { object, .. } => collect_locals_expr(object, out, rec_counter)?,
+        Expr::List { elements, .. } => {
+            // Primero recursa en los elementos, luego reserva el temporal de
+            // ESTA lista — replicando el orden de emit_list.
+            for el in elements {
+                collect_locals_expr(el, out, rec_counter)?;
+            }
+            let temp = format!("__rec{}", *rec_counter);
+            *rec_counter += 1;
+            out.push(temp);
+        }
+        Expr::Index { object, index, .. } => {
+            collect_locals_expr(object, out, rec_counter)?;
+            collect_locals_expr(index, out, rec_counter)?;
+        }
         _ => {}
     }
     Ok(())
@@ -523,15 +589,54 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String, String> {
             fields,
             ..
         } => emit_record(type_name.as_deref(), fields, ctx),
+        Expr::List { elements, .. } => emit_list(elements, ctx),
+        Expr::Index { object, index, .. } => {
+            let obj = emit_expr(object, ctx)?;
+            let idx = emit_expr(index, ctx)?;
+            // dirección del elemento = ptr + (idx + 1) * 4  (la longitud ocupa
+            // la palabra 0; los elementos empiezan en la palabra 1).
+            Ok(format!(
+                "(i32.load (i32.add {obj} (i32.mul (i32.add {idx} (i32.const 1)) (i32.const 4))))"
+            ))
+        }
         Expr::Float { .. } => Err("WASM aún no soporta flotantes (sólo i32 por ahora)".to_string()),
         Expr::If { .. } => {
             Err("WASM aún no soporta 'if' en posición de expresión".to_string())
         }
         Expr::Match { .. } => Err("WASM aún no soporta 'match'".to_string()),
-        Expr::List { .. } => {
-            Err("WASM aún no soporta listas (requieren memoria lineal)".to_string())
-        }
     }
+}
+
+/// Construye una lista en memoria lineal: reserva `4*(N+1)` bytes, guarda la
+/// longitud en la palabra 0 y cada elemento en la palabra `i+1`, y deja el
+/// puntero. Mismo patrón temporal-luego-puntero que `emit_record`.
+fn emit_list(elements: &[Expr], ctx: &mut Ctx) -> Result<String, String> {
+    // Emite los valores ANTES de reservar el temporal (orden = collect_locals_expr).
+    let emitted = elements
+        .iter()
+        .map(|el| emit_expr(el, ctx))
+        .collect::<Result<Vec<_>, String>>()?;
+
+    let n = elements.len();
+    let temp = format!("__rec{}", ctx.rec_counter);
+    ctx.rec_counter += 1;
+    let size = 4 * (n as i32 + 1);
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "(local.set ${temp} (call $__alloc (i32.const {size})))"
+    ));
+    out.push_str(&format!(
+        " (i32.store offset=0 (local.get ${temp}) (i32.const {n}))"
+    ));
+    for (i, value) in emitted.iter().enumerate() {
+        let offset = 4 * (i + 1);
+        out.push_str(&format!(
+            " (i32.store offset={offset} (local.get ${temp}) {value})"
+        ));
+    }
+    out.push_str(&format!(" (local.get ${temp})"));
+    Ok(out)
 }
 
 /// Construye un registro en memoria lineal: reserva `4*N` bytes con `$__alloc`,
@@ -719,6 +824,10 @@ fn collect_strings_expr(e: &Expr, out: &mut Vec<String>, seen: &mut HashSet<Stri
                 collect_strings_expr(el, out, seen);
             }
         }
+        Expr::Index { object, index, .. } => {
+            collect_strings_expr(object, out, seen);
+            collect_strings_expr(index, out, seen);
+        }
         Expr::Int { .. } | Expr::Float { .. } | Expr::Bool { .. } | Expr::Ident { .. } => {}
     }
 }
@@ -749,9 +858,11 @@ fn wasm_binop(op: BinOp) -> &'static str {
 fn check_value_type(t: &Type, layouts: &HashMap<String, StructLayout>) -> Result<(), String> {
     match t {
         Type::Name { name, .. } if name == "Int" || name == "Bool" || name == "String" => Ok(()),
+        // Una lista es un puntero i32 a [longitud][elementos...].
+        Type::Name { name, .. } if name == "List" => Ok(()),
         Type::Name { name, .. } if layouts.contains_key(name) => Ok(()),
         Type::Name { name, .. } => Err(format!(
-            "el backend WASM soporta Int/Bool/String y registros declarados por ahora, no '{name}'"
+            "el backend WASM soporta Int/Bool/String, List y registros declarados por ahora, no '{name}'"
         )),
         Type::Union { .. } => Err("el backend WASM aún no soporta tipos unión".to_string()),
         Type::Record { .. } => {

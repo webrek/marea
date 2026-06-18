@@ -454,6 +454,18 @@ impl Parser {
                         span,
                     };
                 }
+                TokenKind::LBracket => {
+                    self.advance();
+                    // Dentro de '[ ]' el '{' SÍ puede iniciar un registro.
+                    let index = self.allow_struct_literal(|p| p.parse_expr())?;
+                    let close = self.expect(&TokenKind::RBracket, "']' para cerrar el indexado")?;
+                    let span = expr.span().to(close.span);
+                    expr = Expr::Index {
+                        object: Box::new(expr),
+                        index: Box::new(index),
+                        span,
+                    };
+                }
                 _ => break,
             }
         }

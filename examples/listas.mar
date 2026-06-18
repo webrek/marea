@@ -1,0 +1,20 @@
+// Listas sobre memoria lineal en WebAssembly.
+//
+// Una lista es un puntero i32 a un bloque [longitud][elem0][elem1]...]; cada
+// elemento ocupa 4 bytes. Construir una lista reserva el bloque con el allocador
+// bump; 'xs[i]' es un i32.load en la dirección ptr + (i+1)*4.
+
+fn tercero() -> Int {
+    let xs = [10, 20, 30, 40];
+    return xs[2];
+}
+
+fn suma() -> Int {
+    let xs = [5, 15, 25];
+    return xs[0] + xs[1] + xs[2];
+}
+
+// Recibe una lista (puntero) y lee su primer elemento.
+fn cabeza(xs: List) -> Int {
+    return xs[0];
+}

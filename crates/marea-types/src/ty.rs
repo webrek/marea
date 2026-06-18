@@ -27,6 +27,8 @@ pub enum Ty {
     },
     /// Registro estructural con campos `nombre -> tipo`.
     Record(Vec<(String, Ty)>),
+    /// Lista homogénea de elementos de un mismo tipo (`List<T>`).
+    List(Box<Ty>),
     /// Tipo desconocido: absorbe operaciones sin generar errores en cascada.
     Unknown,
 }
@@ -56,6 +58,7 @@ impl Ty {
                     fields.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect();
                 format!("{{ {} }}", fs.join(", "))
             }
+            Ty::List(elem) => format!("List<{}>", elem.display()),
             Ty::Unknown => "?".to_string(),
         }
     }

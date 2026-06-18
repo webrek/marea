@@ -45,9 +45,10 @@ Lo que ya funciona:
 - **Backend WebAssembly** (`marea-wasm`) que compila a WAT → `.wasm`, ejecutable
   en el navegador/Node **sin pasar por JS**. Soporta enteros/booleanos (`i32`),
   `let`, `if`, aritmética/comparación/lógica, llamadas/recursión, **cadenas**
-  sobre memoria lineal, y **registros (structs)**: campos contiguos de 4 bytes,
+  sobre memoria lineal, **registros (structs)** (campos contiguos de 4 bytes,
   `Punto { x: 1, y: 2 }` construye con el allocador bump y `x.campo` es un
-  `i32.load offset=4*i`.
+  `i32.load offset=4*i`), y **listas** (`[10, 20, 30]` = `[longitud][elementos]`
+  en memoria; `xs[i]` es un `i32.load` calculado).
 - **Verificador de tipos** (`marea-types`) expuesto como `marea check`:
   resolución de nombres + tipos ligeros + **tipos de ubicación** (cruce de
   frontera `@client`→`@server` válido; `@server`→`@client` prohibido) + la regla
@@ -142,9 +143,10 @@ cargo clippy --all-targets
 - [x] **WASM (cadenas)** — Strings sobre memoria lineal: literales + `concat`
 - [x] **WASM (structs)** — Registros sobre memoria lineal: construir + leer campos
 - [x] **v1.5** — Verificador de tipos (`marea check`): nombres, tipos, ubicación, unión+match
-- [ ] **WASM (listas)** — Listas sobre memoria + glue DOM/red
+- [x] **WASM (listas)** — Listas sobre memoria + indexado `xs[i]`, tipadas `List<T>`
 - [ ] **v3** — Modelo reactivo en runtime
 - [ ] **LSP** — Servidor de lenguaje para el editor
+- [ ] **glue DOM/red** — Pegamento mínimo para apps WASM completas
 
 ## Licencia
 
