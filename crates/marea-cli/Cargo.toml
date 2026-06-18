@@ -13,3 +13,4 @@ path = "src/main.rs"
 [dependencies]
 marea-syntax = { path = "../marea-syntax" }
 marea-codegen = { path = "../marea-codegen" }
+marea-wasm = { path = "../marea-wasm" }

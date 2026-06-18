@@ -1,0 +1,23 @@
+// Funciones puras que compilan a WebAssembly.
+//
+// Primer slice del backend WASM: sólo enteros (Int) y booleanos (Bool), que
+// WebAssembly maneja nativo como i32. Cada función se exporta y se puede llamar
+// desde el navegador o desde Node con la API WebAssembly.
+
+fn add(a: Int, b: Int) -> Int {
+    return a + b;
+}
+
+fn fib(n: Int) -> Int {
+    if n < 2 {
+        return n;
+    }
+    return add(fib(n - 1), fib(n - 2));
+}
+
+fn gcd(a: Int, b: Int) -> Int {
+    if b == 0 {
+        return a;
+    }
+    return gcd(b, a % b);
+}

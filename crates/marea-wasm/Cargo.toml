@@ -1,0 +1,14 @@
+[package]
+name = "marea-wasm"
+description = "Backend de Marea a WebAssembly (formato texto WAT)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "marea_wasm"
+path = "src/lib.rs"
+
+[dependencies]
+marea-syntax = { path = "../marea-syntax" }

@@ -56,6 +56,32 @@ fn main() -> ExitCode {
                 }
             }
         }
+        "build-wasm" => {
+            let out = args.get(3).map(String::as_str).unwrap_or("module.wat");
+            match marea_syntax::parse(&src) {
+                Ok(module) => match marea_wasm::emit_wat(&module) {
+                    Ok(wat) => match std::fs::write(out, wat) {
+                        Ok(()) => {
+                            println!("  escrito {}", out);
+                            println!("\nEnsambla y corre con:\n  wat2wasm {out} -o module.wasm", out = out);
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("error: no se pudo escribir '{}': {}", out, e);
+                            ExitCode::FAILURE
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("error de codegen WASM: {}", e);
+                        ExitCode::FAILURE
+                    }
+                },
+                Err(e) => {
+                    eprintln!("{}", e.render(&src));
+                    ExitCode::FAILURE
+                }
+            }
+        }
         other => {
             eprintln!("error: comando desconocido '{}'", other);
             print_usage();
@@ -91,7 +117,8 @@ fn build(module: &marea_syntax::Module, out_dir: &str) -> ExitCode {
 fn print_usage() {
     eprintln!("Marea — compilador del lenguaje (v0)\n");
     eprintln!("uso:");
-    eprintln!("  marea tokens <archivo.mar>          muestra los tokens");
-    eprintln!("  marea parse  <archivo.mar>          muestra el AST");
-    eprintln!("  marea build  <archivo.mar> [dir]    transpila a TypeScript");
+    eprintln!("  marea tokens     <archivo.mar>        muestra los tokens");
+    eprintln!("  marea parse      <archivo.mar>        muestra el AST");
+    eprintln!("  marea build      <archivo.mar> [dir]  transpila a TypeScript");
+    eprintln!("  marea build-wasm <archivo.mar> [out]  compila a WebAssembly (WAT)");
 }

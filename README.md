@@ -42,10 +42,14 @@ Lo que ya funciona:
 - **Transpilador a TypeScript** (`marea-codegen`) que materializa la **frontera
   de red**: una función `@server` se vuelve un handler registrado + un *stub* RPC
   en el cliente. El `@client` que la llama no nota la diferencia.
-- **CLI** `marea` con `tokens`, `parse` y `build`.
+- **Backend WebAssembly** (`marea-wasm`) que compila funciones puras a WAT →
+  `.wasm`, ejecutable en el navegador/Node **sin pasar por JS**. Primer slice:
+  enteros/booleanos (`i32`), `let`, `if`, aritmética/comparación/lógica y llamadas.
+- **CLI** `marea` con `tokens`, `parse`, `build` y `build-wasm`.
 
 Lo que **todavía no** existe: chequeo de tipos y resolución de nombres robustos,
-el modelo reactivo en runtime, y el backend WASM (siguiente fase).
+el modelo reactivo en runtime, y WASM para tipos no numéricos (cadenas/structs,
+que requieren memoria lineal).
 
 ### La frontera de red, corriendo de verdad
 
@@ -60,12 +64,27 @@ Un solo `.mar` con `saludar` (`@server`) y `main` (`@client`). Al correr, `main(
 llama a `saludar()` como si fuera local; por debajo viaja un `fetch` real por
 HTTP al servidor. **Cero capa de API escrita a mano.**
 
+### La misma fuente, ahora como WebAssembly
+
+```sh
+marea build-wasm examples/math.mar /tmp/math.wat   # .mar -> WAT
+wat2wasm /tmp/math.wat -o /tmp/math.wasm            # WAT -> .wasm (116 bytes)
+node -e 'const b=require("fs").readFileSync("/tmp/math.wasm");
+  WebAssembly.instantiate(b).then(({instance})=>
+    console.log("fib(20)=", instance.exports.fib(20)))'
+# → fib(20)= 6765
+```
+
+La lógica corre en el motor WebAssembly **sin una línea de JavaScript**. Es el
+camino para que el JS quede reducido a un pegamento mínimo (DOM/red).
+
 ## Estructura
 
 ```
 crates/
   marea-syntax/   # lexer, AST, parser, errores  (la biblioteca)
   marea-codegen/  # transpilador a TypeScript + runtime RPC
+  marea-wasm/     # backend a WebAssembly (WAT)
   marea-cli/      # binario `marea`
 examples/         # programas .mar de muestra
 docs/GRAMMAR.md   # la gramática de v0
@@ -84,6 +103,10 @@ cargo run --bin marea -- parse examples/user.mar
 cargo run --bin marea -- build examples/saludo.mar /tmp/demo
 node /tmp/demo/demo.ts
 
+# Compilar a WebAssembly y ejecutar sin JS
+cargo run --bin marea -- build-wasm examples/math.mar /tmp/math.wat
+wat2wasm /tmp/math.wat -o /tmp/math.wasm
+
 # Pruebas y linter
 cargo test
 cargo clippy --all-targets
@@ -93,7 +116,8 @@ cargo clippy --all-targets
 
 - [x] **v0** — Lexer + AST + Parser + CLI
 - [x] **v2** — Transpilación a TypeScript con cruce de frontera (`@server`/`@client`)
-- [ ] **WASM** — Backend a WebAssembly (cortar la dependencia de JS) ← siguiente
+- [x] **WASM (slice numérico)** — Backend a WebAssembly: i32, `let`, `if`, llamadas
+- [ ] **WASM (memoria)** — Cadenas y structs sobre memoria lineal + glue DOM/red
 - [ ] **v1.5** — Resolución de nombres + chequeo de tipos (con tipos de ubicación)
 - [ ] **v3** — Modelo reactivo en runtime
 - [ ] **LSP** — Servidor de lenguaje para el editor
