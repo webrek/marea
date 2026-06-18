@@ -41,6 +41,8 @@ pub struct FnDecl {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Param {
     pub name: String,
+    /// Span del nombre del parámetro (para hover/go-to-def en el LSP).
+    pub name_span: Span,
     pub ty: Type,
     pub span: Span,
 }

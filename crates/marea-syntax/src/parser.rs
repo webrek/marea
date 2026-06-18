@@ -205,7 +205,12 @@ impl Parser {
         self.expect(&TokenKind::Colon, "':' tras el nombre del parámetro")?;
         let ty = self.parse_type()?;
         let span = name_span.to(ty.span());
-        Ok(Param { name, ty, span })
+        Ok(Param {
+            name,
+            name_span,
+            ty,
+            span,
+        })
     }
 
     fn parse_type_decl(&mut self) -> PResult<TypeDecl> {

@@ -46,6 +46,8 @@ fn hover_markdown(module: &Module, node: Node<'_>) -> Option<String> {
             // formateado tal cual (p. ej. un builtin o un genérico).
             declaration_markdown(module, name).or_else(|| Some(code_block(&render_type(node_type(node)?))))
         }
+        // Sobre el nombre de un parámetro → `nombre: Tipo`.
+        Node::Param(p) => Some(code_block(&format!("{}: {}", p.name, render_type(&p.ty)))),
         // El propio item: función → firma; type → `type N = ...`.
         Node::Item(Item::Fn(f)) => Some(code_block(&fn_signature(f))),
         Node::Item(Item::Type(t)) => Some(code_block(&type_decl(t))),

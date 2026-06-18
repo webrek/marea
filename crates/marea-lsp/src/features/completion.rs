@@ -86,7 +86,20 @@ fn at_location_context(text: &str, offset: usize) -> bool {
         i -= 1;
     }
     // Justo antes del identificador (posiblemente vacío) debe haber un `@`.
-    i > 0 && prefix[i - 1] == b'@'
+    if i == 0 || prefix[i - 1] != b'@' {
+        return false;
+    }
+    // El `@` de ubicación abre un item: en su línea, antes de él, sólo puede
+    // haber espacios. Así NO se dispara dentro de una cadena ("a@b") ni en
+    // medio de una expresión.
+    let mut j = i - 1;
+    while j > 0 && prefix[j - 1] != b'\n' {
+        if !prefix[j - 1].is_ascii_whitespace() {
+            return false;
+        }
+        j -= 1;
+    }
+    true
 }
 
 /// ¿El byte forma parte de un identificador (letra ASCII, dígito o `_`)?
@@ -101,5 +114,27 @@ fn item(label: &str, kind: CompletionItemKind) -> CompletionItem {
         label: label.to_string(),
         kind: Some(kind),
         ..CompletionItem::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::at_location_context;
+
+    #[test]
+    fn arroba_al_inicio_de_item_es_ubicacion() {
+        // '@' que abre un item (solo espacios antes en la línea).
+        assert!(at_location_context("@", 1));
+        assert!(at_location_context("@ser", 4));
+        assert!(at_location_context("  @cl", 5));
+        assert!(at_location_context("fn f() {}\n@ser", 14));
+    }
+
+    #[test]
+    fn arroba_dentro_de_texto_no_es_ubicacion() {
+        // '@' precedido de no-espacios en la línea (cadena, email) NO dispara.
+        assert!(!at_location_context("let x = \"a@b", 12));
+        assert!(!at_location_context("correo@dominio", 14));
+        assert!(!at_location_context("print(x)", 8));
     }
 }

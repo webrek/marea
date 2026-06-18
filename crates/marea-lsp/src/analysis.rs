@@ -14,7 +14,7 @@
 //!     `TypeError` se mapea a un [`NeutralDiag`].
 
 use marea_syntax::ast::{
-    Block, ElseBranch, Expr, Item, Module, Pattern, Stmt, Type,
+    Block, ElseBranch, Expr, Item, Module, Param, Pattern, Stmt, Type,
 };
 use marea_syntax::parse;
 use marea_syntax::span::Span;
@@ -173,9 +173,12 @@ pub fn find_node_at(module: &Module, offset: usize) -> Option<Node<'_>> {
         match item {
             Item::Fn(f) => {
                 if contains(f.span, offset) {
-                    // Busca primero en los parámetros (sus tipos), el tipo de
+                    // Busca primero en los parámetros (nombre y tipo), el tipo de
                     // retorno y el cuerpo; si nada más interno encaja, el item.
                     for p in &f.params {
+                        if contains(p.name_span, offset) {
+                            return Some(Node::Param(p));
+                        }
                         if let Some(n) = find_in_type(&p.ty, offset) {
                             return Some(n);
                         }
@@ -226,6 +229,7 @@ pub enum Node<'a> {
     Expr(&'a Expr),
     Type(&'a Type),
     Pattern(&'a Pattern),
+    Param(&'a Param),
 }
 
 impl Node<'_> {
@@ -241,6 +245,7 @@ impl Node<'_> {
             Node::Expr(e) => e.span(),
             Node::Type(t) => t.span(),
             Node::Pattern(p) => p.span(),
+            Node::Param(p) => p.span,
         }
     }
 }
