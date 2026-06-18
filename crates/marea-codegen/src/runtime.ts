@@ -9,10 +9,17 @@ import http from "node:http";
 import fs from "node:fs";
 
 const MAREA_PORT = 8787;
+// Escuchamos solo en loopback por defecto: la frontera de red es para el cliente
+// local de la app, no para exponer en la LAN. Se puede ampliar con MAREA_HOST.
+const MAREA_HOST = process.env.MAREA_HOST ?? "127.0.0.1";
 const MAREA_URL = `http://127.0.0.1:${MAREA_PORT}/__marea`;
+// Tope del cuerpo RPC (configurable) para no acumular memoria sin límite.
+const MAREA_MAX_BODY = Number(process.env.MAREA_MAX_BODY ?? 1_048_576); // 1 MiB
 
 type Handler = (args: unknown[]) => unknown | Promise<unknown>;
-const __handlers: Record<string, Handler> = {};
+// Tabla sin prototipo: así `fn` no puede resolver a métodos heredados de
+// Object.prototype (constructor/toString/…) y solo alcanza handlers reales.
+const __handlers: Record<string, Handler> = Object.create(null);
 
 export function __register(name: string, fn: Handler): void {
   __handlers[name] = fn;
@@ -28,27 +35,61 @@ export function startServer(): Promise<void> {
         res.end();
         return;
       }
-      let body = "";
-      req.on("data", (chunk) => (body += chunk));
+      const chunks: Buffer[] = [];
+      let size = 0;
+      let aborted = false;
+      req.on("data", (chunk: Buffer) => {
+        if (aborted) return;
+        size += chunk.length;
+        if (size > MAREA_MAX_BODY) {
+          aborted = true;
+          res.statusCode = 413;
+          res.end(JSON.stringify({ error: "payload demasiado grande" }));
+          req.destroy();
+          return;
+        }
+        chunks.push(chunk);
+      });
       req.on("end", async () => {
+        if (aborted) return;
+        let fn: unknown, args: unknown;
         try {
-          const { fn, args } = JSON.parse(body);
-          const handler = __handlers[fn];
-          if (!handler) {
-            res.statusCode = 400;
-            res.end(JSON.stringify({ error: `función desconocida: ${fn}` }));
-            return;
-          }
-          const result = await handler(args);
+          ({ fn, args } = JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        } catch {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: "JSON inválido" }));
+          return;
+        }
+        // 'fn' debe ser string y 'args' un arreglo: rechazo barato antes de tocar
+        // un handler (evita confusión de tipo aguas abajo).
+        if (typeof fn !== "string" || !Array.isArray(args)) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: "petición mal formada" }));
+          return;
+        }
+        const handler = __handlers[fn];
+        if (!handler) {
+          // No hacemos eco de 'fn' (evita oráculo de enumeración de handlers).
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: "petición mal formada" }));
+          return;
+        }
+        try {
+          const result = await handler(args as unknown[]);
           res.setHeader("content-type", "application/json");
           res.end(JSON.stringify({ ok: result }));
         } catch (e) {
+          // El detalle se queda en el servidor; al cliente solo error genérico.
+          console.error("[marea] error en handler:", e);
           res.statusCode = 500;
-          res.end(JSON.stringify({ error: String(e) }));
+          res.end(JSON.stringify({ error: "error interno" }));
         }
       });
     });
-    __server.listen(MAREA_PORT, () => {
+    // Cortar conexiones lentas/colgadas (defensa contra slowloris y fugas).
+    __server.requestTimeout = Number(process.env.MAREA_REQUEST_TIMEOUT ?? 15_000);
+    __server.headersTimeout = Number(process.env.MAREA_HEADERS_TIMEOUT ?? 10_000);
+    __server.listen(MAREA_PORT, MAREA_HOST, () => {
       console.log(`[marea] servidor escuchando en ${MAREA_URL}`);
       resolve();
     });
@@ -273,12 +314,21 @@ function __toRow(rec: any): unknown[] {
     return v ?? null;
   });
 }
+// Parseo de columnas JSON tolerante: una celda corrupta cae a null en vez de
+// tumbar la carga completa del store (aislamos la fila mala).
+function __parseCell(v: any): unknown {
+  try {
+    return JSON.parse(v ?? "null");
+  } catch {
+    return null;
+  }
+}
 function __fromRow(row: any): unknown {
-  if (__isDoc()) return JSON.parse(row?.__doc ?? "null");
+  if (__isDoc()) return __parseCell(row?.__doc);
   const rec: any = {};
   for (const c of (__STORE_SCHEMA as __Schema).columns) {
     const v = row?.[c.name];
-    rec[c.name] = c.kind === "bool" ? v != 0 : c.kind === "json" ? JSON.parse(v ?? "null") : v;
+    rec[c.name] = c.kind === "bool" ? v != 0 : c.kind === "json" ? __parseCell(v) : v;
   }
   return rec;
 }
@@ -287,13 +337,35 @@ function __sqlType(kind: string): string {
   if (kind === "real") return "REAL";
   return "TEXT";
 }
-function __cols(): string {
-  return (__STORE_SCHEMA as __Schema).columns.map((c) => c.name).join(", ");
+// Comilla un identificador SQL según el dialecto (`"` en sqlite/postgres, `` ` ``
+// en mysql), duplicando el delimitador interno. Así un campo llamado como una
+// palabra reservada (from, order, select…) no rompe el SQL generado. Los
+// identificadores ya vienen sin metacaracteres (el lexer solo deja [A-Za-z0-9_]).
+function __quoteId(name: string, q: string): string {
+  return q + name.split(q).join(q + q) + q;
 }
-function __createSql(): string {
+function __cols(q: string): string {
+  return (__STORE_SCHEMA as __Schema).columns.map((c) => __quoteId(c.name, q)).join(", ");
+}
+function __table(q: string): string {
+  return __quoteId((__STORE_SCHEMA as __Schema).table, q);
+}
+function __createSql(q: string): string {
   const s = __STORE_SCHEMA as __Schema;
-  const defs = s.columns.map((c) => `${c.name} ${__sqlType(c.kind)}`).join(", ");
-  return `CREATE TABLE IF NOT EXISTS ${s.table} (${defs})`;
+  const defs = s.columns.map((c) => `${__quoteId(c.name, q)} ${__sqlType(c.kind)}`).join(", ");
+  return `CREATE TABLE IF NOT EXISTS ${__table(q)} (${defs})`;
+}
+
+// Aparta un store corrupto a un archivo '.corrupt' y devuelve un store vacío,
+// para no perder los datos originales ni dejar caer la app entera.
+function __quarantine(file: string, motivo: string): unknown[] {
+  try {
+    fs.renameSync(file, `${file}.corrupt`);
+  } catch {
+    /* si no se puede renombrar, seguimos igual con store vacío */
+  }
+  console.error(`[marea] store corrupto (${motivo}) en ${file}; apartado a ${file}.corrupt`);
+  return [];
 }
 
 // --- backend: archivo JSON (por defecto, cero dependencias) ---
@@ -311,15 +383,28 @@ function __fileBackend(): __Backend {
       try {
         parsed = JSON.parse(data);
       } catch {
-        throw new Error(`[marea] store corrupto (JSON inválido) en ${file}`);
+        // Degradar en vez de morir: apartamos el archivo corrupto y seguimos en
+        // limpio, dejando el original para inspección.
+        return __quarantine(file, "JSON inválido");
       }
       if (!Array.isArray(parsed)) {
-        throw new Error(`[marea] ${file} existe pero no es un arreglo`);
+        return __quarantine(file, "no es un arreglo");
       }
       return parsed;
     },
     async saveAll(items) {
-      fs.writeFileSync(file, JSON.stringify(items));
+      // Escritura atómica: volcamos a un temporal y renombramos (rename es
+      // atómico en el mismo FS), para que un crash a media escritura no deje el
+      // store corrupto a medias.
+      const tmp = `${file}.${process.pid}.tmp`;
+      const fd = fs.openSync(tmp, "w");
+      try {
+        fs.writeFileSync(fd, JSON.stringify(items));
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+      fs.renameSync(tmp, file);
     },
   };
 }
@@ -332,19 +417,19 @@ function __sqliteBackend(): __Backend {
     if (db) return db;
     const { DatabaseSync } = await import("node:sqlite");
     db = new DatabaseSync(path);
-    db.exec(__createSql());
+    db.exec(__createSql('"'));
     return db;
   }
   return {
     async load() {
       const d = await open();
-      return d.prepare(`SELECT ${__cols()} FROM ${(__STORE_SCHEMA as __Schema).table}`).all().map(__fromRow);
+      return d.prepare(`SELECT ${__cols('"')} FROM ${__table('"')}`).all().map(__fromRow);
     },
     async saveAll(items) {
       const d = await open();
-      const t = (__STORE_SCHEMA as __Schema).table;
+      const t = __table('"');
       const ph = (__STORE_SCHEMA as __Schema).columns.map(() => "?").join(", ");
-      const ins = d.prepare(`INSERT INTO ${t} (${__cols()}) VALUES (${ph})`);
+      const ins = d.prepare(`INSERT INTO ${t} (${__cols('"')}) VALUES (${ph})`);
       d.exec("BEGIN");
       d.exec(`DELETE FROM ${t}`);
       for (const it of items) ins.run(...(__toRow(it) as any[]));
@@ -360,13 +445,13 @@ function __postgresBackend(): __Backend {
     if (pool) return pool;
     const pg = await import("pg");
     pool = new pg.Pool({ connectionString: process.env.MAREA_DB_URL });
-    await pool.query(__createSql());
+    await pool.query(__createSql('"'));
     return pool;
   }
   return {
     async load() {
       const p = await open();
-      const r = await p.query(`SELECT ${__cols()} FROM ${(__STORE_SCHEMA as __Schema).table}`);
+      const r = await p.query(`SELECT ${__cols('"')} FROM ${__table('"')}`);
       return r.rows.map(__fromRow);
     },
     async saveAll(items) {
@@ -375,10 +460,10 @@ function __postgresBackend(): __Backend {
       const c = await p.connect();
       try {
         await c.query("BEGIN");
-        await c.query(`DELETE FROM ${s.table}`);
+        await c.query(`DELETE FROM ${__table('"')}`);
         for (const it of items) {
           const ph = s.columns.map((_, i) => `$${i + 1}`).join(", ");
-          await c.query(`INSERT INTO ${s.table} (${__cols()}) VALUES (${ph})`, __toRow(it) as any[]);
+          await c.query(`INSERT INTO ${__table('"')} (${__cols('"')}) VALUES (${ph})`, __toRow(it) as any[]);
         }
         await c.query("COMMIT");
       } catch (e) {
@@ -398,13 +483,13 @@ function __mysqlBackend(): __Backend {
     if (pool) return pool;
     const mysql = await import("mysql2/promise");
     pool = mysql.createPool(process.env.MAREA_DB_URL ?? "");
-    await pool.query(__createSql());
+    await pool.query(__createSql("`"));
     return pool;
   }
   return {
     async load() {
       const p = await open();
-      const [rows] = await p.query(`SELECT ${__cols()} FROM ${(__STORE_SCHEMA as __Schema).table}`);
+      const [rows] = await p.query(`SELECT ${__cols("`")} FROM ${__table("`")}`);
       return (rows as any[]).map(__fromRow);
     },
     async saveAll(items) {
@@ -414,9 +499,9 @@ function __mysqlBackend(): __Backend {
       const c = await p.getConnection();
       try {
         await c.beginTransaction();
-        await c.query(`DELETE FROM ${s.table}`);
+        await c.query(`DELETE FROM ${__table("`")}`);
         for (const it of items) {
-          await c.query(`INSERT INTO ${s.table} (${__cols()}) VALUES (${ph})`, __toRow(it) as any[]);
+          await c.query(`INSERT INTO ${__table("`")} (${__cols("`")}) VALUES (${ph})`, __toRow(it) as any[]);
         }
         await c.commit();
       } catch (e) {

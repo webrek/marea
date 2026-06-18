@@ -51,9 +51,17 @@ pub fn emit(module: &Module) -> Project {
         Some(sig) => format!("marea-store.{sig}.json"),
         None => "marea-store.json".to_string(),
     };
-    let runtime = RUNTIME_TS
-        .replace("__MAREA_STORE_DEFAULT__", &store_file)
-        .replace("__MAREA_STORE_SCHEMA__", &store_schema_literal(module));
+    // Sustitución en UNA pasada: cada centinela del template se reemplaza una
+    // vez y el contenido inyectado nunca se vuelve a escanear. Así un nombre de
+    // tipo/campo que coincida con otro centinela (p.ej. un campo llamado como el
+    // placeholder) no puede corromper la sustitución siguiente.
+    let runtime = fill_template(
+        RUNTIME_TS,
+        &[
+            ("__MAREA_STORE_DEFAULT__", &store_file),
+            ("__MAREA_STORE_SCHEMA__", &store_schema_literal(module)),
+        ],
+    );
 
     Project {
         runtime,
@@ -61,6 +69,34 @@ pub fn emit(module: &Module) -> Project {
         client: emit_client(&remote, &local),
         demo: emit_demo(&local),
     }
+}
+
+/// Sustituye varios centinelas en `tpl` en una sola pasada de izquierda a
+/// derecha. A diferencia de encadenar `str::replace`, el texto inyectado se
+/// copia a la salida y no se vuelve a inspeccionar, así que un reemplazo no
+/// puede introducir (ni chocar con) el centinela de otro.
+fn fill_template(tpl: &str, subs: &[(&str, &str)]) -> String {
+    let mut out = String::with_capacity(tpl.len());
+    let mut rest = tpl;
+    while !rest.is_empty() {
+        // El centinela que aparezca más a la izquierda en lo que queda.
+        let next = subs
+            .iter()
+            .filter_map(|(pat, val)| rest.find(pat).map(|idx| (idx, pat.len(), *val)))
+            .min_by_key(|(idx, _, _)| *idx);
+        match next {
+            Some((idx, pat_len, val)) => {
+                out.push_str(&rest[..idx]);
+                out.push_str(val);
+                rest = &rest[idx + pat_len..];
+            }
+            None => {
+                out.push_str(rest);
+                break;
+            }
+        }
+    }
+    out
 }
 
 /// Firma del esquema del `store T;` del módulo (nombre + campos), para nombrar
@@ -269,9 +305,12 @@ fn emit_server(remote: &[&FnDecl]) -> String {
     for f in remote {
         s.push_str(&emit_fn_def(f, false));
         s.push('\n');
+        // El transporte ya garantiza que 'args' es un arreglo; aquí exigimos la
+        // aridad exacta para que un argumento faltante no se cuele como undefined.
         let pass: Vec<String> = (0..f.params.len()).map(|i| format!("args[{i}]")).collect();
+        let n = f.params.len();
         s.push_str(&format!(
-            "__register(\"{}\", (args) => {}({}));\n\n",
+            "__register(\"{}\", (args) => {{ if (args.length !== {n}) throw new Error(\"aridad inválida\"); return {}({}); }});\n\n",
             f.name,
             f.name,
             pass.join(", ")
@@ -750,4 +789,24 @@ fn js_string(s: &str) -> String {
     }
     out.push('"');
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fill_template;
+
+    #[test]
+    fn fill_template_no_reescanea_lo_inyectado() {
+        // El valor inyectado por A contiene el centinela de B: en una sola pasada
+        // NO debe volver a sustituirse (a diferencia de encadenar str::replace).
+        let tpl = "x=A; y=B;";
+        let out = fill_template(tpl, &[("A", "B"), ("B", "Z")]);
+        assert_eq!(out, "x=B; y=Z;");
+    }
+
+    #[test]
+    fn fill_template_respeta_el_orden_izquierda_a_derecha() {
+        let out = fill_template("__P1__ medio __P2__", &[("__P1__", "uno"), ("__P2__", "dos")]);
+        assert_eq!(out, "uno medio dos");
+    }
 }

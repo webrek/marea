@@ -187,6 +187,61 @@ fn indexado_usa_bounds_check() {
     assert!(p.runtime.contains("export function __index"), "{}", p.runtime);
 }
 
+// --- endurecimiento de seguridad (auditoría 2026-06-18) ---
+
+#[test]
+fn handler_valida_aridad_de_args() {
+    // M1: el wrapper RPC exige la aridad exacta antes de invocar la función,
+    // para que un argumento faltante no se cuele como undefined.
+    let p = build("@server fn pub(a: String, b: Int) {}");
+    assert!(p.server.contains(r#"if (args.length !== 2) throw new Error("aridad inválida")"#), "{}", p.server);
+}
+
+#[test]
+fn transporte_rpc_esta_endurecido() {
+    // H1/L1/M2: bind a loopback, tope de cuerpo, tabla de handlers sin prototipo,
+    // y errores genéricos al cliente (sin reflejar String(e) ni el nombre de fn).
+    let p = build("@server fn f() {}");
+    assert!(p.runtime.contains("MAREA_MAX_BODY"), "falta tope de cuerpo");
+    assert!(p.runtime.contains("statusCode = 413"), "falta rechazo 413");
+    assert!(p.runtime.contains("Object.create(null)"), "handlers deben ir sin prototipo");
+    assert!(p.runtime.contains("listen(MAREA_PORT, MAREA_HOST"), "debe bindear host explícito");
+    assert!(p.runtime.contains(r#"error: "error interno""#), "el error al cliente debe ser genérico");
+    // No debe filtrar el error crudo ni hacer eco del nombre de función.
+    assert!(!p.runtime.contains("error: String(e)"), "no debe reflejar String(e)");
+    assert!(!p.runtime.contains("función desconocida: ${fn}"), "no debe hacer eco del fn");
+}
+
+#[test]
+fn backends_sql_comillan_identificadores() {
+    // L2: tabla/columnas se comillan por dialecto, así un campo con nombre de
+    // palabra reservada (from, order…) no rompe el SQL generado.
+    let p = build("type Fila = { from: String, order: Int };\nstore Fila;\n@server fn g() { guardar(Fila { from: \"a\", order: 1 }); }");
+    assert!(p.runtime.contains("function __quoteId"), "{}", p.runtime);
+    assert!(p.runtime.contains("__cols('\"')"), "sqlite/pg deben comillar con \"");
+    assert!(p.runtime.contains("__cols(\"`\")"), "mysql debe comillar con backtick");
+}
+
+#[test]
+fn escritura_a_disco_es_atomica() {
+    // L5: el store en archivo se escribe a un temporal y se renombra (atómico).
+    let p = build("store Int;\n@server fn g(x: Int) { guardar(x); }");
+    assert!(p.runtime.contains("renameSync"), "{}", p.runtime);
+    assert!(p.runtime.contains(".tmp"), "debe escribir a temporal");
+    assert!(p.runtime.contains("__quarantine"), "debe degradar ante store corrupto");
+}
+
+#[test]
+fn placeholders_se_sustituyen_en_una_pasada() {
+    // L3: un campo cuyo nombre coincide con un centinela del template no debe
+    // corromper la sustitución del otro. Tras emitir no quedan centinelas crudos.
+    let p = build("type T = { __MAREA_STORE_SCHEMA__: Int };\nstore T;\n@server fn g() { guardar(T { __MAREA_STORE_SCHEMA__: 1 }); }");
+    assert!(!p.runtime.contains("__MAREA_STORE_DEFAULT__"), "centinela DEFAULT sin sustituir");
+    // El único '__MAREA_STORE_SCHEMA__' admisible es el nombre de columna inyectado,
+    // no un placeholder del template suelto en una posición de código.
+    assert!(p.runtime.contains("const __STORE_SCHEMA: __Schema | null = {"), "el esquema debe quedar sustituido");
+}
+
 #[test]
 fn store_inyecta_esquema_de_columnas() {
     let p = build("type Post = { texto: String, likes: Int };\nstore Post;\n@server fn g() { guardar(Post { texto: \"a\", likes: 0 }); }");
