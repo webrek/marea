@@ -59,7 +59,8 @@ impl Parser {
         result
     }
 
-    /// Punto de entrada: tokens -> módulo.
+    /// Punto de entrada (fail-fast): tokens -> módulo, abortando en el primer
+    /// error. Lo usan `build`/`build-wasm`, que exigen un AST completo y válido.
     pub fn parse_module(tokens: Vec<Token>) -> PResult<Module> {
         let mut p = Parser::new(tokens);
         let mut items = Vec::new();
@@ -67,6 +68,51 @@ impl Parser {
             items.push(p.parse_item()?);
         }
         Ok(Module { items })
+    }
+
+    /// Punto de entrada CON RECUPERACIÓN: devuelve el módulo PARCIAL (los items
+    /// que sí parsearon) y TODOS los errores de sintaxis. Ante un error, salta
+    /// hasta el inicio probable del siguiente item y continúa. Lo usa el LSP y
+    /// `marea check` para reportar varios diagnósticos a la vez.
+    pub fn parse_module_recovering(tokens: Vec<Token>) -> (Module, Vec<SyntaxError>) {
+        let mut p = Parser::new(tokens);
+        let mut items = Vec::new();
+        let mut errors = Vec::new();
+        while !p.at_eof() {
+            let before = p.pos;
+            match p.parse_item() {
+                Ok(item) => items.push(item),
+                Err(e) => {
+                    errors.push(e);
+                    p.recover_to_item();
+                }
+            }
+            // Garantía anti-bucle: siempre avanzar al menos un token.
+            if p.pos == before && !p.at_eof() {
+                p.advance();
+            }
+        }
+        (Module { items }, errors)
+    }
+
+    /// Salta tokens hasta el inicio probable del siguiente item (`@`, `fn`,
+    /// `type`, `let`, `reactive`) o el fin del archivo.
+    fn recover_to_item(&mut self) {
+        // Consume el token donde se detectó el error para garantizar progreso.
+        self.advance();
+        while !self.at_eof() {
+            if matches!(
+                self.peek_kind(),
+                TokenKind::At
+                    | TokenKind::Fn
+                    | TokenKind::Type
+                    | TokenKind::Let
+                    | TokenKind::Reactive
+            ) {
+                break;
+            }
+            self.advance();
+        }
     }
 
     // --- utilidades ---

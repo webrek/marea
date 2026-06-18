@@ -16,7 +16,7 @@
 use marea_syntax::ast::{
     Block, ElseBranch, Expr, Item, Module, Param, Pattern, Stmt, Type,
 };
-use marea_syntax::parse;
+use marea_syntax::parse_recovering;
 use marea_syntax::span::Span;
 use marea_types::check;
 
@@ -59,33 +59,37 @@ pub struct Analysis {
 /// - Parseo correcto → cada `TypeError` se mapea a un diagnóstico (con su
 ///   código y notas) y `module` queda en `Some`.
 pub fn analyze(src: &str) -> Analysis {
-    match parse(src) {
-        Err(err) => Analysis {
-            module: None,
-            diagnostics: vec![NeutralDiag {
+    // Parser con recuperación: módulo parcial + TODOS los errores de sintaxis.
+    let (module, syntax_errors) = parse_recovering(src);
+    let mut diagnostics: Vec<NeutralDiag> = syntax_errors
+        .into_iter()
+        .map(|err| NeutralDiag {
+            severity: Severity::Error,
+            span: err.span,
+            code: None,
+            message: err.message,
+            notes: Vec::new(),
+        })
+        .collect();
+
+    // El chequeo de tipos sólo corre si la SINTAXIS está limpia: sobre un AST
+    // parcial produciría diagnósticos de tipos confusos (nombres que faltan por
+    // los items descartados).
+    if diagnostics.is_empty() {
+        for te in check(&module) {
+            diagnostics.push(NeutralDiag {
                 severity: Severity::Error,
-                span: err.span,
-                code: None,
-                message: err.message,
-                notes: Vec::new(),
-            }],
-        },
-        Ok(module) => {
-            let diagnostics = check(&module)
-                .into_iter()
-                .map(|te| NeutralDiag {
-                    severity: Severity::Error,
-                    span: te.span,
-                    code: Some(te.code),
-                    message: te.message,
-                    notes: te.notes,
-                })
-                .collect();
-            Analysis {
-                module: Some(module),
-                diagnostics,
-            }
+                span: te.span,
+                code: Some(te.code),
+                message: te.message,
+                notes: te.notes,
+            });
         }
+    }
+
+    Analysis {
+        module: Some(module),
+        diagnostics,
     }
 }
 

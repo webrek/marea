@@ -17,8 +17,19 @@ pub use lexer::Lexer;
 pub use parser::Parser;
 pub use token::{Token, TokenKind};
 
-/// Conveniencia: de fuente a módulo (lex + parse en un paso).
+/// Conveniencia: de fuente a módulo (lex + parse en un paso, fail-fast).
 pub fn parse(src: &str) -> Result<Module, SyntaxError> {
     let tokens = Lexer::tokenize(src)?;
     Parser::parse_module(tokens)
+}
+
+/// De fuente a módulo PARCIAL + todos los errores de sintaxis (con recuperación).
+///
+/// Si el lexer falla (p. ej. cadena sin cerrar), devuelve un módulo vacío y ese
+/// único error léxico. Si lexea, recupera a nivel de item y acumula los errores.
+pub fn parse_recovering(src: &str) -> (Module, Vec<SyntaxError>) {
+    match Lexer::tokenize(src) {
+        Ok(tokens) => Parser::parse_module_recovering(tokens),
+        Err(e) => (Module { items: Vec::new() }, vec![e]),
+    }
 }

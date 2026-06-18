@@ -47,8 +47,18 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        "check" => match marea_syntax::parse(&src) {
-            Ok(module) => {
+        "check" => {
+            // Parser con recuperación: reporta TODOS los errores de sintaxis a
+            // la vez; los de tipos solo si la sintaxis está limpia.
+            let (module, syntax_errors) = marea_syntax::parse_recovering(&src);
+            if !syntax_errors.is_empty() {
+                for e in &syntax_errors {
+                    eprintln!("{}\n", e.render(&src));
+                }
+                let n = syntax_errors.len();
+                eprintln!("{} error{} de sintaxis", n, if n == 1 { "" } else { "es" });
+                ExitCode::FAILURE
+            } else {
                 let errores = marea_types::check(&module);
                 if errores.is_empty() {
                     println!("  {} tipa sin errores", path);
@@ -58,19 +68,11 @@ fn main() -> ExitCode {
                         eprintln!("{}\n", e.render(&src));
                     }
                     let n = errores.len();
-                    eprintln!(
-                        "{} error{} de tipos",
-                        n,
-                        if n == 1 { "" } else { "es" }
-                    );
+                    eprintln!("{} error{} de tipos", n, if n == 1 { "" } else { "es" });
                     ExitCode::FAILURE
                 }
             }
-            Err(e) => {
-                eprintln!("{}", e.render(&src));
-                ExitCode::FAILURE
-            }
-        },
+        }
         "build" => {
             let out_dir = args.get(3).map(String::as_str).unwrap_or("marea-out");
             match marea_syntax::parse(&src) {

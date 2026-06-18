@@ -52,26 +52,24 @@ fn type_mismatch_un_diagnostico_con_codigo() {
 }
 
 #[test]
-fn error_de_sintaxis_un_solo_diagnostico_sin_chequear_tipos() {
-    // Fuente con un error de sintaxis claro y, además, un error de tipos que
-    // NO debe reportarse (porque el chequeo de tipos no corre tras fallar el
-    // parseo): si corriera, habría más de un diagnóstico.
+fn error_de_sintaxis_no_corre_chequeo_de_tipos() {
+    // Con recuperación, el parser produce un módulo parcial y los errores de
+    // sintaxis; el chequeo de tipos NO corre mientras haya errores de sintaxis,
+    // así que NO debe aparecer ningún diagnóstico con código E_... (de tipos).
     let src = "fn mal( {\n    return 1 + \"x\";\n}\n";
     let analysis = analyze(src);
     assert!(
-        analysis.module.is_none(),
-        "un error de sintaxis no debe producir módulo"
+        !analysis.diagnostics.is_empty(),
+        "debe haber al menos un error de sintaxis"
     );
-    assert_eq!(
-        analysis.diagnostics.len(),
-        1,
-        "el parseo es fail-fast: exactamente un diagnóstico, hubo {:?}",
+    // Todos los diagnósticos son de sintaxis (sin código E_...): los de tipos
+    // no corren mientras la sintaxis esté rota.
+    assert!(
+        analysis.diagnostics.iter().all(|d| d.code.is_none()),
+        "no debe haber diagnósticos de tipos sobre un AST parcial: {:?}",
         analysis.diagnostics
     );
-    let diag = &analysis.diagnostics[0];
-    assert_eq!(diag.severity, Severity::Error);
-    // Los errores de sintaxis no llevan código `E_...`.
-    assert_eq!(diag.code, None);
+    assert!(analysis.diagnostics.iter().all(|d| d.severity == Severity::Error));
 }
 
 #[test]

@@ -285,3 +285,19 @@ fn anidamiento_profundo_no_paniquea() {
     let err = parse(&src).unwrap_err();
     assert!(err.message.contains("anidada"), "mensaje: {}", err.message);
 }
+
+#[test]
+fn recuperacion_reporta_varios_errores() {
+    use marea_syntax::parse_recovering;
+    // Dos funciones con errores + una válida: deben salir 2 errores y el item
+    // válido debe parsearse (módulo parcial).
+    let (module, errors) = parse_recovering(
+        "@client\nfn a() { let x = ; }\nfn b() { return 1 }\nfn c() -> Int { return 5; }",
+    );
+    assert!(errors.len() >= 2, "errores: {:?}", errors.iter().map(|e| &e.message).collect::<Vec<_>>());
+    // 'c' es válida y debe aparecer en el módulo parcial.
+    assert!(
+        module.items.iter().any(|it| matches!(it, Item::Fn(f) if f.name == "c")),
+        "el item válido 'c' debe parsearse"
+    );
+}
