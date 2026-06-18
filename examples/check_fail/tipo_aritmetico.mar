@@ -1,0 +1,9 @@
+// DEBE FALLAR: E_ARITH_TYPE
+//
+// Se suma un Int con un String. La aritmética exige operandos del mismo tipo
+// numérico (ambos Int o ambos Float), así que el verificador reporta el error
+// en vez de generar código inválido.
+
+fn mal(a: Int, b: String) -> Int {
+    return a + b;
+}

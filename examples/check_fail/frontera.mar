@@ -1,0 +1,15 @@
+// DEBE FALLAR: E_CALL_CLIENT_FROM_SERVER
+//
+// Una función @server intenta llamar a una @client. La frontera de red es
+// unidireccional: el cliente llama al servidor (el compilador genera el RPC),
+// pero el servidor NO puede invocar código de cliente.
+
+@client
+fn pintar(mensaje: String) {
+    render(mensaje);
+}
+
+@server
+fn procesar() {
+    pintar("hola desde el servidor");
+}

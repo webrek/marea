@@ -1,0 +1,22 @@
+// DEBE FALLAR: E_NON_EXHAUSTIVE_MATCH (y E_FIELD_ON_UNION dentro de la rama)
+//
+// 'buscar' devuelve la unión 'User | NotFound'. El 'match' sólo cubre la
+// variante NotFound y no tiene comodín, así que falta la variante User: el
+// verificador lo reporta como no exhaustivo.
+
+type User = Record;
+
+@server
+fn buscar(id: Int) -> User | NotFound {
+    let u = db.users.find(id);
+    return u;
+}
+
+@client
+fn ver(id: Int) {
+    reactive usuario = buscar(id);
+
+    match usuario {
+        NotFound => render("no encontrado"),
+    }
+}

@@ -1,0 +1,37 @@
+// Registros (structs) compilados a WebAssembly.
+//
+// Un 'type' registro define campos contiguos en memoria lineal: el campo 'i'
+// (en orden de declaración) vive en el offset 4*i. Construir un registro reserva
+// el bloque con el allocador bump y devuelve un puntero i32; leer 'x.campo' es
+// un i32.load en ese offset.
+//
+// Sólo se usan patrones que el backend resuelve sin inferencia de tipos:
+// un literal de registro directo, un 'let' con tipo anotado, o un parámetro
+// de tipo registro. Nada de acceso a miembro sobre el retorno de una llamada.
+
+type Punto = {
+    x: Int,
+    y: Int,
+};
+
+// Construye un registro y devuelve su puntero. El llamador lee los campos
+// desde la memoria exportada con un DataView.
+fn origen() -> Punto {
+    return Punto { x: 3, y: 7 };
+}
+
+// Lee un campo de un parámetro de tipo registro (offset 0).
+fn leerX(p: Punto) -> Int {
+    return p.x;
+}
+
+// Lee el segundo campo (offset 4).
+fn leerY(p: Punto) -> Int {
+    return p.y;
+}
+
+// 'let' con tipo anotado: el backend conoce el tipo de 'q' y resuelve q.x / q.y.
+fn sumaCampos() -> Int {
+    let q: Punto = Punto { x: 10, y: 20 };
+    return q.x + q.y;
+}

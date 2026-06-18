@@ -2,6 +2,7 @@
 //!
 //!   marea tokens <archivo.mar>   muestra los tokens del lexer
 //!   marea parse  <archivo.mar>   muestra el AST del parser
+//!   marea check  <archivo.mar>   verifica los tipos del módulo
 
 use std::process::ExitCode;
 
@@ -40,6 +41,30 @@ fn main() -> ExitCode {
             Ok(module) => {
                 println!("{:#?}", module);
                 ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("{}", e.render(&src));
+                ExitCode::FAILURE
+            }
+        },
+        "check" => match marea_syntax::parse(&src) {
+            Ok(module) => {
+                let errores = marea_types::check(&module);
+                if errores.is_empty() {
+                    println!("  {} tipa sin errores", path);
+                    ExitCode::SUCCESS
+                } else {
+                    for e in &errores {
+                        eprintln!("{}\n", e.render(&src));
+                    }
+                    let n = errores.len();
+                    eprintln!(
+                        "{} error{} de tipos",
+                        n,
+                        if n == 1 { "" } else { "es" }
+                    );
+                    ExitCode::FAILURE
+                }
             }
             Err(e) => {
                 eprintln!("{}", e.render(&src));
@@ -119,6 +144,7 @@ fn print_usage() {
     eprintln!("uso:");
     eprintln!("  marea tokens     <archivo.mar>        muestra los tokens");
     eprintln!("  marea parse      <archivo.mar>        muestra el AST");
+    eprintln!("  marea check      <archivo.mar>        verifica los tipos");
     eprintln!("  marea build      <archivo.mar> [dir]  transpila a TypeScript");
     eprintln!("  marea build-wasm <archivo.mar> [out]  compila a WebAssembly (WAT)");
 }

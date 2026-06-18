@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/marea-syntax",
+    "crates/marea-types",
     "crates/marea-codegen",
     "crates/marea-wasm",
     "crates/marea-cli",

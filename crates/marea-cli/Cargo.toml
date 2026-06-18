@@ -14,3 +14,4 @@ path = "src/main.rs"
 marea-syntax = { path = "../marea-syntax" }
 marea-codegen = { path = "../marea-codegen" }
 marea-wasm = { path = "../marea-wasm" }
+marea-types = { path = "../marea-types" }

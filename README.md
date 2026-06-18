@@ -44,10 +44,16 @@ Lo que ya funciona:
   en el cliente. El `@client` que la llama no nota la diferencia.
 - **Backend WebAssembly** (`marea-wasm`) que compila a WAT → `.wasm`, ejecutable
   en el navegador/Node **sin pasar por JS**. Soporta enteros/booleanos (`i32`),
-  `let`, `if`, aritmética/comparación/lógica, llamadas/recursión, y **cadenas
-  sobre memoria lineal** (literales en el *data section* + `concat` con allocador
-  bump y `memory.copy`).
-- **CLI** `marea` con `tokens`, `parse`, `build` y `build-wasm`.
+  `let`, `if`, aritmética/comparación/lógica, llamadas/recursión, **cadenas**
+  sobre memoria lineal, y **registros (structs)**: campos contiguos de 4 bytes,
+  `Punto { x: 1, y: 2 }` construye con el allocador bump y `x.campo` es un
+  `i32.load offset=4*i`.
+- **Verificador de tipos** (`marea-types`) expuesto como `marea check`:
+  resolución de nombres + tipos ligeros + **tipos de ubicación** (cruce de
+  frontera `@client`→`@server` válido; `@server`→`@client` prohibido) + la regla
+  estrella: un retorno unión `User | NotFound` es **opaco** y obliga a un `match`
+  exhaustivo (con *narrowing* en la rama). Acumula todos los errores.
+- **CLI** `marea` con `tokens`, `parse`, `check`, `build` y `build-wasm`.
 
 Lo que **todavía no** existe: chequeo de tipos y resolución de nombres robustos,
 el modelo reactivo en runtime, y WASM para tipos no numéricos (cadenas/structs,
@@ -94,10 +100,11 @@ wat2wasm /tmp/texto.wat -o /tmp/texto.wasm
 ```
 crates/
   marea-syntax/   # lexer, AST, parser, errores  (la biblioteca)
+  marea-types/    # verificador de tipos (nombres, tipos, ubicación, unión)
   marea-codegen/  # transpilador a TypeScript + runtime RPC
   marea-wasm/     # backend a WebAssembly (WAT)
   marea-cli/      # binario `marea`
-examples/         # programas .mar de muestra
+examples/         # programas .mar de muestra (+ check_fail/ que deben fallar)
 docs/GRAMMAR.md   # la gramática de v0
 ```
 
@@ -109,6 +116,10 @@ cargo run --bin marea -- tokens examples/user.mar
 
 # Ver el AST
 cargo run --bin marea -- parse examples/user.mar
+
+# Verificar los tipos (incluye la regla unión-opaca + match exhaustivo)
+cargo run --bin marea -- check examples/user.mar
+cargo run --bin marea -- check examples/check_fail/match_no_exhaustivo.mar  # falla a propósito
 
 # Transpilar a TypeScript y correr la demo de la frontera de red
 cargo run --bin marea -- build examples/saludo.mar /tmp/demo
@@ -129,8 +140,9 @@ cargo clippy --all-targets
 - [x] **v2** — Transpilación a TypeScript con cruce de frontera (`@server`/`@client`)
 - [x] **WASM (numérico)** — Backend a WebAssembly: i32, `let`, `if`, llamadas
 - [x] **WASM (cadenas)** — Strings sobre memoria lineal: literales + `concat`
-- [ ] **WASM (structs)** — Registros/listas sobre memoria + glue DOM/red
-- [ ] **v1.5** — Resolución de nombres + chequeo de tipos (con tipos de ubicación)
+- [x] **WASM (structs)** — Registros sobre memoria lineal: construir + leer campos
+- [x] **v1.5** — Verificador de tipos (`marea check`): nombres, tipos, ubicación, unión+match
+- [ ] **WASM (listas)** — Listas sobre memoria + glue DOM/red
 - [ ] **v3** — Modelo reactivo en runtime
 - [ ] **LSP** — Servidor de lenguaje para el editor
 
