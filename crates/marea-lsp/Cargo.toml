@@ -1,0 +1,23 @@
+[package]
+name = "marea-lsp"
+description = "Servidor de lenguaje (LSP) del lenguaje Marea."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "marea_lsp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "marea-lsp"
+path = "src/main.rs"
+
+[dependencies]
+marea-syntax = { path = "../marea-syntax" }
+marea-types = { path = "../marea-types" }
+lsp-server = { workspace = true }
+lsp-types = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
