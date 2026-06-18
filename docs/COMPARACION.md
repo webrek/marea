@@ -24,13 +24,13 @@ enormes. En todo lo que importa para enviar a producción hoy, los otros cuatro
 ganan. Aquí solo miramos **dónde vive cada frontera**: en el lenguaje, en un
 framework, o en tu propio pegamento.
 
-**Honestidad sobre la columna de Marea:** el ejemplo real (`examples/x-likes.mar`)
-corre las dos fronteras **de verdad** —el RPC cruza por HTTP, la reactividad son
-signals reales en el runtime— pero las renderiza a **consola**, no a un DOM
-reactivo en el navegador. Marea aún no tiene una demo web que cablee ambas
-fronteras en una página (su backend WASM/DOM es incipiente). Los otros cuatro son
-apps de navegador interactivas. Lo comparable es **cómo el lenguaje expresa la
-lógica servidor↔cliente + reactividad**, no el pulido de la UI.
+**Honestidad sobre la columna de Marea:** las dos fronteras corren **de verdad**
+y ahora en una **página real**: `marea build-app examples/web-likes.mar` genera
+una app de navegador donde dar like cruza la red por RPC y el estado `reactive`
+de módulo re-pinta el DOM solo (sin React, sin fetch a mano). Lo que sigue siendo
+incipiente es el pulido (un solo `#app` con `innerHTML`, sin diffing fino ni
+componentes). Lo comparable es **cómo el lenguaje expresa la lógica
+servidor↔cliente + reactividad**, no la madurez de la UI.
 
 > Los fragmentos de los stacks no-Marea son implementaciones **mínimas
 > idiomáticas** escritas a mano; no se ejecutaron en esta máquina. El conteo de
@@ -400,9 +400,9 @@ Esto sería deshonesto sin la otra cara:
 
 - **Madurez:** Marea es v0. Los otros cuatro corren en producción a escala. Marea
   no tiene auth, validación robusta, ni un ORM real con migraciones versionadas.
-- **UI de navegador:** los otros cuatro pintan un DOM interactivo. La demo de
-  Marea renderiza a **consola**; aún no cablea RPC + reactividad + DOM en una
-  página (su backend web es incipiente).
+- **UI de navegador:** `marea build-app` ya pinta un DOM interactivo con RPC +
+  reactividad, pero es **básico** (un `#app` con `innerHTML`, sin diffing fino,
+  componentes ni manejo de formularios); los otros cuatro tienen años de pulido.
 - **Ecosistema:** `npm`/`hex`/`crates`/`composer` tienen todo. Marea tiene su
   runtime y poco más.
 - **Drivers de BD probados:** los backends Postgres/MySQL/Mongo de Marea existen

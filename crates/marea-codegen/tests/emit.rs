@@ -160,6 +160,56 @@ fn web_entry_no_string_no_decodifica() {
     assert!(!glue.contains("decodificarCadena(exports.vista())"), "glue: {glue}");
 }
 
+// --- app web (marea build-app): RPC + reactivo + DOM ---
+
+fn app(src: &str) -> marea_codegen::AppProject {
+    marea_codegen::emit_app(&parse(src).unwrap())
+}
+
+#[test]
+fn app_reactiva_de_modulo_es_signal() {
+    // Una `reactive mut` de nivel superior se vuelve un signal de módulo.
+    let a = app("reactive mut posts = [];\n@client fn vista() -> String { let p = posts; return \"x\"; }");
+    assert!(a.client_js.contains("const posts = __signal([]);"), "{}", a.client_js);
+    // La vista lee el signal con .get().
+    assert!(a.client_js.contains("posts.get()"), "{}", a.client_js);
+}
+
+#[test]
+fn app_cliente_es_js_sin_tipos_ni_imports_node() {
+    let a = app("@server fn feed() -> List<Int> { return todos(); }\n@client fn main() { feed(); }");
+    // El cliente de navegador NO importa Node ni lleva anotaciones de tipo.
+    assert!(!a.client_js.contains("node:http"), "{}", a.client_js);
+    assert!(!a.client_js.contains(": number"), "{}", a.client_js);
+    assert!(!a.client_js.contains(": string"), "{}", a.client_js);
+    // El @server se vuelve un stub fetch al mismo origen.
+    assert!(a.client_js.contains("__rpc(\"feed\""), "{}", a.client_js);
+    assert!(a.client_js.contains("fetch(\"/__marea\""), "{}", a.client_js);
+}
+
+#[test]
+fn app_arranca_main_y_monta_vista() {
+    let a = app("@client fn vista() -> String { return \"hola\"; }\n@client fn main() { print(\"hi\"); }");
+    assert!(a.client_js.contains("await main();"), "{}", a.client_js);
+    assert!(a.client_js.contains("__mount(vista);"), "{}", a.client_js);
+    // Expone las funciones en window.marea para los onclick del HTML.
+    assert!(a.client_js.contains("globalThis.marea = {"), "{}", a.client_js);
+    // index.html tiene el contenedor #app y carga client.js como módulo.
+    assert!(a.index_html.contains("id=\"app\""), "{}", a.index_html);
+    assert!(a.index_html.contains("src=\"./client.js\""), "{}", a.index_html);
+}
+
+#[test]
+fn app_servidor_sirve_estaticos() {
+    let a = app("@server fn feed() -> List<Int> { return todos(); }");
+    // El runtime Node sirve estáticos (la app vive en el mismo origen que el RPC).
+    assert!(a.runtime.contains("__serveStatic"), "{}", a.runtime);
+    assert!(a.runtime.contains("MAREA_WEB_ROOT"), "{}", a.runtime);
+    // El entry deja el servidor vivo y fija la raíz estática.
+    assert!(a.serve.contains("startServer()"), "{}", a.serve);
+    assert!(a.serve.contains("MAREA_WEB_ROOT"), "{}", a.serve);
+}
+
 #[test]
 fn store_builtins_son_async_y_se_awaitan() {
     let p = build("@server fn g(x: Int) { guardar(x); } @server fn t() -> List<Int> { return todos(); }");

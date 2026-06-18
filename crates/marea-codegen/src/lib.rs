@@ -14,12 +14,25 @@ use std::collections::HashSet;
 /// El runtime TypeScript embebido (transporte RPC + builtins).
 pub const RUNTIME_TS: &str = include_str!("runtime.ts");
 
+/// El runtime de NAVEGADOR embebido (cliente RPC + reactivo + DOM, sin Node).
+pub const BROWSER_RT: &str = include_str!("browser.js");
+
 /// Los cuatro archivos TypeScript que produce el transpilador.
 pub struct Project {
     pub runtime: String,
     pub server: String,
     pub client: String,
     pub demo: String,
+}
+
+/// Los archivos de una app web completa (`marea build-app`): servidor Node
+/// (runtime + handlers + entry) y cliente de navegador (HTML + JS).
+pub struct AppProject {
+    pub runtime: String,    // runtime.ts — servidor Node (RPC + store + estáticos)
+    pub server: String,     // server.ts — handlers @server registrados
+    pub serve: String,      // serve.ts — arranca el servidor y lo deja vivo
+    pub client_js: String,  // client.js — cliente de navegador (RPC + reactivo + DOM)
+    pub index_html: String, // index.html — la página
 }
 
 /// Builtins provistos por el runtime; no se transpilan ni se registran.
@@ -100,6 +113,161 @@ fn fill_template(tpl: &str, subs: &[(&str, &str)]) -> String {
     }
     out
 }
+
+/// El runtime Node con los centinelas del store sustituidos (compartido por
+/// `emit` y `emit_app`).
+fn build_node_runtime(module: &Module) -> String {
+    let store_file = match store_signature(module) {
+        Some(sig) => format!("marea-store.{sig}.log"),
+        None => "marea-store.log".to_string(),
+    };
+    fill_template(
+        RUNTIME_TS,
+        &[
+            ("__MAREA_STORE_DEFAULT__", &store_file),
+            ("__MAREA_STORE_SCHEMA__", &store_schema_literal(module)),
+        ],
+    )
+}
+
+/// Genera una app web COMPLETA a partir de un módulo: servidor Node (runtime +
+/// handlers `@server` + entry) y cliente de navegador (HTML + JS con cliente RPC,
+/// núcleo reactivo y render al DOM). Las `reactive` de nivel superior se vuelven
+/// signals de módulo: el estado de la app vive ahí y la vista se re-pinta sola.
+pub fn emit_app(module: &Module) -> AppProject {
+    let mut remote = Vec::new();
+    let mut local = Vec::new();
+    for item in &module.items {
+        if let Item::Fn(f) = item {
+            if is_remote(f) {
+                remote.push(f);
+            } else {
+                local.push(f);
+            }
+        }
+    }
+    let top_reactives: Vec<&LetStmt> = module
+        .items
+        .iter()
+        .filter_map(|it| match it {
+            Item::Let(l) if l.reactive => Some(l),
+            _ => None,
+        })
+        .collect();
+    let reactive_names: HashSet<String> =
+        top_reactives.iter().map(|l| l.name.clone()).collect();
+
+    let serve = "// Generado por Marea — arranca el servidor web y lo deja vivo.\n\
+        import { startServer } from \"./runtime.ts\";\n\
+        import \"./server.ts\";\n\
+        // Sirve los estáticos (index.html, client.js) desde esta carpeta.\n\
+        process.env.MAREA_WEB_ROOT ??= import.meta.dirname;\n\
+        await startServer();\n\
+        console.log(\"[marea] app web en http://127.0.0.1:8787\");\n"
+        .to_string();
+
+    AppProject {
+        runtime: build_node_runtime(module),
+        server: emit_server(&remote),
+        serve,
+        client_js: emit_client_js(&remote, &local, &top_reactives, &reactive_names),
+        index_html: APP_HTML.to_string(),
+    }
+}
+
+/// El cliente de navegador: runtime de navegador + estado reactivo de módulo +
+/// stubs RPC + funciones `@client`/locales (como JS sin tipos) + arranque.
+fn emit_client_js(
+    remote: &[&FnDecl],
+    local: &[&FnDecl],
+    top_reactives: &[&LetStmt],
+    reactive: &HashSet<String>,
+) -> String {
+    let mut s = String::new();
+    s.push_str("// Generado por Marea — cliente de navegador (no editar).\n");
+    s.push_str(BROWSER_RT);
+    s.push_str("\n// --- programa ---\n");
+
+    // Estado reactivo de nivel superior: signal (mutable) o memo (derivado).
+    for l in top_reactives {
+        let init = emit_expr(&l.value, reactive);
+        if l.mutable {
+            s.push_str(&format!("const {} = __signal({init});\n", l.name));
+        } else {
+            s.push_str(&format!("const {} = __memo(() => {init});\n", l.name));
+        }
+    }
+    s.push('\n');
+
+    // Stubs RPC para las @server (cruzan la red por fetch al mismo origen).
+    for f in remote {
+        s.push_str(&emit_stub_js(f));
+    }
+    // Funciones @client y locales, como JS sin anotaciones de tipo.
+    for f in local {
+        s.push_str(&emit_fn_def_js(f, reactive));
+    }
+
+    // Arranque: expone las funciones en window.marea (para onclick), corre main()
+    // y monta vista() en el DOM si existen.
+    s.push_str("\n// --- arranque ---\n");
+    let exposed: Vec<String> = local.iter().map(|f| f.name.clone()).collect();
+    s.push_str(&format!("globalThis.marea = {{ {} }};\n", exposed.join(", ")));
+    if local.iter().any(|f| f.name == "main") {
+        s.push_str("await main();\n");
+    }
+    if local
+        .iter()
+        .any(|f| f.name == "vista" && f.params.is_empty())
+    {
+        s.push_str("__mount(vista);\n");
+    }
+    s
+}
+
+/// Una función @client/local como JS de navegador: sin tipos, parámetros por
+/// nombre, cuerpo idéntico al del transpilador (que ya no emite tipos).
+fn emit_fn_def_js(f: &FnDecl, reactive: &HashSet<String>) -> String {
+    let params: Vec<String> = f.params.iter().map(|p| p.name.clone()).collect();
+    let body = emit_block_inner(&f.body, 1, reactive);
+    format!(
+        "async function {}({}) {{\n{}\n}}\n",
+        f.name,
+        params.join(", "),
+        body
+    )
+}
+
+/// Stub RPC en JS de navegador para una @server: serializa y manda por fetch.
+fn emit_stub_js(f: &FnDecl) -> String {
+    let names: Vec<String> = f.params.iter().map(|p| p.name.clone()).collect();
+    format!(
+        "async function {name}({params}) {{\n  return await __rpc(\"{name}\", [{args}]);\n}}\n",
+        name = f.name,
+        params = names.join(", "),
+        args = names.join(", ")
+    )
+}
+
+/// La página de la app web: un #app donde se monta la vista reactiva.
+const APP_HTML: &str = "<!doctype html>\n\
+    <html lang=\"es\">\n\
+    <head>\n\
+    <meta charset=\"utf-8\">\n\
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+    <title>Marea — app web</title>\n\
+    <style>\n\
+      body { font-family: system-ui, sans-serif; margin: 2rem; color: #0b1b3a; }\n\
+      #app { font-size: 1.1rem; }\n\
+      button { cursor: pointer; }\n\
+    </style>\n\
+    </head>\n\
+    <body>\n\
+    <h1>Marea en el navegador 🌊</h1>\n\
+    <div id=\"app\">cargando…</div>\n\
+    <script type=\"module\" src=\"./client.js\"></script>\n\
+    </body>\n\
+    </html>\n";
 
 /// Firma del esquema del `store T;` del módulo (nombre + campos), para nombrar
 /// el archivo de persistencia. `None` si no hay store.

@@ -27,9 +27,46 @@ export function __register(name: string, fn: Handler): void {
 
 let __server: http.Server | null = null;
 
+// Sirve archivos estáticos de la app web (index.html, client.js) desde la raíz
+// dada por MAREA_WEB_ROOT (leída en cada petición, así el entry puede fijarla
+// tras los imports). Solo se activa si esa variable está puesta (el modo demo no
+// la usa). Evita el path traversal: solo nombres simples bajo la raíz.
+const __MIME: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+};
+function __serveStatic(req: http.IncomingMessage, res: http.ServerResponse): boolean {
+  const root = process.env.MAREA_WEB_ROOT ?? null;
+  if (!root || req.method !== "GET") return false;
+  let path = (req.url ?? "/").split("?")[0];
+  if (path === "/") path = "/index.html";
+  // Rechaza traversal: solo segmentos simples (sin '..', sin separadores extra).
+  if (path.includes("..") || /[^A-Za-z0-9._/-]/.test(path)) {
+    res.statusCode = 400;
+    res.end();
+    return true;
+  }
+  const file = root + path;
+  let data: Buffer;
+  try {
+    data = fs.readFileSync(file);
+  } catch {
+    res.statusCode = 404;
+    res.end();
+    return true;
+  }
+  const dot = path.lastIndexOf(".");
+  res.setHeader("content-type", __MIME[path.slice(dot)] ?? "application/octet-stream");
+  res.end(data);
+  return true;
+}
+
 export function startServer(): Promise<void> {
   return new Promise((resolve) => {
     __server = http.createServer((req, res) => {
+      if (__serveStatic(req, res)) return;
       if (req.method !== "POST" || req.url !== "/__marea") {
         res.statusCode = 404;
         res.end();

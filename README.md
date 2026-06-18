@@ -214,6 +214,35 @@ prototipo. Los identificadores SQL se comillan por dialecto.
 | `mysql`    | `mysql2/promise`| `npm i mysql2`     | cadena de conexión         |
 | `mongodb`  | `mongodb`       | `npm i mongodb`    | cadena de conexión         |
 
+## App web de verdad: las dos fronteras tocando el DOM
+
+`marea build-app <archivo.mar> [dir]` genera una **app web completa** donde los
+dos pilares de Marea trabajan juntos en una página: las `@server` se llaman por
+RPC desde el navegador (frontera de **red**) y el estado `reactive` de módulo
+re-pinta el DOM solo cuando cambia (frontera del **tiempo**). Sin React, sin
+fetch a mano.
+
+```marea
+reactive mut posts = [];                  // estado de app (signal de módulo)
+
+@server fn like(i: Int) { /* … persiste … */ }
+@server fn feed() -> List<Post> { return todos(); }
+
+@client fn vista() -> String { /* lee 'posts' y devuelve HTML */ }
+@client fn darLike(i: Int) { like(i); posts = feed(); }  // RPC → reactivo → DOM
+```
+
+```sh
+marea build-app examples/web-likes.mar /tmp/app
+node /tmp/app/serve.ts        # abre http://127.0.0.1:8787
+```
+
+Genera `index.html` + `client.js` (navegador: cliente RPC + núcleo reactivo +
+render al DOM, **sin Node ni tipos**) y `runtime.ts`/`server.ts`/`serve.ts`
+(servidor Node: RPC + store + estáticos en el **mismo origen**, sin CORS). Una
+`reactive mut` de nivel superior es el estado compartido entre la vista y los
+manejadores; `vista()` se monta en un `effect` que re-pinta `#app` al cambiar.
+
 ## Hoja de ruta
 
 - [x] **v0** — Lexer + AST + Parser + CLI
@@ -229,6 +258,8 @@ prototipo. Los identificadores SQL se comillan por dialecto.
 - [x] **glue DOM (web)** — `marea build-web` genera una app WASM para el navegador
 - [x] **Persistencia** — `store T;` con backends intercambiables: archivo JSON,
       SQLite, PostgreSQL, MySQL y MongoDB (elegidos por `MAREA_DB`, sin cambiar el `.mar`)
+- [x] **App web (RPC + reactivo + DOM)** — `marea build-app` genera una página real
+      donde las `@server` se llaman por RPC y el estado `reactive` de módulo re-pinta el DOM
 
 ## Licencia
 

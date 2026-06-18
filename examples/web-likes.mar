@@ -1,0 +1,79 @@
+// X-mini como APP WEB de verdad: las dos fronteras de Marea tocando el DOM.
+//
+//   Frontera de RED:    publicar/like/feed son @server; el @client los llama por
+//                       RPC como si fueran locales (el compilador genera el fetch).
+//   Frontera del TIEMPO: 'posts' es estado reactivo de MÓDULO; la vista lo lee y
+//                       se re-pinta sola cuando cambia. Sin React, sin fetch a mano.
+//
+//   Construir y correr:
+//     marea build-app examples/web-likes.mar /tmp/app
+//     node /tmp/app/serve.ts        # abre http://127.0.0.1:8787
+
+type Post = { autor: String, texto: String, likes: Int };
+
+store Post;
+
+// --- servidor: el estado vive y persiste aquí ---
+@server
+fn publicar(autor: String, texto: String) {
+    guardar(Post { autor: autor, texto: texto, likes: 0 });
+}
+
+@server
+fn like(i: Int) {
+    let p = todos()[i];
+    actualizar(i, Post { autor: p.autor, texto: p.texto, likes: p.likes + 1 });
+}
+
+@server
+fn feed() -> List<Post> {
+    return todos();
+}
+
+// --- estado reactivo de la app (a nivel de módulo) ---
+reactive mut posts = [];
+
+// --- render: cada post a HTML; el botón llama a marea.darLike(i) ---
+fn fila(p: Post, i: Int) -> String {
+    return concat(
+        concat(
+            concat("<li>", concat(p.autor, concat(": ", p.texto))),
+            concat("  (", concat(aTexto(p.likes), " likes)  "))
+        ),
+        concat(
+            concat("<button onclick=\"marea.darLike(", aTexto(i)),
+            ")\">like</button></li>"
+        )
+    );
+}
+
+fn filas(ps: List<Post>, i: Int) -> String {
+    if i < len(ps) {
+        return concat(fila(ps[i], i), filas(ps, i + 1));
+    }
+    return "";
+}
+
+// La vista lee 'posts' (reactiva) en su parte síncrona y devuelve el HTML.
+@client
+fn vista() -> String {
+    let ps = posts;
+    return concat("<ul>", concat(filas(ps, 0), "</ul>"));
+}
+
+// Acción de UI: cruza la red (like), recarga el feed y reasigna 'posts'.
+// La reasignación dispara el re-pintado del DOM por sí sola.
+@client
+fn darLike(i: Int) {
+    like(i);
+    posts = feed();
+}
+
+@client
+fn main() {
+    // Siembra un par de posts la primera vez (idempotente para la demo no, pero
+    // basta para ver algo). Luego carga el feed al estado reactivo.
+    publicar("ada", "Primer post en Marea");
+    publicar("grace", "El store es reactivo en el navegador");
+    posts = feed();
+}

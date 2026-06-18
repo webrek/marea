@@ -51,6 +51,7 @@ struct FnSig {
 pub fn check(module: &Module) -> Vec<TypeError> {
     let mut checker = Checker::new();
     checker.collect(module);
+    checker.collect_globals(module);
     checker.check_bodies(module);
     checker.errors
 }
@@ -59,6 +60,7 @@ pub fn check(module: &Module) -> Vec<TypeError> {
 pub fn check_with_boundaries(module: &Module) -> (Vec<TypeError>, Vec<BoundaryCrossing>) {
     let mut checker = Checker::new();
     checker.collect(module);
+    checker.collect_globals(module);
     checker.check_bodies(module);
     (checker.errors, checker.crossings)
 }
@@ -74,6 +76,9 @@ struct Checker {
     /// Tipo de elemento del store del servidor (Fase A), declarado con `store T;`.
     /// Tipa `guardar(T)` y `todos() -> List<T>`. `None` si no se declaró.
     store_elem: Option<Ty>,
+    /// Variables de nivel superior (`let`/`reactive` de módulo) y su mutabilidad.
+    /// Visibles desde cualquier función; son el estado reactivo de la app.
+    globals: HashMap<String, (Ty, bool)>,
     /// Pila de scopes léxicos de variables (Fase B). El bool es la mutabilidad
     /// (`true` si se declaró `mut`/`reactive`); se usa para rechazar reasignar
     /// un binding inmutable.
@@ -93,6 +98,7 @@ impl Checker {
             aliases: HashMap::new(),
             cyclic: std::collections::HashSet::new(),
             store_elem: None,
+            globals: HashMap::new(),
             scopes: Vec::new(),
             current_location: None,
             current_return: Ty::Unit,
@@ -103,6 +109,29 @@ impl Checker {
 
     fn error(&mut self, e: TypeError) {
         self.errors.push(e);
+    }
+
+    /// Registra las variables de nivel superior (`let`/`reactive` de módulo) como
+    /// globales, tipándolas por su anotación o por su inicializador. Corre tras
+    /// `collect` (necesita fns/alias/store ya resueltos) y antes de los cuerpos.
+    fn collect_globals(&mut self, module: &Module) {
+        for item in &module.items {
+            if let Item::Let(l) = item {
+                // El inicializador se tipa en un scope vacío (una global solo puede
+                // referir funciones, builtins y literales, no variables locales).
+                self.scopes = vec![HashMap::new()];
+                self.current_location = None;
+                let ty = match &l.ty {
+                    Some(t) => {
+                        self.validate_type_exists(t);
+                        self.ty_from_syntax(t)
+                    }
+                    None => self.check_expr(&l.value),
+                };
+                self.globals.insert(l.name.clone(), (ty, l.mutable));
+            }
+        }
+        self.scopes = Vec::new();
     }
 
     // ===================== FASE A: recolección global =====================
@@ -421,6 +450,10 @@ impl Checker {
                         break;
                     }
                 }
+                // Si no es una variable local, puede ser una global de módulo.
+                if target.is_none() {
+                    target = self.globals.get(name).cloned();
+                }
                 match target {
                     None => self.error(TypeError::new(
                         "E_UNRESOLVED_NAME",
@@ -491,6 +524,10 @@ impl Checker {
             if let Some((ty, _)) = scope.get(name) {
                 return ty.clone();
             }
+        }
+        // Variable global (estado reactivo de módulo).
+        if let Some((ty, _)) = self.globals.get(name) {
+            return ty.clone();
         }
         // Función declarada.
         if let Some(sig) = self.fns.get(name) {

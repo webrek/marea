@@ -119,12 +119,52 @@ fn main() -> ExitCode {
                 }
             }
         }
+        "build-app" => {
+            let out_dir = args.get(3).map(String::as_str).unwrap_or("marea-app");
+            match marea_syntax::parse(&src) {
+                Ok(module) => build_app(&module, out_dir),
+                Err(e) => {
+                    eprintln!("{}", e.render(&src));
+                    ExitCode::FAILURE
+                }
+            }
+        }
         other => {
             eprintln!("error: comando desconocido '{}'", other);
             print_usage();
             ExitCode::FAILURE
         }
     }
+}
+
+fn build_app(module: &marea_syntax::Module, out_dir: &str) -> ExitCode {
+    let app = marea_codegen::emit_app(module);
+    if let Err(e) = std::fs::create_dir_all(out_dir) {
+        eprintln!("error: no se pudo crear '{}': {}", out_dir, e);
+        return ExitCode::FAILURE;
+    }
+    let files = [
+        ("runtime.ts", app.runtime),
+        ("server.ts", app.server),
+        ("serve.ts", app.serve),
+        ("client.js", app.client_js),
+        ("index.html", app.index_html),
+    ];
+    for (name, contents) in files {
+        let path = format!("{}/{}", out_dir, name);
+        if let Err(e) = std::fs::write(&path, contents) {
+            eprintln!("error: no se pudo escribir '{}': {}", path, e);
+            return ExitCode::FAILURE;
+        }
+        println!("  escrito {}", path);
+    }
+    println!(
+        "\nlisto. Arranca la app web (servidor + estáticos en el mismo origen):\n  \
+         node {}/serve.ts\n  \
+         (abre http://127.0.0.1:8787 en el navegador)",
+        out_dir
+    );
+    ExitCode::SUCCESS
 }
 
 fn build(module: &marea_syntax::Module, out_dir: &str) -> ExitCode {
@@ -206,4 +246,5 @@ fn print_usage() {
     eprintln!("  marea build      <archivo.mar> [dir]  transpila a TypeScript");
     eprintln!("  marea build-wasm <archivo.mar> [out]  compila a WebAssembly (WAT)");
     eprintln!("  marea build-web  <archivo.mar> [dir]  genera una app web (WASM + DOM)");
+    eprintln!("  marea build-app  <archivo.mar> [dir]  app web completa (RPC + reactivo + DOM)");
 }

@@ -590,3 +590,33 @@ fn atexto_de_no_escalar_es_error() {
     let errs = check_src("type P = { a: Int };\n@client fn f() { let s = aTexto(P { a: 1 }); print(s); }");
     assert!(has_code(&errs, "E_ARG_TYPE"), "códigos: {:?}", codes(&errs));
 }
+
+// ===================== estado reactivo de nivel superior =====================
+
+#[test]
+fn reactiva_de_modulo_se_resuelve_en_funciones() {
+    // Una `reactive mut` de nivel superior es visible desde las funciones y se
+    // le puede reasignar (es mutable).
+    let errs = check_src(
+        "reactive mut n = 0;\n\
+         @client fn leer() -> Int { return n; }\n\
+         @client fn subir() { n = n + 1; }",
+    );
+    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+}
+
+#[test]
+fn reactiva_de_modulo_derivada_es_inmutable() {
+    // `reactive` (sin mut) de módulo es una derivada de solo lectura.
+    let errs = check_src(
+        "reactive base = 10;\n@client fn f() { base = 1; }",
+    );
+    assert!(has_code(&errs, "E_ASSIGN_IMMUTABLE"), "códigos: {:?}", codes(&errs));
+}
+
+#[test]
+fn variable_inexistente_sigue_siendo_error() {
+    // Sin declaración de módulo, el nombre sigue sin resolverse.
+    let errs = check_src("@client fn f() -> Int { return fantasma; }");
+    assert!(has_code(&errs, "E_UNRESOLVED_NAME"), "códigos: {:?}", codes(&errs));
+}
