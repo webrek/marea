@@ -119,6 +119,8 @@ crates/
 examples/         # programas .mar de muestra (+ check_fail/ que deben fallar)
 docs/GRAMMAR.md   # la gramática de v0
 docs/COMPARACION.md  # la misma app en 5 stacks (Marea vs React/tRPC, LiveView, Leptos, Livewire)
+docs/BENCH.md        # tiempos: compilación + kernel CPU (Marea→WASM ≈ nativo)
+scripts/bench.sh     # el benchmark de tiempos, reproducible
 ```
 
 ¿Por qué un lenguaje nuevo y no una librería? La respuesta en código está en
