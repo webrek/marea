@@ -181,15 +181,27 @@ impl Parser {
             TokenKind::Let | TokenKind::Reactive if location.is_none() => {
                 Ok(Item::Let(self.parse_let()?))
             }
+            TokenKind::Store if location.is_none() => self.parse_store(),
             _ if location.is_some() => Err(SyntaxError::new(
                 "los atributos de ubicación (@server/@client/@edge) solo aplican a funciones",
                 self.peek().span,
             )),
             _ => Err(SyntaxError::new(
-                "se esperaba un elemento de nivel superior: fn, type o let",
+                "se esperaba un elemento de nivel superior: fn, type, let o store",
                 self.peek().span,
             )),
         }
+    }
+
+    /// `store Post;` — declara el tipo de elemento del store del servidor.
+    fn parse_store(&mut self) -> PResult<Item> {
+        let kw = self.expect(&TokenKind::Store, "'store'")?;
+        let ty = self.parse_type()?;
+        let semi = self.expect(&TokenKind::Semicolon, "';' al final de 'store'")?;
+        Ok(Item::Store {
+            ty,
+            span: kw.span.to(semi.span),
+        })
     }
 
     fn parse_location(&mut self) -> PResult<Option<Location>> {

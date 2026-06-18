@@ -7,6 +7,9 @@ type Post = {
     texto: String,
 };
 
+// El store del servidor guarda Posts: tipa 'guardar(Post)' y 'todos() -> List<Post>'.
+store Post;
+
 // Cada 'publicar' es un cruce de frontera; el servidor acumula el post.
 @server
 fn publicar(autor: String, texto: String) {

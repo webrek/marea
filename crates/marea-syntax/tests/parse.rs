@@ -315,3 +315,9 @@ fn recuperacion_no_descarta_item_valido() {
         module.items.iter().filter_map(|it| match it { Item::Fn(f) => Some(&f.name), _ => None }).collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn parse_store() {
+    let m = parse("store Post;").unwrap();
+    assert!(matches!(&m.items[0], Item::Store { .. }));
+}

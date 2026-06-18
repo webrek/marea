@@ -520,6 +520,7 @@ fn lista_heterogenea_es_error() {
 fn store_del_servidor_tipa() {
     let errs = check_src(
         "type P = { t: String };\n\
+         store P;\n\
          @server fn pub2(t: String) { guardar(P { t: t }); }\n\
          @server fn feed() -> List<P> { return todos(); }",
     );
@@ -538,4 +539,23 @@ fn estado_fuera_de_server_es_error() {
 fn estado_en_server_es_valido() {
     let errs = check_src("type P = { t: String };\n@server fn s() -> List<P> { guardar(P { t: \"a\" }); return todos(); }");
     assert!(!has_code(&errs, "E_STATE_OFF_SERVER"), "códigos: {:?}", codes(&errs));
+}
+
+#[test]
+fn store_tipado_cierra_el_lavado_de_tipos() {
+    // guardar un Int cuando el store es Post -> error (antes 'lavaba' tipos).
+    let errs = check_src("type Post = { a: String };\nstore Post;\n@server fn m() -> List<Post> { guardar(99); return todos(); }");
+    assert!(has_code(&errs, "E_ARG_TYPE"), "códigos: {:?}", codes(&errs));
+}
+
+#[test]
+fn guardar_sin_store_declarado_es_error() {
+    let errs = check_src("@server fn f() -> List<Int> { guardar(1); return todos(); }");
+    assert!(has_code(&errs, "E_NO_STORE"), "códigos: {:?}", codes(&errs));
+}
+
+#[test]
+fn store_tipado_correcto_no_es_error() {
+    let errs = check_src("type Post = { a: String };\nstore Post;\n@server fn pub(a: String) { guardar(Post { a: a }); }\n@server fn feed() -> List<Post> { return todos(); }");
+    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
 }

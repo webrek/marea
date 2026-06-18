@@ -71,6 +71,9 @@ struct Checker {
     /// Alias detectados como cíclicos (Fase A): cortan la resolución recursiva
     /// en Fase B para no desbordar la pila.
     cyclic: std::collections::HashSet<String>,
+    /// Tipo de elemento del store del servidor (Fase A), declarado con `store T;`.
+    /// Tipa `guardar(T)` y `todos() -> List<T>`. `None` si no se declaró.
+    store_elem: Option<Ty>,
     /// Pila de scopes léxicos de variables (Fase B). El bool es la mutabilidad
     /// (`true` si se declaró `mut`/`reactive`); se usa para rechazar reasignar
     /// un binding inmutable.
@@ -89,6 +92,7 @@ impl Checker {
             fns: HashMap::new(),
             aliases: HashMap::new(),
             cyclic: std::collections::HashSet::new(),
+            store_elem: None,
             scopes: Vec::new(),
             current_location: None,
             current_return: Ty::Unit,
@@ -107,6 +111,8 @@ impl Checker {
         // Spans de la primera declaración de cada nombre, para notas de duplicado.
         let mut fn_spans: HashMap<String, Span> = HashMap::new();
         let mut type_spans: HashMap<String, Span> = HashMap::new();
+        // Tipo sintáctico del `store T;` (se resuelve tras registrar los alias).
+        let mut store_decl: Option<&Type> = None;
 
         for item in &module.items {
             match item {
@@ -156,6 +162,17 @@ impl Checker {
                     }
                 }
                 Item::Let(_) => {}
+                Item::Store { ty, span } => {
+                    if store_decl.is_some() {
+                        self.error(TypeError::new(
+                            "E_DUPLICATE_STORE",
+                            "el store del servidor ya fue declarado",
+                            *span,
+                        ));
+                    } else {
+                        store_decl = Some(ty);
+                    }
+                }
             }
         }
 
@@ -163,6 +180,12 @@ impl Checker {
         // registrar firmas: el registro llama a ty_from_syntax, que sin la marca
         // de ciclo recurriría infinitamente (stack overflow).
         self.detect_cyclic_types(&type_spans);
+
+        // Resuelve el tipo del store ahora que los alias ya están registrados.
+        if let Some(ty) = store_decl {
+            self.validate_type_exists(ty);
+            self.store_elem = Some(self.ty_from_syntax(ty));
+        }
 
         // Registra las firmas (solo la primera de cada nombre).
         for item in &module.items {
@@ -269,7 +292,7 @@ impl Checker {
                     }
                     self.scopes.pop();
                 }
-                Item::Type(_) => {}
+                Item::Type(_) | Item::Store { .. } => {}
             }
         }
     }
@@ -604,27 +627,74 @@ impl Checker {
         }
     }
 
-    fn check_call(&mut self, callee: &Expr, args: &[Expr], span: Span) -> Ty {
-        // Los builtins de ESTADO (`guardar`/`todos`) operan sobre el store del
-        // servidor; sólo valen dentro de una función @server (o @edge). Desde
-        // @client o una función sin ubicación tocarían el store del proceso
-        // equivocado (cliente ≠ servidor), con divergencia silenciosa. Hay que
-        // envolverlos en una fn @server y llamarla por RPC.
-        if let Expr::Ident { name, .. } = callee {
-            if (name == "guardar" || name == "todos")
-                && !matches!(
-                    self.current_location,
-                    Some(Location::Server) | Some(Location::Edge)
-                )
-            {
+    /// Chequea `guardar(x)` y `todos()` contra el store tipado (`store T;`):
+    /// sólo en @server/@edge, requieren la declaración, y `guardar` exige que su
+    /// argumento sea del tipo del store; `todos()` devuelve `List<T>`.
+    fn check_state_builtin(&mut self, name: &str, args: &[Expr], span: Span) -> Ty {
+        if !matches!(
+            self.current_location,
+            Some(Location::Server) | Some(Location::Edge)
+        ) {
+            self.error(TypeError::new(
+                "E_STATE_OFF_SERVER",
+                format!(
+                    "'{name}' (estado del servidor) sólo puede usarse en una función @server; \
+                     envuélvelo en una y llámala por RPC"
+                ),
+                span,
+            ));
+        }
+        let arg_tys: Vec<Ty> = args.iter().map(|a| self.check_expr(a)).collect();
+
+        let elem = match &self.store_elem {
+            Some(t) => t.clone(),
+            None => {
                 self.error(TypeError::new(
-                    "E_STATE_OFF_SERVER",
-                    format!(
-                        "'{name}' (estado del servidor) sólo puede usarse en una función @server; \
-                         envuélvelo en una y llámala por RPC"
-                    ),
+                    "E_NO_STORE",
+                    format!("'{name}' requiere declarar el tipo del store con 'store T;'"),
                     span,
                 ));
+                Ty::Unknown
+            }
+        };
+
+        if name == "guardar" {
+            if arg_tys.len() != 1 {
+                self.error(TypeError::new(
+                    "E_ARITY",
+                    format!("'guardar' espera 1 argumento, se recibieron {}", arg_tys.len()),
+                    span,
+                ));
+            } else if !self.is_subtype(&arg_tys[0], &elem) {
+                self.error(TypeError::new(
+                    "E_ARG_TYPE",
+                    format!(
+                        "se guarda '{}' pero el store es de '{}'",
+                        arg_tys[0].display(),
+                        elem.display()
+                    ),
+                    args[0].span(),
+                ));
+            }
+            Ty::Unit
+        } else {
+            if !arg_tys.is_empty() {
+                self.error(TypeError::new(
+                    "E_ARITY",
+                    "'todos' no recibe argumentos".to_string(),
+                    span,
+                ));
+            }
+            Ty::List(Box::new(elem))
+        }
+    }
+
+    fn check_call(&mut self, callee: &Expr, args: &[Expr], span: Span) -> Ty {
+        // Los builtins de ESTADO (`guardar`/`todos`) se chequean aparte: contra
+        // el tipo del store y sólo dentro de @server/@edge.
+        if let Expr::Ident { name, .. } = callee {
+            if name == "guardar" || name == "todos" {
+                return self.check_state_builtin(name, args, span);
             }
         }
 

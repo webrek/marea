@@ -17,6 +17,9 @@ pub enum Item {
     Fn(FnDecl),
     Type(TypeDecl),
     Let(LetStmt),
+    /// Declara el tipo de elemento del store del servidor: `store Post;`.
+    /// Tipa los builtins de estado `guardar(T)` y `todos() -> List<T>`.
+    Store { ty: Type, span: Span },
 }
 
 /// Dónde se ejecuta una función. El compilador genera el cruce de frontera

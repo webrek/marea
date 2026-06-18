@@ -119,22 +119,24 @@ pub fn collect_symbols(module: &Module) -> Vec<Symbol> {
     module
         .items
         .iter()
-        .map(|item| match item {
-            Item::Fn(f) => Symbol {
+        .filter_map(|item| match item {
+            Item::Fn(f) => Some(Symbol {
                 class: SymbolClass::Fn,
                 name: f.name.clone(),
                 span: f.span,
-            },
-            Item::Type(t) => Symbol {
+            }),
+            Item::Type(t) => Some(Symbol {
                 class: SymbolClass::Type,
                 name: t.name.clone(),
                 span: t.span,
-            },
-            Item::Let(l) => Symbol {
+            }),
+            Item::Let(l) => Some(Symbol {
                 class: SymbolClass::Let,
                 name: l.name.clone(),
                 span: l.span,
-            },
+            }),
+            // El `store T;` no aporta un símbolo con nombre al esquema.
+            Item::Store { .. } => None,
         })
         .collect()
 }
@@ -219,6 +221,14 @@ pub fn find_node_at(module: &Module, offset: usize) -> Option<Node<'_>> {
                     return Some(Node::Item(item));
                 }
             }
+            Item::Store { ty, span } => {
+                if contains(*span, offset) {
+                    if let Some(n) = find_in_type(ty, offset) {
+                        return Some(n);
+                    }
+                    return Some(Node::Item(item));
+                }
+            }
         }
     }
     None
@@ -244,6 +254,7 @@ impl Node<'_> {
                 Item::Fn(f) => f.span,
                 Item::Type(t) => t.span,
                 Item::Let(l) => l.span,
+                Item::Store { span, .. } => *span,
             },
             Node::Stmt(s) => stmt_span(s),
             Node::Expr(e) => e.span(),
