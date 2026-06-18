@@ -282,9 +282,10 @@ export function __index(xs: unknown[], i: number): unknown {
 // los backends comparten la misma interfaz, así que el código .mar no cambia al
 // pasar de un archivo JSON a una base de datos real.
 //
-// Modelo: el arreglo en memoria es la copia de trabajo (índices estables); cada
-// mutación lo persiste completo (saveAll). Simple y correcto; una versión de
-// producción usaría operaciones incrementales por id.
+// Modelo: el arreglo en memoria es la copia de trabajo con índices posicionales
+// estables; un arreglo paralelo (__ids) mapea cada posición a un id persistente.
+// Cada mutación toca SOLO su fila en el backend (insert/update/remove por id) —
+// O(1) por operación, sin reescribir el store completo en cada cambio.
 
 interface __Schema {
   table: string;
@@ -292,9 +293,17 @@ interface __Schema {
 }
 const __STORE_SCHEMA: __Schema | null = __MAREA_STORE_SCHEMA__;
 
+// Una fila persistida: id estable + el valor del .mar. El id desacopla la
+// identidad en almacenamiento del índice posicional que ve el lenguaje.
+interface __Row {
+  id: number;
+  item: unknown;
+}
 interface __Backend {
-  load(): Promise<unknown[]>;
-  saveAll(items: unknown[]): Promise<void>;
+  load(): Promise<__Row[]>;
+  insert(id: number, item: unknown): Promise<void>;
+  update(id: number, item: unknown): Promise<void>;
+  remove(id: number): Promise<void>;
 }
 
 // Cuando el store no guarda registros (p.ej. `store Int;` o `store String;`) el
@@ -347,30 +356,75 @@ function __quoteId(name: string, q: string): string {
 function __cols(q: string): string {
   return (__STORE_SCHEMA as __Schema).columns.map((c) => __quoteId(c.name, q)).join(", ");
 }
+function __colList(q: string): string[] {
+  return (__STORE_SCHEMA as __Schema).columns.map((c) => __quoteId(c.name, q));
+}
 function __table(q: string): string {
   return __quoteId((__STORE_SCHEMA as __Schema).table, q);
 }
+// Columna interna de id (clave primaria). Convención '__id', como '__doc': el
+// lexer permite el nombre, pero un campo de usuario así llamado es improbable.
+function __idCol(q: string): string {
+  return __quoteId("__id", q);
+}
 function __createSql(q: string): string {
   const s = __STORE_SCHEMA as __Schema;
-  const defs = s.columns.map((c) => `${__quoteId(c.name, q)} ${__sqlType(c.kind)}`).join(", ");
+  const defs = [
+    `${__idCol(q)} INTEGER PRIMARY KEY`,
+    ...s.columns.map((c) => `${__quoteId(c.name, q)} ${__sqlType(c.kind)}`),
+  ].join(", ");
   return `CREATE TABLE IF NOT EXISTS ${__table(q)} (${defs})`;
 }
 
-// Aparta un store corrupto a un archivo '.corrupt' y devuelve un store vacío,
-// para no perder los datos originales ni dejar caer la app entera.
-function __quarantine(file: string, motivo: string): unknown[] {
-  try {
-    fs.renameSync(file, `${file}.corrupt`);
-  } catch {
-    /* si no se puede renombrar, seguimos igual con store vacío */
-  }
-  console.error(`[marea] store corrupto (${motivo}) en ${file}; apartado a ${file}.corrupt`);
-  return [];
+// Constructores de SQL incremental, parametrizados por dialecto (`q` = comilla de
+// identificador, `p(i)` = i-ésimo placeholder: '?' en sqlite/mysql, '$i' en pg).
+function __selectSql(q: string): string {
+  return `SELECT ${__idCol(q)}, ${__cols(q)} FROM ${__table(q)} ORDER BY ${__idCol(q)}`;
+}
+function __insertSql(q: string, p: (i: number) => string): string {
+  const cols = [__idCol(q), ...__colList(q)];
+  const vals = cols.map((_, i) => p(i + 1)).join(", ");
+  return `INSERT INTO ${__table(q)} (${cols.join(", ")}) VALUES (${vals})`;
+}
+function __updateSql(q: string, p: (i: number) => string): string {
+  const cols = __colList(q);
+  const sets = cols.map((c, i) => `${c} = ${p(i + 1)}`).join(", ");
+  return `UPDATE ${__table(q)} SET ${sets} WHERE ${__idCol(q)} = ${p(cols.length + 1)}`;
+}
+function __deleteSql(q: string, p: (i: number) => string): string {
+  return `DELETE FROM ${__table(q)} WHERE ${__idCol(q)} = ${p(1)}`;
+}
+// Fila SQL -> __Row. __fromRow ignora la columna __id (solo lee las del esquema).
+function __rowFrom(row: any): __Row {
+  return { id: Number(row.__id), item: __fromRow(row) };
 }
 
-// --- backend: archivo JSON (por defecto, cero dependencias) ---
+// --- backend: archivo (por defecto, cero dependencias) ---
+//
+// Formato: LOG append-only JSONL, una línea por mutación {op,id,item}. Escribir
+// es O(1) (un append pequeño y atómico) en vez de reserializar el store entero
+// en cada cambio; al cargar se reproduce el log. Se compacta al cargar si creció
+// mucho respecto a las filas vivas, así no crece sin límite entre reinicios.
 function __fileBackend(): __Backend {
   const file = process.env.MAREA_STORE ?? "__MAREA_STORE_DEFAULT__";
+  // Append síncrono de UNA línea: O(1) y atómico para escrituras pequeñas; no
+  // congela el event-loop como sí lo haría volcar todo el store.
+  function append(op: object): void {
+    fs.appendFileSync(file, JSON.stringify(op) + "\n");
+  }
+  // Reescribe el log compactado (solo inserts de las filas vivas), atómicamente.
+  function compact(rows: __Row[]): void {
+    const tmp = `${file}.${process.pid}.tmp`;
+    const body = rows.map((r) => JSON.stringify({ op: "i", id: r.id, item: r.item })).join("\n");
+    const fd = fs.openSync(tmp, "w");
+    try {
+      fs.writeFileSync(fd, body.length ? body + "\n" : "");
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(tmp, file);
+  }
   return {
     async load() {
       let data: string;
@@ -379,32 +433,36 @@ function __fileBackend(): __Backend {
       } catch {
         return [];
       }
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(data);
-      } catch {
-        // Degradar en vez de morir: apartamos el archivo corrupto y seguimos en
-        // limpio, dejando el original para inspección.
-        return __quarantine(file, "JSON inválido");
+      // Map preserva el orden de inserción: un 'u' sobre una clave existente
+      // conserva su posición; 'i' agrega al final; 'd' la quita.
+      const live = new Map<number, unknown>();
+      let ops = 0;
+      for (const ln of data.split("\n")) {
+        if (!ln) continue;
+        let op: any;
+        try {
+          op = JSON.parse(ln);
+        } catch {
+          // Línea corrupta (p.ej. el último append truncado por un crash): se
+          // ignora y el resto del log sigue siendo válido.
+          continue;
+        }
+        ops++;
+        if (op.op === "d") live.delete(op.id);
+        else live.set(op.id, op.item); // 'i' o 'u': última escritura gana
       }
-      if (!Array.isArray(parsed)) {
-        return __quarantine(file, "no es un arreglo");
-      }
-      return parsed;
+      const rows: __Row[] = [...live.entries()].map(([id, item]) => ({ id, item }));
+      if (ops > rows.length * 2 + 64) compact(rows);
+      return rows;
     },
-    async saveAll(items) {
-      // Escritura atómica: volcamos a un temporal y renombramos (rename es
-      // atómico en el mismo FS), para que un crash a media escritura no deje el
-      // store corrupto a medias.
-      const tmp = `${file}.${process.pid}.tmp`;
-      const fd = fs.openSync(tmp, "w");
-      try {
-        fs.writeFileSync(fd, JSON.stringify(items));
-        fs.fsyncSync(fd);
-      } finally {
-        fs.closeSync(fd);
-      }
-      fs.renameSync(tmp, file);
+    async insert(id, item) {
+      append({ op: "i", id, item });
+    },
+    async update(id, item) {
+      append({ op: "u", id, item });
+    },
+    async remove(id) {
+      append({ op: "d", id });
     },
   };
 }
@@ -412,104 +470,87 @@ function __fileBackend(): __Backend {
 // --- backend: SQLite (módulo integrado node:sqlite, cero dependencias) ---
 function __sqliteBackend(): __Backend {
   const path = process.env.MAREA_DB_URL ?? "marea.sqlite";
+  const q = '"';
+  const p = () => "?";
   let db: any = null;
   async function open() {
     if (db) return db;
     const { DatabaseSync } = await import("node:sqlite");
     db = new DatabaseSync(path);
-    db.exec(__createSql('"'));
+    db.exec(__createSql(q));
     return db;
   }
   return {
     async load() {
       const d = await open();
-      return d.prepare(`SELECT ${__cols('"')} FROM ${__table('"')}`).all().map(__fromRow);
+      return d.prepare(__selectSql(q)).all().map(__rowFrom);
     },
-    async saveAll(items) {
-      const d = await open();
-      const t = __table('"');
-      const ph = (__STORE_SCHEMA as __Schema).columns.map(() => "?").join(", ");
-      const ins = d.prepare(`INSERT INTO ${t} (${__cols('"')}) VALUES (${ph})`);
-      d.exec("BEGIN");
-      d.exec(`DELETE FROM ${t}`);
-      for (const it of items) ins.run(...(__toRow(it) as any[]));
-      d.exec("COMMIT");
+    async insert(id, item) {
+      (await open()).prepare(__insertSql(q, p)).run(id, ...(__toRow(item) as any[]));
+    },
+    async update(id, item) {
+      (await open()).prepare(__updateSql(q, p)).run(...(__toRow(item) as any[]), id);
+    },
+    async remove(id) {
+      (await open()).prepare(__deleteSql(q, p)).run(id);
     },
   };
 }
 
 // --- backend: PostgreSQL (driver 'pg', import perezoso; requiere MAREA_DB_URL) ---
 function __postgresBackend(): __Backend {
+  const q = '"';
+  const p = (i: number) => `$${i}`;
   let pool: any = null;
   async function open() {
     if (pool) return pool;
     const pg = await import("pg");
     pool = new pg.Pool({ connectionString: process.env.MAREA_DB_URL });
-    await pool.query(__createSql('"'));
+    await pool.query(__createSql(q));
     return pool;
   }
   return {
     async load() {
-      const p = await open();
-      const r = await p.query(`SELECT ${__cols('"')} FROM ${__table('"')}`);
-      return r.rows.map(__fromRow);
+      const r = await (await open()).query(__selectSql(q));
+      return r.rows.map(__rowFrom);
     },
-    async saveAll(items) {
-      const p = await open();
-      const s = __STORE_SCHEMA as __Schema;
-      const c = await p.connect();
-      try {
-        await c.query("BEGIN");
-        await c.query(`DELETE FROM ${__table('"')}`);
-        for (const it of items) {
-          const ph = s.columns.map((_, i) => `$${i + 1}`).join(", ");
-          await c.query(`INSERT INTO ${__table('"')} (${__cols('"')}) VALUES (${ph})`, __toRow(it) as any[]);
-        }
-        await c.query("COMMIT");
-      } catch (e) {
-        await c.query("ROLLBACK");
-        throw e;
-      } finally {
-        c.release();
-      }
+    async insert(id, item) {
+      await (await open()).query(__insertSql(q, p), [id, ...(__toRow(item) as any[])]);
+    },
+    async update(id, item) {
+      await (await open()).query(__updateSql(q, p), [...(__toRow(item) as any[]), id]);
+    },
+    async remove(id) {
+      await (await open()).query(__deleteSql(q, p), [id]);
     },
   };
 }
 
 // --- backend: MySQL (driver 'mysql2/promise', import perezoso; MAREA_DB_URL) ---
 function __mysqlBackend(): __Backend {
+  const q = "`";
+  const p = () => "?";
   let pool: any = null;
   async function open() {
     if (pool) return pool;
     const mysql = await import("mysql2/promise");
     pool = mysql.createPool(process.env.MAREA_DB_URL ?? "");
-    await pool.query(__createSql("`"));
+    await pool.query(__createSql(q));
     return pool;
   }
   return {
     async load() {
-      const p = await open();
-      const [rows] = await p.query(`SELECT ${__cols("`")} FROM ${__table("`")}`);
-      return (rows as any[]).map(__fromRow);
+      const [rows] = await (await open()).query(__selectSql(q));
+      return (rows as any[]).map(__rowFrom);
     },
-    async saveAll(items) {
-      const p = await open();
-      const s = __STORE_SCHEMA as __Schema;
-      const ph = s.columns.map(() => "?").join(", ");
-      const c = await p.getConnection();
-      try {
-        await c.beginTransaction();
-        await c.query(`DELETE FROM ${__table("`")}`);
-        for (const it of items) {
-          await c.query(`INSERT INTO ${__table("`")} (${__cols("`")}) VALUES (${ph})`, __toRow(it) as any[]);
-        }
-        await c.commit();
-      } catch (e) {
-        await c.rollback();
-        throw e;
-      } finally {
-        c.release();
-      }
+    async insert(id, item) {
+      await (await open()).query(__insertSql(q, p), [id, ...(__toRow(item) as any[])]);
+    },
+    async update(id, item) {
+      await (await open()).query(__updateSql(q, p), [...(__toRow(item) as any[]), id]);
+    },
+    async remove(id) {
+      await (await open()).query(__deleteSql(q, p), [id]);
     },
   };
 }
@@ -525,21 +566,30 @@ function __mongoBackend(): __Backend {
     coll = client.db().collection((__STORE_SCHEMA as __Schema).table);
     return coll;
   }
+  // Empaqueta el item como documento con _id = id estable. Para el caso escalar
+  // (__doc) el valor va en un campo; para registros se esparce el objeto.
+  function __doc(id: number, item: unknown): any {
+    return __isDoc() ? { _id: id, __doc: item } : { _id: id, ...(item as object) };
+  }
+  function __itemOf(d: any): unknown {
+    if (__isDoc()) return d.__doc;
+    const { _id, ...rest } = d;
+    return rest;
+  }
   return {
     async load() {
       const c = await open();
-      // Documentos directos; quitamos el _id que Mongo agrega.
-      const docs = (await c.find({}, { projection: { _id: 0 } }).toArray()) as any[];
-      return __isDoc() ? docs.map((d) => d.__doc) : (docs as unknown[]);
+      const docs = (await c.find({}).sort({ _id: 1 }).toArray()) as any[];
+      return docs.map((d) => ({ id: Number(d._id), item: __itemOf(d) }));
     },
-    async saveAll(items) {
-      const c = await open();
-      await c.deleteMany({});
-      if (items.length === 0) return;
-      const docs = __isDoc()
-        ? items.map((x) => ({ __doc: x }))
-        : items.map((x) => ({ ...(x as object) }));
-      await c.insertMany(docs);
+    async insert(id, item) {
+      await (await open()).insertOne(__doc(id, item));
+    },
+    async update(id, item) {
+      await (await open()).replaceOne({ _id: id }, __doc(id, item));
+    },
+    async remove(id) {
+      await (await open()).deleteOne({ _id: id });
     },
   };
 }
@@ -561,39 +611,46 @@ function __makeBackend(): __Backend {
 }
 
 let __backend: __Backend | null = null;
-let __store: unknown[] | null = null;
+let __store: unknown[] | null = null; // valores, por posición (lo que ve el .mar)
+let __ids: number[] = []; // id persistente paralelo a cada posición de __store
+let __nextId = 1; // contador de ids nuevos
 
 async function __ensureStore(): Promise<unknown[]> {
   if (__store === null) {
     if (__backend === null) __backend = __makeBackend();
-    __store = await __backend.load();
+    const rows = await __backend.load();
+    __store = rows.map((r) => r.item);
+    __ids = rows.map((r) => r.id);
+    __nextId = rows.reduce((m, r) => Math.max(m, r.id), 0) + 1;
   }
   return __store;
 }
-async function __persist(): Promise<void> {
-  if (__backend) await __backend.saveAll(__store ?? []);
-}
 
 export async function guardar(x: unknown): Promise<void> {
-  (await __ensureStore()).push(x);
-  await __persist();
+  const s = await __ensureStore();
+  const id = __nextId++;
+  s.push(x);
+  __ids.push(id);
+  await (__backend as __Backend).insert(id, x);
 }
 export async function todos(): Promise<unknown[]> {
   return (await __ensureStore()).slice();
 }
-// Reemplaza el elemento en el índice 'i' (CRUD: update).
+// Reemplaza el elemento en el índice 'i' (CRUD: update) — solo toca esa fila.
 export async function actualizar(i: number, x: unknown): Promise<void> {
   const s = await __ensureStore();
   if (i >= 0 && i < s.length) {
     s[i] = x;
-    await __persist();
+    await (__backend as __Backend).update(__ids[i], x);
   }
 }
-// Elimina el elemento en el índice 'i' (CRUD: delete).
+// Elimina el elemento en el índice 'i' (CRUD: delete) — solo borra esa fila.
 export async function borrar(i: number): Promise<void> {
   const s = await __ensureStore();
   if (i >= 0 && i < s.length) {
+    const id = __ids[i];
     s.splice(i, 1);
-    await __persist();
+    __ids.splice(i, 1);
+    await (__backend as __Backend).remove(id);
   }
 }

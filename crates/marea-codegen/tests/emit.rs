@@ -218,17 +218,32 @@ fn backends_sql_comillan_identificadores() {
     // palabra reservada (from, order…) no rompe el SQL generado.
     let p = build("type Fila = { from: String, order: Int };\nstore Fila;\n@server fn g() { guardar(Fila { from: \"a\", order: 1 }); }");
     assert!(p.runtime.contains("function __quoteId"), "{}", p.runtime);
-    assert!(p.runtime.contains("__cols('\"')"), "sqlite/pg deben comillar con \"");
-    assert!(p.runtime.contains("__cols(\"`\")"), "mysql debe comillar con backtick");
+    assert!(p.runtime.contains("function __idCol"), "{}", p.runtime);
+    // sqlite/pg usan comilla doble; mysql usa backtick (constantes por backend).
+    assert!(p.runtime.contains("const q = '\"'"), "sqlite/pg deben comillar con \"");
+    assert!(p.runtime.contains("const q = \"`\""), "mysql debe comillar con backtick");
 }
 
 #[test]
-fn escritura_a_disco_es_atomica() {
-    // L5: el store en archivo se escribe a un temporal y se renombra (atómico).
+fn persistencia_a_archivo_es_incremental_y_atomica() {
+    // H2/L5: el backend de archivo usa un log append-only (O(1) por mutación) y
+    // compacta atómicamente (temporal + rename). Sin reescritura completa por op.
     let p = build("store Int;\n@server fn g(x: Int) { guardar(x); }");
-    assert!(p.runtime.contains("renameSync"), "{}", p.runtime);
-    assert!(p.runtime.contains(".tmp"), "debe escribir a temporal");
-    assert!(p.runtime.contains("__quarantine"), "debe degradar ante store corrupto");
+    assert!(p.runtime.contains("appendFileSync"), "debe escribir incremental (append)");
+    assert!(p.runtime.contains("renameSync"), "la compactación debe ser atómica");
+    assert!(p.runtime.contains(".tmp"), "debe compactar vía temporal");
+}
+
+#[test]
+fn backends_son_incrementales_por_id() {
+    // H2: la interfaz del backend es insert/update/remove por id, no saveAll;
+    // las mutaciones tocan una sola fila.
+    let p = build("store Int;\n@server fn g(x: Int) { guardar(x); }");
+    assert!(p.runtime.contains("insert(id: number, item: unknown)"), "{}", p.runtime);
+    assert!(p.runtime.contains("remove(id: number)"), "{}", p.runtime);
+    assert!(!p.runtime.contains("saveAll"), "saveAll (reescritura total) debe haber desaparecido");
+    // El esquema SQL gana una clave primaria interna.
+    assert!(p.runtime.contains("INTEGER PRIMARY KEY"), "{}", p.runtime);
 }
 
 #[test]
@@ -281,6 +296,6 @@ fn store_tiene_backends_de_base_de_datos() {
 fn store_file_lleva_la_firma_del_esquema() {
     let p = build("type Post = { a: Int };\nstore Post;\n@server fn g() { guardar(Post { a: 1 }); }");
     // El archivo por defecto incluye nombre+campos para no colisionar entre apps.
-    assert!(p.runtime.contains("marea-store.Post-a.json"), "{}", p.runtime);
+    assert!(p.runtime.contains("marea-store.Post-a.log"), "{}", p.runtime);
     assert!(!p.runtime.contains("__MAREA_STORE_DEFAULT__"), "placeholder sin sustituir");
 }

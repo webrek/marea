@@ -47,9 +47,11 @@ pub fn emit(module: &Module) -> Project {
 
     // El archivo del store por defecto lleva la firma del esquema de `store T;`,
     // para que dos apps con esquemas distintos no compartan archivo.
+    // Extensión .log: el backend de archivo es un log append-only JSONL (no un
+    // arreglo JSON), una línea por mutación.
     let store_file = match store_signature(module) {
-        Some(sig) => format!("marea-store.{sig}.json"),
-        None => "marea-store.json".to_string(),
+        Some(sig) => format!("marea-store.{sig}.log"),
+        None => "marea-store.log".to_string(),
     };
     // Sustitución en UNA pasada: cada centinela del template se reemplaza una
     // vez y el contenido inyectado nunca se vuelve a escanear. Así un nombre de

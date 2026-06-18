@@ -166,7 +166,7 @@ store Post;
 ```
 
 ```sh
-# Por defecto: archivo JSON (cero dependencias)
+# Por defecto: archivo (log JSONL append-only, cero dependencias)
 node /tmp/x/demo.ts
 
 # SQLite (módulo integrado de Node, cero dependencias)
@@ -184,17 +184,18 @@ sola columna JSON `__doc`. Los drivers externos (`pg`, `mysql2`, `mongodb`) se
 cargan con `import()` perezoso, así que un programa sin base de datos —o con
 `file`/`sqlite`— no necesita instalarlos.
 
+**Persistencia incremental por id:** el arreglo en memoria tiene índices
+posicionales estables y un id persistente paralelo; cada mutación toca **una sola
+fila** (`insert`/`update`/`remove` por id) — O(1), sin reescribir el store
+completo. En SQL/Mongo es un statement puntual; el backend de archivo es un log
+append-only (compactado al cargar).
+
 **Endurecimiento del endpoint RPC** (`/__marea`): escucha solo en `127.0.0.1`
 (ampliable con `MAREA_HOST`), rechaza cuerpos sobre `MAREA_MAX_BODY` (1 MiB) con
 `413`, valida forma y aridad de los argumentos, no refleja errores internos al
 cliente (solo `error interno` + log en servidor) y usa una tabla de handlers sin
-prototipo. La escritura del backend de archivo es atómica (`tmp`+`rename`+`fsync`)
-y un store corrupto se aparta a `.corrupt` en vez de tumbar la app. Los
-identificadores SQL se comillan por dialecto.
+prototipo. Los identificadores SQL se comillan por dialecto.
 
-> **Pendiente conocido:** cada mutación reescribe el store completo (`saveAll`).
-> Es simple y correcto, pero O(n²) sobre stores grandes; producción usaría
-> persistencia incremental por id.
 
 | `MAREA_DB` | Backend         | Dependencia        | `MAREA_DB_URL`              |
 | ---------- | --------------- | ------------------ | -------------------------- |
