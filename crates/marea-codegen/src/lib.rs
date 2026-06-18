@@ -262,12 +262,21 @@ fn emit_control(e: &Expr, indent: usize, reactive: &HashSet<String>) -> String {
         }
         Expr::Match {
             scrutinee, arms, ..
-        } => emit_match(scrutinee, arms, indent, reactive),
+        } => emit_match(scrutinee, arms, indent, reactive, false),
         _ => format!("{p}{};", emit_expr(e, reactive)),
     }
 }
 
-fn emit_match(scrut: &Expr, arms: &[MatchArm], indent: usize, reactive: &HashSet<String>) -> String {
+/// `returning`: si es `true`, el cuerpo de cada rama se emite como `return <v>;`
+/// (match en posición de EXPRESIÓN, dentro de un IIFE que produce el valor); si
+/// es `false`, como sentencia (`<v>;`).
+fn emit_match(
+    scrut: &Expr,
+    arms: &[MatchArm],
+    indent: usize,
+    reactive: &HashSet<String>,
+    returning: bool,
+) -> String {
     let p = pad(indent);
     let pin = pad(indent + 1);
     let mut s = format!("{p}{{\n{pin}const __m = {};\n", emit_expr(scrut, reactive));
@@ -275,6 +284,11 @@ fn emit_match(scrut: &Expr, arms: &[MatchArm], indent: usize, reactive: &HashSet
     for arm in arms {
         let body = match &arm.body {
             Expr::If { .. } | Expr::Match { .. } => emit_control(&arm.body, indent + 2, reactive),
+            _ if returning => format!(
+                "{}return {};",
+                pad(indent + 2),
+                emit_expr(&arm.body, reactive)
+            ),
             _ => format!("{}{};", pad(indent + 2), emit_expr(&arm.body, reactive)),
         };
         match &arm.pattern {
@@ -326,10 +340,14 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
         Expr::Float { value, .. } => value.to_string(),
         Expr::Str { value, .. } => js_string(value),
         Expr::Bool { value, .. } => value.to_string(),
-        // Leer una variable reactiva = llamar a su getter (rastrea dependencias).
         Expr::Ident { name, .. } => {
             if reactive.contains(name) {
+                // Leer una reactiva = su getter (rastrea dependencias).
                 format!("{name}.get()")
+            } else if name.chars().next().is_some_and(|c| c.is_uppercase()) {
+                // Variante nominal usada como valor (errores como valores): se
+                // representa por su etiqueta, que '__marea_is' reconoce en match.
+                js_string(name)
             } else {
                 name.clone()
             }
@@ -372,8 +390,16 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
             }
         }
         Expr::Member { object, field, .. } => format!("{}.{}", emit_expr(object, reactive), field),
-        // if/match en posición de expresión: IIFE async (sin síntesis de valor).
-        Expr::If { .. } | Expr::Match { .. } => {
+        // 'match' en posición de expresión: IIFE que RETORNA el valor de la rama.
+        Expr::Match { scrutinee, arms, .. } => {
+            format!(
+                "(await (async () => {{\n{}\n}})())",
+                emit_match(scrutinee, arms, 1, reactive, true)
+            )
+        }
+        // 'if' en posición de expresión: IIFE (las ramas-bloque no tienen valor
+        // de cola en la gramática; queda como sentencia, valor diferido).
+        Expr::If { .. } => {
             format!(
                 "(await (async () => {{\n{}\n}})())",
                 emit_control(e, 1, reactive)

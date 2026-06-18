@@ -471,6 +471,13 @@ impl Checker {
         if let Some(ty) = builtins::lookup(name) {
             return ty;
         }
+        // Variante nominal usada como valor ("errores como valores"): por
+        // convención, un identificador con inicial Mayúscula que no es variable,
+        // función ni builtin es una etiqueta de variante (p.ej. `NotFound`). Su
+        // tipo es Named(name), que es subtipo de cualquier unión que la contenga.
+        if name.chars().next().is_some_and(|c| c.is_uppercase()) {
+            return Ty::Named(name.to_string());
+        }
         self.error(TypeError::new(
             "E_UNRESOLVED_NAME",
             format!("'{name}' no está definido"),
@@ -817,6 +824,9 @@ impl Checker {
 
         let mut covered: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut has_catch_all = false;
+        // Tipos de los cuerpos de cada rama, para inferir el tipo del 'match'
+        // cuando se usa en posición de expresión (`let x = match ...`).
+        let mut arm_types: Vec<Ty> = Vec::new();
 
         for arm in arms {
             match &arm.pattern {
@@ -843,7 +853,7 @@ impl Checker {
                             let narrowed = self.narrow_variant(name);
                             self.scopes.last_mut().unwrap().insert(sn.clone(), (narrowed, false));
                         }
-                        self.check_expr(&arm.body);
+                        arm_types.push(self.check_expr(&arm.body));
                         self.scopes.pop();
                     } else {
                         // minúscula = binding catch-all. Captura el residual
@@ -852,7 +862,7 @@ impl Checker {
                         let residual = self.residual_narrow(&variants, &covered, &scrut_ty);
                         self.scopes.push(HashMap::new());
                         self.scopes.last_mut().unwrap().insert(name.clone(), (residual, false));
-                        self.check_expr(&arm.body);
+                        arm_types.push(self.check_expr(&arm.body));
                         self.scopes.pop();
                     }
                 }
@@ -864,12 +874,12 @@ impl Checker {
                     if let Some(sn) = &scrut_name {
                         self.scopes.last_mut().unwrap().insert(sn.clone(), (residual, false));
                     }
-                    self.check_expr(&arm.body);
+                    arm_types.push(self.check_expr(&arm.body));
                     self.scopes.pop();
                 }
                 Pattern::Int { .. } | Pattern::Bool { .. } | Pattern::Str { .. } => {
                     // Patrón literal: chequea la rama; no aporta a la exhaustividad nominal.
-                    self.check_expr(&arm.body);
+                    arm_types.push(self.check_expr(&arm.body));
                 }
             }
         }
@@ -893,7 +903,21 @@ impl Checker {
             }
         }
 
-        Ty::Unit
+        // Tipo del 'match': el común de las ramas (ignorando Unknown). Si todas
+        // coinciden, ese tipo; si difieren, Unknown (no forzamos un error aquí);
+        // sin ramas, Unit.
+        arm_types
+            .into_iter()
+            .reduce(|acc, t| {
+                if matches!(acc, Ty::Unknown) {
+                    t
+                } else if matches!(t, Ty::Unknown) || acc == t {
+                    acc
+                } else {
+                    Ty::Unknown
+                }
+            })
+            .unwrap_or(Ty::Unit)
     }
 
     /// Estrecha el escrutinio en una rama catch-all al residual de la unión:

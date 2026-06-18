@@ -109,3 +109,16 @@ fn division_entera_trunca() {
     let p = build("fn d() -> Int { return 7 / 2; }");
     assert!(p.client.contains("Math.trunc"), "{}", p.client);
 }
+
+#[test]
+fn variante_como_valor_es_etiqueta() {
+    let p = build("@client fn f(n: Int) -> A | B { if n > 0 { return A; } return B; }");
+    assert!(p.client.contains("return \"A\""), "{}", p.client);
+}
+
+#[test]
+fn match_como_expresion_retorna_valor() {
+    let p = build("@client fn f(n: Int) -> String { return match n { 0 => \"c\", _ => \"o\" }; }");
+    // El IIFE debe RETORNAR el valor de la rama, no quedar en undefined.
+    assert!(p.client.contains("return \"c\""), "{}", p.client);
+}

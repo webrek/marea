@@ -475,3 +475,25 @@ fn lista_vacia_es_subtipo_de_list() {
     let errs = check_src("@client fn f() { let xs: List<Int> = []; print(xs); }");
     assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
 }
+
+#[test]
+fn variante_como_valor_tipa() {
+    // 'errores como valores': una variante Mayúscula es valor de su unión.
+    let errs = check_src("@client fn f(n: Int) -> A | B { if n > 0 { return A; } return B; }");
+    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+}
+
+#[test]
+fn ident_minuscula_inexistente_sigue_siendo_error() {
+    let errs = check_src("@client fn f() { print(noExiste); }");
+    assert!(has_code(&errs, "E_UNRESOLVED_NAME"), "códigos: {:?}", codes(&errs));
+}
+
+#[test]
+fn match_como_expresion_infiere_tipo() {
+    // Antes: el match valía Unit -> E_RETURN_TYPE_MISMATCH. Ahora infiere String.
+    let errs = check_src(
+        "@client fn f(n: Int) -> String { return match n { 0 => \"cero\", _ => \"otro\" }; }",
+    );
+    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+}

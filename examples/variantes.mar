@@ -1,0 +1,30 @@
+// Errores como valores: las variantes nominales son ciudadanos de primera clase.
+//
+// Una función devuelve una unión 'A | B | C'. Cada variante (Mayúscula inicial)
+// es un valor que se construye por su nombre y se consume con 'match' — sin
+// excepciones, sin null. El compilador exige cubrir todos los casos.
+
+@client
+fn clasificar(n: Int) -> Positivo | Negativo | Cero {
+    if n > 0 {
+        return Positivo;
+    }
+    if n < 0 {
+        return Negativo;
+    }
+    return Cero;
+}
+
+@client
+fn main() {
+    match clasificar(7) {
+        Positivo => print("siete es positivo"),
+        Negativo => print("siete es negativo"),
+        _        => print("siete es cero"),
+    }
+
+    match clasificar(0) {
+        Cero     => print("cero es cero"),
+        _        => print("cero no es cero"),
+    }
+}
