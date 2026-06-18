@@ -97,9 +97,12 @@ impl Parser {
 
     /// Salta tokens hasta el inicio probable del siguiente item (`@`, `fn`,
     /// `type`, `let`, `reactive`) o el fin del archivo.
+    ///
+    /// NO avanza incondicionalmente: si el error dejó el cursor justo al inicio
+    /// de un item (p. ej. un `;` faltante reportado sobre la `fn` siguiente), no
+    /// consume esa palabra clave, para no descartar un item válido. El progreso
+    /// lo garantiza el guardia anti-bucle de `parse_module_recovering`.
     fn recover_to_item(&mut self) {
-        // Consume el token donde se detectó el error para garantizar progreso.
-        self.advance();
         while !self.at_eof() {
             if matches!(
                 self.peek_kind(),
@@ -109,7 +112,7 @@ impl Parser {
                     | TokenKind::Let
                     | TokenKind::Reactive
             ) {
-                break;
+                return;
             }
             self.advance();
         }

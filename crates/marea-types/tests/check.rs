@@ -509,3 +509,9 @@ fn len_de_lista_es_int() {
     let errs = check_src("@client fn f() { let xs = [1, 2, 3]; let n: Int = len(xs); print(n); }");
     assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
 }
+
+#[test]
+fn lista_heterogenea_es_error() {
+    let errs = check_src(r#"fn f() -> Int { let xs = ["n", 99]; return len(xs[0]); }"#);
+    assert!(has_code(&errs, "E_LIST_HETEROGENEOUS"), "códigos: {:?}", codes(&errs));
+}

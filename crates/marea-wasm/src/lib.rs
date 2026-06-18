@@ -308,11 +308,21 @@ const CONCAT: &str = "  (func $concat (export \"concat\") (param $a i32) (param 
 
 // --- funciones ---
 
+/// Nombres de export reservados por el runtime/prelude WASM; una función no
+/// puede usarlos o produciría un export duplicado y WAT inválido.
+const RESERVED_EXPORTS: &[&str] = &["memory", "concat"];
+
 fn emit_func(
     f: &FnDecl,
     strings: &Strings,
     layouts: &HashMap<String, StructLayout>,
 ) -> Result<String, String> {
+    if RESERVED_EXPORTS.contains(&f.name.as_str()) {
+        return Err(format!(
+            "el nombre '{}' está reservado por el runtime WASM; renómbrala",
+            f.name
+        ));
+    }
     let params = f
         .params
         .iter()

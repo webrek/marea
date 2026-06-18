@@ -264,3 +264,9 @@ fn len_es_load_de_la_longitud() {
     // len(xs) = i32.load del puntero (la longitud vive en la palabra 0).
     assert!(w.contains("(i32.load (local.get $xs))"), "wat: {w}");
 }
+
+#[test]
+fn fn_con_nombre_reservado_es_error() {
+    let err = wat(r#"fn memory() -> Int { return 1; } fn s() -> String { return concat("a","b"); }"#).unwrap_err();
+    assert!(err.contains("reservado"), "mensaje: {err}");
+}

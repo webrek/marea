@@ -95,7 +95,33 @@ pub fn emit_web(module: &Module) -> (String, String) {
          </html>\n"
     );
 
-    let glue = WEB_GLUE.to_string();
+    // Entrada web por convención: `vista` o `main` SIN parámetros. El render se
+    // genera según su tipo de retorno: si es String se decodifica desde memoria;
+    // si es otro valor se muestra tal cual; si no hay entrada válida, un aviso.
+    // (Antes, el glue asumía siempre String y crasheaba si devolvía un Int.)
+    let entry = module.items.iter().find_map(|it| match it {
+        Item::Fn(f) if (f.name == "vista" || f.name == "main") && f.params.is_empty() => Some(f),
+        _ => None,
+    });
+    let render = match entry {
+        Some(f) => {
+            let call = format!("exports.{}()", f.name);
+            match &f.return_type {
+                Some(Type::Name { name, .. }) if name == "String" => {
+                    format!("  salida.textContent = decodificarCadena({call});")
+                }
+                Some(_) => format!("  salida.textContent = String({call});"),
+                None => format!("  {call};\n  salida.textContent = \"(listo)\";"),
+            }
+        }
+        None => "  salida.textContent = \"(define vista() o main() sin argumentos)\";".to_string(),
+    };
+
+    let glue = format!(
+        "{WEB_GLUE}\n\
+         const salida = typeof document !== \"undefined\" && document.getElementById(\"salida\");\n\
+         if (salida) {{\n{render}\n}}\n"
+    );
     (html, glue)
 }
 
@@ -122,13 +148,6 @@ for (const [nombre, fn] of Object.entries(exports)) {
 }
 globalThis.marea = marea;
 globalThis.mareaCadena = decodificarCadena;
-
-// Entrada por convención: vista() o main(), que devuelve una cadena a mostrar.
-const entrada = exports.vista || exports.main;
-const salida = typeof document !== "undefined" && document.getElementById("salida");
-if (entrada && salida) {
-  salida.textContent = decodificarCadena(entrada());
-}
 "#;
 
 fn emit_server(remote: &[&FnDecl]) -> String {
@@ -516,12 +535,21 @@ fn map_binop(op: BinOp) -> &'static str {
 
 fn map_type(t: &Type) -> String {
     match t {
+        // `List<T>` -> `T[]` (arreglo TS). Sin args, una lista genérica.
+        Type::Name { name, args, .. } if name == "List" => match args.first() {
+            Some(elem) => format!("{}[]", map_type(elem)),
+            None => "unknown[]".to_string(),
+        },
+        // Otros genéricos: traducir los argumentos en vez de descartarlos.
+        Type::Name { name, args, .. } if !args.is_empty() => {
+            let inner: Vec<String> = args.iter().map(map_type).collect();
+            format!("{}<{}>", name, inner.join(", "))
+        }
         Type::Name { name, .. } => match name.as_str() {
             "Int" | "Float" => "number".to_string(),
             "String" => "string".to_string(),
             "Bool" => "boolean".to_string(),
-            // Tipos aún sin definir: conservamos el nombre (Node lo ignora al
-            // ejecutar; el chequeo real de tipos llega en v1.5).
+            // Tipos sin definir: conservamos el nombre (Node lo ignora al correr).
             _ => name.clone(),
         },
         Type::Union { variants, .. } => variants

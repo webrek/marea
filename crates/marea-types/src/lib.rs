@@ -457,7 +457,7 @@ impl Checker {
             Expr::Record { type_name, type_name_span, fields, span } => {
                 self.check_record(type_name.as_deref(), *type_name_span, fields, *span)
             }
-            Expr::List { elements, .. } => self.check_list(elements),
+            Expr::List { elements, span } => self.check_list(elements, *span),
             Expr::Index { object, index, .. } => self.check_index(object, index),
         }
     }
@@ -1096,10 +1096,12 @@ impl Checker {
         }
     }
 
-    fn check_list(&mut self, elements: &[Expr]) -> Ty {
+    fn check_list(&mut self, elements: &[Expr], span: Span) -> Ty {
         let tys: Vec<Ty> = elements.iter().map(|e| self.check_expr(e)).collect();
-        // Elemento = tipo del primero si todos coinciden (ignorando Unknown);
-        // lista vacía o heterogénea → elemento desconocido.
+        // Elemento = tipo del primero si todos coinciden (ignorando Unknown).
+        // Tipos concretos incompatibles en la misma lista = error (si se dejara
+        // pasar como List<Unknown>, ese Unknown envenenaría usos posteriores como
+        // `len(xs[i])`, que en WASM hace un i32.load ciego de memoria ajena).
         let elem = match tys.first() {
             None => Ty::Unknown,
             Some(first) => {
@@ -1109,6 +1111,11 @@ impl Checker {
                 {
                     first.clone()
                 } else {
+                    self.error(TypeError::new(
+                        "E_LIST_HETEROGENEOUS",
+                        "los elementos de una lista deben ser todos del mismo tipo",
+                        span,
+                    ));
                     Ty::Unknown
                 }
             }

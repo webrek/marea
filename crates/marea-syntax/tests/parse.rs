@@ -301,3 +301,17 @@ fn recuperacion_reporta_varios_errores() {
         "el item válido 'c' debe parsearse"
     );
 }
+
+
+#[test]
+fn recuperacion_no_descarta_item_valido() {
+    use marea_syntax::parse_recovering;
+    // El error en 'a' (falta ';') no debe consumir la 'fn b' siguiente.
+    let (module, errors) = parse_recovering("fn a() { let x = 1 }\nfn b() -> Int { return 5; }");
+    assert!(!errors.is_empty());
+    assert!(
+        module.items.iter().any(|it| matches!(it, Item::Fn(f) if f.name == "b")),
+        "'b' válida debe parsearse, items: {:?}",
+        module.items.iter().filter_map(|it| match it { Item::Fn(f) => Some(&f.name), _ => None }).collect::<Vec<_>>()
+    );
+}

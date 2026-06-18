@@ -141,6 +141,21 @@ fn emit_web_genera_html_y_glue() {
     assert!(html.contains("id=\"salida\""), "html: {html}");
     assert!(html.contains("./glue.mjs"), "html: {html}");
     assert!(glue.contains("WebAssembly.instantiate"), "glue: {glue}");
-    assert!(glue.contains("decodificarCadena"), "glue: {glue}");
-    assert!(glue.contains("exports.vista || exports.main"), "glue: {glue}");
+    // vista() devuelve String: el render decodifica el puntero desde memoria.
+    assert!(glue.contains("decodificarCadena(exports.vista())"), "glue: {glue}");
+}
+
+#[test]
+fn map_type_traduce_list_generica() {
+    let p = build("@server fn feed() -> List<String> { return []; } @client fn main() { let x = feed(); print(x); }");
+    // El stub del cliente debe tipar el retorno como string[], no como 'List'.
+    assert!(p.client.contains("Promise<string[]>"), "{}", p.client);
+}
+
+#[test]
+fn web_entry_no_string_no_decodifica() {
+    let m = marea_syntax::parse("fn vista() -> Int { return 42; }").unwrap();
+    let (_html, glue) = marea_codegen::emit_web(&m);
+    assert!(glue.contains("String(exports.vista())"), "glue: {glue}");
+    assert!(!glue.contains("decodificarCadena(exports.vista())"), "glue: {glue}");
 }
