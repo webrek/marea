@@ -240,6 +240,7 @@ impl<'a> Lexer<'a> {
             "match" => TokenKind::Match,
             "return" => TokenKind::Return,
             "import" => TokenKind::Import,
+            "effect" => TokenKind::Effect,
             "true" => TokenKind::Bool(true),
             "false" => TokenKind::Bool(false),
             "_" => TokenKind::Underscore,

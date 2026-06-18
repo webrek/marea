@@ -364,6 +364,39 @@ impl Checker {
                     ));
                 }
             }
+            Stmt::Assign { name, name_span, value, .. } => {
+                let value_ty = self.check_expr(value);
+                let mut target = None;
+                for scope in self.scopes.iter().rev() {
+                    if let Some(t) = scope.get(name) {
+                        target = Some(t.clone());
+                        break;
+                    }
+                }
+                match target {
+                    None => self.error(TypeError::new(
+                        "E_UNRESOLVED_NAME",
+                        format!("'{name}' no está definido"),
+                        *name_span,
+                    )),
+                    Some(var_ty) => {
+                        if !self.is_subtype(&value_ty, &var_ty) {
+                            self.error(TypeError::new(
+                                "E_ASSIGN_TYPE_MISMATCH",
+                                format!(
+                                    "se asigna '{}' a una variable de tipo '{}'",
+                                    value_ty.display(),
+                                    var_ty.display()
+                                ),
+                                value.span(),
+                            ));
+                        }
+                    }
+                }
+            }
+            Stmt::Effect { body, .. } => {
+                self.check_block(body);
+            }
             Stmt::Expr(e) => {
                 self.check_expr(e);
             }
@@ -1198,7 +1231,7 @@ fn stmt_terminates(stmt: &Stmt) -> bool {
     match stmt {
         Stmt::Return { .. } => true,
         Stmt::Expr(e) => expr_terminates(e),
-        Stmt::Let(_) => false,
+        Stmt::Let(_) | Stmt::Assign { .. } | Stmt::Effect { .. } => false,
     }
 }
 

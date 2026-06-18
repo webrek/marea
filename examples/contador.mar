@@ -1,0 +1,20 @@
+// El modelo reactivo de Marea: la frontera del TIEMPO.
+//
+// 'reactive mut' declara una fuente (signal); 'reactive' deriva un valor que se
+// recomputa solo; 'effect' se re-ejecuta cuando cambia algo que leyó. Asignar a
+// la fuente propaga el cambio por todo el grafo. Sin librerías: es del lenguaje.
+
+@client
+fn main() {
+    reactive mut n = 0;
+    reactive doble = n * 2;
+
+    // Este efecto se vuelve a ejecutar cada vez que 'doble' (y por ende 'n') cambia.
+    effect {
+        print(doble);
+    }
+
+    // Cada asignación propaga: el efecto imprime 0, luego 2, luego 4.
+    n = n + 1;
+    n = n + 1;
+}

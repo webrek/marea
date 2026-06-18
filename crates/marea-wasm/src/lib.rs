@@ -215,6 +215,8 @@ fn constructs_list(module: &Module) -> bool {
     fn in_block(b: &Block) -> bool {
         b.stmts.iter().any(|s| match s {
             Stmt::Let(l) => in_expr(&l.value),
+            Stmt::Assign { value, .. } => in_expr(value),
+            Stmt::Effect { body, .. } => in_block(body),
             Stmt::Return { value: Some(v), .. } => in_expr(v),
             Stmt::Return { .. } => false,
             Stmt::Expr(e) => in_expr(e),
@@ -388,6 +390,8 @@ fn collect_locals(
                 collect_locals_expr(&l.value, out, rec_counter)?;
                 out.push(l.name.clone());
             }
+            Stmt::Assign { value, .. } => collect_locals_expr(value, out, rec_counter)?,
+            Stmt::Effect { body, .. } => collect_locals(body, out, rec_counter)?,
             Stmt::Return { value: Some(v), .. } => collect_locals_expr(v, out, rec_counter)?,
             Stmt::Return { .. } => {}
             Stmt::Expr(e) => collect_locals_expr(e, out, rec_counter)?,
@@ -488,6 +492,15 @@ fn emit_stmt(stmt: &Stmt, indent: usize, ctx: &mut Ctx) -> Result<String, String
             }
             let value = emit_expr(&l.value, ctx)?;
             Ok(format!("{p}(local.set ${} {})", l.name, value))
+        }
+        // Asignación a un local existente. (La reactividad es del cliente; en
+        // WASM puro un `assign` es simplemente reescribir el local.)
+        Stmt::Assign { name, value, .. } => {
+            let v = emit_expr(value, ctx)?;
+            Ok(format!("{p}(local.set ${name} {v})"))
+        }
+        Stmt::Effect { .. } => {
+            Err("WASM no soporta 'effect' (la reactividad vive en el cliente/TS)".to_string())
         }
         Stmt::Return { value, .. } => match value {
             Some(v) => Ok(format!("{p}(return {})", emit_expr(v, ctx)?)),
@@ -765,6 +778,8 @@ fn collect_strings_block(block: &Block, out: &mut Vec<String>, seen: &mut HashSe
     for stmt in &block.stmts {
         match stmt {
             Stmt::Let(l) => collect_strings_expr(&l.value, out, seen),
+            Stmt::Assign { value, .. } => collect_strings_expr(value, out, seen),
+            Stmt::Effect { body, .. } => collect_strings_block(body, out, seen),
             Stmt::Return { value: Some(v), .. } => collect_strings_expr(v, out, seen),
             Stmt::Return { .. } => {}
             Stmt::Expr(e) => collect_strings_expr(e, out, seen),

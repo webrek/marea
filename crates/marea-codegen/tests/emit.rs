@@ -52,9 +52,11 @@ fn precedencia_se_conserva_con_parentesis() {
 }
 
 #[test]
-fn reactive_se_marca_para_v3() {
+fn reactive_derivada_es_memo() {
     let p = build("@client fn f() { reactive x = 1; print(x); }");
-    assert!(p.client.contains("/* reactive"));
+    // Una 'reactive' (no mut) compila a un memo, y su lectura a '.get()'.
+    assert!(p.client.contains("const x = __memo(() => 1)"), "{}", p.client);
+    assert!(p.client.contains("print(x.get())"), "{}", p.client);
 }
 
 #[test]
@@ -70,4 +72,25 @@ fn runtime_lleva_el_transporte() {
     let p = build("@client fn main() { print(1); }");
     assert!(p.runtime.contains("export async function __rpc"));
     assert!(p.runtime.contains("export function startServer"));
+}
+
+#[test]
+fn reactivo_genera_signal_memo_y_effect() {
+    let p = build(
+        "@client fn main() { reactive mut n = 0; reactive doble = n * 2; effect { print(doble); } n = n + 1; }",
+    );
+    assert!(p.client.contains("const n = __signal(0)"), "{}", p.client);
+    assert!(p.client.contains("const doble = __memo(() => (n.get() * 2))"), "{}", p.client);
+    assert!(p.client.contains("__effect(async () =>"), "{}", p.client);
+    // Lectura reactiva -> .get(); asignación -> .set()
+    assert!(p.client.contains("print(doble.get())"), "{}", p.client);
+    assert!(p.client.contains("n.set((n.get() + 1))"), "{}", p.client);
+}
+
+#[test]
+fn runtime_lleva_el_nucleo_reactivo() {
+    let p = build("@client fn main() { print(1); }");
+    assert!(p.runtime.contains("export function __signal"));
+    assert!(p.runtime.contains("export function __effect"));
+    assert!(p.runtime.contains("export function __memo"));
 }

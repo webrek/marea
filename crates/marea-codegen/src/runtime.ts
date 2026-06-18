@@ -88,6 +88,57 @@ export function __marea_is(value: unknown, tag: string): boolean {
   return false;
 }
 
+// --- núcleo reactivo (signals de grano fino) ---
+//
+// Una variable 'reactive mut' es un signal (fuente); una 'reactive' derivada es
+// un memo; 'effect { ... }' se re-ejecuta cuando cambia algo que leyó. El
+// rastreo de dependencias es automático: leer un signal/memo dentro de un effect
+// o memo lo suscribe.
+
+type Sub = () => void;
+let __currentSub: Sub | null = null;
+
+export interface Cell<T> {
+  get(): T;
+  set(v: T): void;
+}
+
+export function __signal<T>(initial: T): Cell<T> {
+  let value = initial;
+  const subs = new Set<Sub>();
+  return {
+    get() {
+      if (__currentSub) subs.add(__currentSub);
+      return value;
+    },
+    set(v: T) {
+      if (v === value) return;
+      value = v;
+      // Copia para tolerar resuscripciones durante la notificación.
+      for (const s of [...subs]) s();
+    },
+  };
+}
+
+export function __effect(fn: () => void | Promise<void>): void {
+  const run: Sub = () => {
+    const prev = __currentSub;
+    __currentSub = run;
+    try {
+      void fn();
+    } finally {
+      __currentSub = prev;
+    }
+  };
+  run();
+}
+
+export function __memo<T>(fn: () => T): Cell<T> {
+  const cell = __signal<T>(undefined as unknown as T);
+  __effect(() => cell.set(fn()));
+  return { get: cell.get, set: cell.set };
+}
+
 // --- builtins del lenguaje ---
 export function print(x: unknown): void {
   console.log(x);

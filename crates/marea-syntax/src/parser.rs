@@ -302,8 +302,23 @@ impl Parser {
     }
 
     fn parse_stmt(&mut self) -> PResult<Stmt> {
+        // Asignación `IDENT = expr;` — sólo si el token siguiente es '=' (no '==').
+        if let TokenKind::Ident(_) = self.peek_kind() {
+            if matches!(
+                self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                Some(TokenKind::Eq)
+            ) {
+                return self.parse_assign();
+            }
+        }
         match self.peek_kind() {
             TokenKind::Let | TokenKind::Reactive => Ok(Stmt::Let(self.parse_let()?)),
+            TokenKind::Effect => {
+                let kw = self.advance();
+                let body = self.parse_block()?;
+                let span = kw.span.to(body.span);
+                Ok(Stmt::Effect { body, span })
+            }
             TokenKind::Return => {
                 let kw = self.advance();
                 let value = if self.check(&TokenKind::Semicolon) {
@@ -329,6 +344,19 @@ impl Parser {
                 Ok(Stmt::Expr(expr))
             }
         }
+    }
+
+    fn parse_assign(&mut self) -> PResult<Stmt> {
+        let (name, name_span) = self.expect_ident("nombre de variable")?;
+        self.expect(&TokenKind::Eq, "'=' en la asignación")?;
+        let value = self.parse_expr()?;
+        let semi = self.expect(&TokenKind::Semicolon, "';' al final de la asignación")?;
+        Ok(Stmt::Assign {
+            name,
+            name_span,
+            value,
+            span: name_span.to(semi.span),
+        })
     }
 
     fn parse_let(&mut self) -> PResult<LetStmt> {

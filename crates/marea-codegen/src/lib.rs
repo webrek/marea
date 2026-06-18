@@ -9,9 +9,37 @@
 //! end-to-end y validar el diseño.
 
 use marea_syntax::ast::*;
+use std::collections::HashSet;
 
 /// El runtime TypeScript embebido (transporte RPC + builtins).
 pub const RUNTIME_TS: &str = include_str!("runtime.ts");
+
+/// Recoge los nombres de variables declaradas con `reactive` en una función
+/// (incluidas ramas y efectos), para que sus lecturas emitan `.get()`.
+fn collect_reactive(block: &Block, out: &mut HashSet<String>) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Let(l) if l.reactive => {
+                out.insert(l.name.clone());
+            }
+            Stmt::Effect { body, .. } => collect_reactive(body, out),
+            Stmt::Expr(Expr::If {
+                then_branch,
+                else_branch,
+                ..
+            }) => {
+                collect_reactive(then_branch, out);
+                if let Some(eb) = else_branch {
+                    match eb.as_ref() {
+                        ElseBranch::Block(b) => collect_reactive(b, out),
+                        ElseBranch::If(_) => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
 
 /// Los cuatro archivos TypeScript que produce el transpilador.
 pub struct Project {
@@ -22,7 +50,8 @@ pub struct Project {
 }
 
 /// Builtins provistos por el runtime; no se transpilan ni se registran.
-const BUILTINS: &str = "{ __register, __rpc, print, concat, render, __marea_is }";
+const BUILTINS: &str =
+    "{ __register, __rpc, print, concat, render, __marea_is, __signal, __memo, __effect }";
 
 /// Una función con `@server` o `@edge` corre "remota": handler + stub RPC.
 fn is_remote(f: &FnDecl) -> bool {
@@ -112,7 +141,9 @@ fn emit_fn_def(f: &FnDecl, export: bool) -> String {
     } else {
         "async function"
     };
-    let body = emit_block_inner(&f.body, 1);
+    let mut reactive = HashSet::new();
+    collect_reactive(&f.body, &mut reactive);
+    let body = emit_block_inner(&f.body, 1, &reactive);
     format!(
         "{}\n{} {}({}) {{\n{}\n}}\n",
         signature_comment(f),
@@ -152,39 +183,57 @@ fn ts_params(f: &FnDecl) -> String {
 
 // --- sentencias ---
 
-fn emit_block_inner(block: &Block, indent: usize) -> String {
+fn emit_block_inner(block: &Block, indent: usize, reactive: &HashSet<String>) -> String {
     block
         .stmts
         .iter()
-        .map(|s| emit_stmt(s, indent))
+        .map(|s| emit_stmt(s, indent, reactive))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn emit_stmt(stmt: &Stmt, indent: usize) -> String {
+fn emit_stmt(stmt: &Stmt, indent: usize, reactive: &HashSet<String>) -> String {
     let p = pad(indent);
     match stmt {
+        Stmt::Let(l) if l.reactive => {
+            // Fuente reactiva (mutable) = signal; derivada (inmutable) = memo.
+            let init = emit_expr(&l.value, reactive);
+            if l.mutable {
+                format!("{p}const {} = __signal({init});", l.name)
+            } else {
+                format!("{p}const {} = __memo(() => {init});", l.name)
+            }
+        }
         Stmt::Let(l) => {
             let kw = if l.mutable { "let" } else { "const" };
-            let note = if l.reactive {
-                "  /* reactive: modelo de reactividad en v3 */"
+            format!("{p}{kw} {} = {};", l.name, emit_expr(&l.value, reactive))
+        }
+        // Asignar a una variable reactiva = invocar su setter; si no, asignación normal.
+        Stmt::Assign { name, value, .. } => {
+            let v = emit_expr(value, reactive);
+            if reactive.contains(name) {
+                format!("{p}{name}.set({v});")
             } else {
-                ""
-            };
-            format!("{p}{kw} {} = {};{note}", l.name, emit_expr(&l.value))
+                format!("{p}{name} = {v};")
+            }
+        }
+        // Efecto: se re-ejecuta cuando cambian las reactivas que lee.
+        Stmt::Effect { body, .. } => {
+            let inner = emit_block_inner(body, indent + 1, reactive);
+            format!("{p}__effect(async () => {{\n{inner}\n{p}}});")
         }
         Stmt::Return { value, .. } => match value {
-            Some(v) => format!("{p}return {};", emit_expr(v)),
+            Some(v) => format!("{p}return {};", emit_expr(v, reactive)),
             None => format!("{p}return;"),
         },
         Stmt::Expr(e) => match e {
-            Expr::If { .. } | Expr::Match { .. } => emit_control(e, indent),
-            _ => format!("{p}{};", emit_expr(e)),
+            Expr::If { .. } | Expr::Match { .. } => emit_control(e, indent, reactive),
+            _ => format!("{p}{};", emit_expr(e, reactive)),
         },
     }
 }
 
-fn emit_control(e: &Expr, indent: usize) -> String {
+fn emit_control(e: &Expr, indent: usize, reactive: &HashSet<String>) -> String {
     let p = pad(indent);
     match e {
         Expr::If {
@@ -193,19 +242,19 @@ fn emit_control(e: &Expr, indent: usize) -> String {
             else_branch,
             ..
         } => {
-            let mut s = format!("{p}if ({}) {{\n", emit_expr(cond));
-            s.push_str(&emit_block_inner(then_branch, indent + 1));
+            let mut s = format!("{p}if ({}) {{\n", emit_expr(cond, reactive));
+            s.push_str(&emit_block_inner(then_branch, indent + 1, reactive));
             s.push_str(&format!("\n{p}}}"));
             if let Some(eb) = else_branch {
                 match eb.as_ref() {
                     ElseBranch::Block(b) => {
                         s.push_str(" else {\n");
-                        s.push_str(&emit_block_inner(b, indent + 1));
+                        s.push_str(&emit_block_inner(b, indent + 1, reactive));
                         s.push_str(&format!("\n{p}}}"));
                     }
                     ElseBranch::If(inner) => {
                         s.push_str(" else ");
-                        s.push_str(emit_control(inner, indent).trim_start());
+                        s.push_str(emit_control(inner, indent, reactive).trim_start());
                     }
                 }
             }
@@ -213,20 +262,20 @@ fn emit_control(e: &Expr, indent: usize) -> String {
         }
         Expr::Match {
             scrutinee, arms, ..
-        } => emit_match(scrutinee, arms, indent),
-        _ => format!("{p}{};", emit_expr(e)),
+        } => emit_match(scrutinee, arms, indent, reactive),
+        _ => format!("{p}{};", emit_expr(e, reactive)),
     }
 }
 
-fn emit_match(scrut: &Expr, arms: &[MatchArm], indent: usize) -> String {
+fn emit_match(scrut: &Expr, arms: &[MatchArm], indent: usize, reactive: &HashSet<String>) -> String {
     let p = pad(indent);
     let pin = pad(indent + 1);
-    let mut s = format!("{p}{{\n{pin}const __m = {};\n", emit_expr(scrut));
+    let mut s = format!("{p}{{\n{pin}const __m = {};\n", emit_expr(scrut, reactive));
     let mut chained = false; // ¿ya emitimos algún if/else-if?
     for arm in arms {
         let body = match &arm.body {
-            Expr::If { .. } | Expr::Match { .. } => emit_control(&arm.body, indent + 2),
-            _ => format!("{}{};", pad(indent + 2), emit_expr(&arm.body)),
+            Expr::If { .. } | Expr::Match { .. } => emit_control(&arm.body, indent + 2, reactive),
+            _ => format!("{}{};", pad(indent + 2), emit_expr(&arm.body, reactive)),
         };
         match &arm.pattern {
             Pattern::Wildcard { .. } => {
@@ -271,15 +320,22 @@ fn emit_match(scrut: &Expr, arms: &[MatchArm], indent: usize) -> String {
 
 // --- expresiones ---
 
-fn emit_expr(e: &Expr) -> String {
+fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
     match e {
         Expr::Int { value, .. } => value.to_string(),
         Expr::Float { value, .. } => value.to_string(),
         Expr::Str { value, .. } => js_string(value),
         Expr::Bool { value, .. } => value.to_string(),
-        Expr::Ident { name, .. } => name.clone(),
+        // Leer una variable reactiva = llamar a su getter (rastrea dependencias).
+        Expr::Ident { name, .. } => {
+            if reactive.contains(name) {
+                format!("{name}.get()")
+            } else {
+                name.clone()
+            }
+        }
         Expr::Unary { op, expr, .. } => {
-            let inner = emit_expr(expr);
+            let inner = emit_expr(expr, reactive);
             match op {
                 UnaryOp::Neg => format!("-({inner})"),
                 UnaryOp::Not => format!("!({inner})"),
@@ -287,37 +343,42 @@ fn emit_expr(e: &Expr) -> String {
         }
         Expr::Binary {
             op, left, right, ..
-        } => format!("({} {} {})", emit_expr(left), map_binop(*op), emit_expr(right)),
+        } => format!(
+            "({} {} {})",
+            emit_expr(left, reactive),
+            map_binop(*op),
+            emit_expr(right, reactive)
+        ),
         // Toda llamada se 'await': uniforme para builtins, locales y cruces de
         // frontera (los stubs RPC son async).
         Expr::Call { callee, args, .. } => {
-            let a: Vec<String> = args.iter().map(emit_expr).collect();
-            format!("(await {}({}))", emit_expr(callee), a.join(", "))
+            let a: Vec<String> = args.iter().map(|x| emit_expr(x, reactive)).collect();
+            format!("(await {}({}))", emit_expr(callee, reactive), a.join(", "))
         }
-        Expr::Member { object, field, .. } => format!("{}.{}", emit_expr(object), field),
+        Expr::Member { object, field, .. } => format!("{}.{}", emit_expr(object, reactive), field),
         // if/match en posición de expresión: IIFE async (sin síntesis de valor).
         Expr::If { .. } | Expr::Match { .. } => {
             format!(
                 "(await (async () => {{\n{}\n}})())",
-                emit_control(e, 1)
+                emit_control(e, 1, reactive)
             )
         }
         // Literal de registro -> objeto JS.
         Expr::Record { fields, .. } => {
             let parts: Vec<String> = fields
                 .iter()
-                .map(|f| format!("{}: {}", f.name, emit_expr(&f.value)))
+                .map(|f| format!("{}: {}", f.name, emit_expr(&f.value, reactive)))
                 .collect();
             format!("{{ {} }}", parts.join(", "))
         }
         // Literal de lista -> arreglo JS.
         Expr::List { elements, .. } => {
-            let parts: Vec<String> = elements.iter().map(emit_expr).collect();
+            let parts: Vec<String> = elements.iter().map(|x| emit_expr(x, reactive)).collect();
             format!("[{}]", parts.join(", "))
         }
         // Indexado -> acceso por índice JS.
         Expr::Index { object, index, .. } => {
-            format!("{}[{}]", emit_expr(object), emit_expr(index))
+            format!("{}[{}]", emit_expr(object, reactive), emit_expr(index, reactive))
         }
     }
 }

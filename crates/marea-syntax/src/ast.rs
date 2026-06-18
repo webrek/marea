@@ -102,6 +102,16 @@ pub struct Block {
 pub enum Stmt {
     Let(LetStmt),
     Return { value: Option<Expr>, span: Span },
+    /// Asignación a una variable existente: `n = n + 1;`.
+    Assign {
+        name: String,
+        name_span: Span,
+        value: Expr,
+        span: Span,
+    },
+    /// Efecto reactivo: el bloque se re-ejecuta cuando cambian las variables
+    /// reactivas que lee. `effect { print(total); }`.
+    Effect { body: Block, span: Span },
     Expr(Expr),
 }
 

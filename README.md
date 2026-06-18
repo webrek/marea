@@ -9,6 +9,8 @@ lenguaje** las dos fronteras que hoy se cruzan a mano y con pegamento.
    "capa de API" que escribir.
 2. **La frontera del tiempo** (reactividad). Una variable `reactive` propaga sus
    cambios; el grafo de dependencias lo conoce el compilador, no una librería.
+   `reactive mut` es una fuente (signal), `reactive` una derivada (memo), y
+   `effect { ... }` se re-ejecuta solo cuando cambia algo que leyó.
 
 ```marea
 type UserId = Int;
@@ -130,6 +132,10 @@ node /tmp/demo/demo.ts
 cargo run --bin marea -- build-wasm examples/math.mar /tmp/math.wat
 wat2wasm /tmp/math.wat -o /tmp/math.wasm
 
+# Reactividad: un efecto que se re-ejecuta solo al cambiar una fuente
+cargo run --bin marea -- build examples/contador.mar /tmp/c
+node /tmp/c/demo.ts   # imprime 0, 2, 4 (el effect reacciona a cada n = n + 1)
+
 # Pruebas y linter
 cargo test
 cargo clippy --all-targets
@@ -144,7 +150,7 @@ cargo clippy --all-targets
 - [x] **WASM (structs)** — Registros sobre memoria lineal: construir + leer campos
 - [x] **v1.5** — Verificador de tipos (`marea check`): nombres, tipos, ubicación, unión+match
 - [x] **WASM (listas)** — Listas sobre memoria + indexado `xs[i]`, tipadas `List<T>`
-- [ ] **v3** — Modelo reactivo en runtime
+- [x] **v3 (reactividad)** — `reactive mut`/`reactive`/`effect` → signals/memo/effect en TS
 - [ ] **LSP** — Servidor de lenguaje para el editor
 - [ ] **glue DOM/red** — Pegamento mínimo para apps WASM completas
 

@@ -253,3 +253,20 @@ fn parse_lista_literal_indexada() {
     };
     assert!(matches!(object.as_ref(), Expr::List { .. }));
 }
+
+#[test]
+fn parse_asignacion_y_efecto() {
+    let m = parse("@client fn f() { reactive mut n = 0; effect { print(n); } n = n + 1; }").unwrap();
+    let Item::Fn(f) = &m.items[0] else { panic!() };
+    assert!(matches!(&f.body.stmts[0], Stmt::Let(l) if l.reactive && l.mutable));
+    assert!(matches!(&f.body.stmts[1], Stmt::Effect { .. }));
+    assert!(matches!(&f.body.stmts[2], Stmt::Assign { .. }));
+}
+
+#[test]
+fn igualdad_no_es_asignacion() {
+    // 'n == 1' es comparación (expr-stmt), no asignación.
+    let m = parse("@client fn f(n: Int) { n == 1; }").unwrap();
+    let Item::Fn(f) = &m.items[0] else { panic!() };
+    assert!(matches!(&f.body.stmts[0], Stmt::Expr(Expr::Binary { .. })));
+}
