@@ -1,0 +1,9 @@
+// Cadenas en WebAssembly: viven en memoria lineal.
+//
+// Un String es un puntero a un registro [longitud][bytes UTF-8]. Los literales
+// van en el data section; 'concat' es un builtin en WAT (allocador bump +
+// memory.copy). El host lee el resultado desde la memoria exportada.
+
+fn saludar() -> String {
+    return concat("Hola desde ", "WebAssembly 🌊");
+}

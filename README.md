@@ -42,9 +42,11 @@ Lo que ya funciona:
 - **Transpilador a TypeScript** (`marea-codegen`) que materializa la **frontera
   de red**: una función `@server` se vuelve un handler registrado + un *stub* RPC
   en el cliente. El `@client` que la llama no nota la diferencia.
-- **Backend WebAssembly** (`marea-wasm`) que compila funciones puras a WAT →
-  `.wasm`, ejecutable en el navegador/Node **sin pasar por JS**. Primer slice:
-  enteros/booleanos (`i32`), `let`, `if`, aritmética/comparación/lógica y llamadas.
+- **Backend WebAssembly** (`marea-wasm`) que compila a WAT → `.wasm`, ejecutable
+  en el navegador/Node **sin pasar por JS**. Soporta enteros/booleanos (`i32`),
+  `let`, `if`, aritmética/comparación/lógica, llamadas/recursión, y **cadenas
+  sobre memoria lineal** (literales en el *data section* + `concat` con allocador
+  bump y `memory.copy`).
 - **CLI** `marea` con `tokens`, `parse`, `build` y `build-wasm`.
 
 Lo que **todavía no** existe: chequeo de tipos y resolución de nombres robustos,
@@ -77,6 +79,15 @@ node -e 'const b=require("fs").readFileSync("/tmp/math.wasm");
 
 La lógica corre en el motor WebAssembly **sin una línea de JavaScript**. Es el
 camino para que el JS quede reducido a un pegamento mínimo (DOM/red).
+
+Las **cadenas** también corren en WASM, sobre memoria lineal:
+
+```sh
+marea build-wasm examples/texto.mar /tmp/texto.wat
+wat2wasm /tmp/texto.wat -o /tmp/texto.wasm
+# saludar() -> "Hola desde WebAssembly 🌊", concatenado dentro del módulo WASM
+# (allocador bump + memory.copy), leído por el host desde la memoria exportada.
+```
 
 ## Estructura
 
@@ -116,8 +127,9 @@ cargo clippy --all-targets
 
 - [x] **v0** — Lexer + AST + Parser + CLI
 - [x] **v2** — Transpilación a TypeScript con cruce de frontera (`@server`/`@client`)
-- [x] **WASM (slice numérico)** — Backend a WebAssembly: i32, `let`, `if`, llamadas
-- [ ] **WASM (memoria)** — Cadenas y structs sobre memoria lineal + glue DOM/red
+- [x] **WASM (numérico)** — Backend a WebAssembly: i32, `let`, `if`, llamadas
+- [x] **WASM (cadenas)** — Strings sobre memoria lineal: literales + `concat`
+- [ ] **WASM (structs)** — Registros/listas sobre memoria + glue DOM/red
 - [ ] **v1.5** — Resolución de nombres + chequeo de tipos (con tipos de ubicación)
 - [ ] **v3** — Modelo reactivo en runtime
 - [ ] **LSP** — Servidor de lenguaje para el editor
