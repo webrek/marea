@@ -425,3 +425,7 @@ problema para volverse del compilador.
 
 Queda el trabajo difícil —madurez, ecosistema, una UI de navegador de verdad—
 pero la tesis se sostiene: **las fronteras de la web caben en el lenguaje.**
+
+> ¿Y de **rendimiento**? Ver [BENCH.md](BENCH.md): Marea→WASM va a ras de Rust
+> nativo; el backend TypeScript paga un impuesto de `async` en cómputo puro que
+> es una optimización pendiente, no una limitación de fondo.
