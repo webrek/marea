@@ -53,6 +53,84 @@ pub fn emit(module: &Module) -> Project {
     }
 }
 
+/// Harness web para correr un módulo WebAssembly de Marea en el navegador:
+/// `(index.html, glue.mjs)`. El glue carga `module.wasm`, expone sus funciones
+/// en `window.marea` (decodificando cadenas desde la memoria) y, si existe una
+/// entrada `vista()`/`main()` que devuelve String, la renderiza en `#salida`.
+pub fn emit_web(module: &Module) -> (String, String) {
+    let fns: Vec<&str> = module
+        .items
+        .iter()
+        .filter_map(|it| match it {
+            Item::Fn(f) => Some(f.name.as_str()),
+            _ => None,
+        })
+        .collect();
+    let lista = if fns.is_empty() {
+        "(ninguna)".to_string()
+    } else {
+        fns.join(", ")
+    };
+
+    let html = format!(
+        "<!doctype html>\n\
+         <html lang=\"es\">\n\
+         <head>\n\
+         <meta charset=\"utf-8\">\n\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+         <title>Marea — app WebAssembly</title>\n\
+         <style>\n\
+           body {{ font-family: system-ui, sans-serif; margin: 2rem; color: #0b1b3a; }}\n\
+           #salida {{ font-size: 1.4rem; padding: 1rem 1.2rem; background: #eaf1ff;\n\
+                      border-radius: 10px; display: inline-block; }}\n\
+           code {{ background: #f3f3f3; padding: .1rem .3rem; border-radius: 4px; }}\n\
+         </style>\n\
+         </head>\n\
+         <body>\n\
+         <h1>Marea en el navegador 🌊</h1>\n\
+         <div id=\"salida\">cargando…</div>\n\
+         <p>Funciones disponibles en <code>window.marea</code>: {lista}.</p>\n\
+         <script type=\"module\" src=\"./glue.mjs\"></script>\n\
+         </body>\n\
+         </html>\n"
+    );
+
+    let glue = WEB_GLUE.to_string();
+    (html, glue)
+}
+
+/// Pegamento JS que conecta el navegador con el módulo WASM (DOM ↔ WASM).
+const WEB_GLUE: &str = r#"// Glue generado por Marea: carga el módulo WASM, expone sus funciones en
+// window.marea (decodificando cadenas) y renderiza vista()/main() en #salida.
+
+const bytes = await (await fetch("./module.wasm")).arrayBuffer();
+const { instance } = await WebAssembly.instantiate(bytes);
+const exports = instance.exports;
+const memory = exports.memory;
+
+// Una cadena de Marea es un puntero a [longitud:i32][bytes UTF-8].
+export function decodificarCadena(ptr) {
+  if (!memory) return String(ptr);
+  const dv = new DataView(memory.buffer);
+  const len = dv.getUint32(ptr, true);
+  return new TextDecoder().decode(new Uint8Array(memory.buffer, ptr + 4, len));
+}
+
+export const marea = {};
+for (const [nombre, fn] of Object.entries(exports)) {
+  if (typeof fn === "function") marea[nombre] = fn;
+}
+globalThis.marea = marea;
+globalThis.mareaCadena = decodificarCadena;
+
+// Entrada por convención: vista() o main(), que devuelve una cadena a mostrar.
+const entrada = exports.vista || exports.main;
+const salida = typeof document !== "undefined" && document.getElementById("salida");
+if (entrada && salida) {
+  salida.textContent = decodificarCadena(entrada());
+}
+"#;
+
 fn emit_server(remote: &[&FnDecl]) -> String {
     let mut s = String::new();
     s.push_str("// Generado por Marea — lado servidor.\n");

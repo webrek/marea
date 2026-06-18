@@ -1,0 +1,14 @@
+// Una app de Marea para el navegador.
+//
+// Compila a WebAssembly puro; el glue generado por 'marea build-web' la carga,
+// llama a 'vista()' y muestra el resultado en la página. La lógica corre en
+// WASM; el JS solo es el pegamento mínimo con el DOM.
+
+fn saludo() -> String {
+    return concat("Hola desde ", "WebAssembly en el navegador 🌊");
+}
+
+// Por convención, 'vista()' devuelve lo que se muestra en #salida.
+fn vista() -> String {
+    return saludo();
+}

@@ -133,3 +133,14 @@ fn local_sombrea_a_reactiva() {
     // La reactiva externa sigue siendo signal.
     assert!(p.client.contains("const n = __signal(0)"), "{}", p.client);
 }
+
+#[test]
+fn emit_web_genera_html_y_glue() {
+    let m = marea_syntax::parse("fn vista() -> String { return concat(\"a\", \"b\"); }").unwrap();
+    let (html, glue) = marea_codegen::emit_web(&m);
+    assert!(html.contains("id=\"salida\""), "html: {html}");
+    assert!(html.contains("./glue.mjs"), "html: {html}");
+    assert!(glue.contains("WebAssembly.instantiate"), "glue: {glue}");
+    assert!(glue.contains("decodificarCadena"), "glue: {glue}");
+    assert!(glue.contains("exports.vista || exports.main"), "glue: {glue}");
+}

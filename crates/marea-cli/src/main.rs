@@ -109,6 +109,16 @@ fn main() -> ExitCode {
                 }
             }
         }
+        "build-web" => {
+            let out_dir = args.get(3).map(String::as_str).unwrap_or("marea-web");
+            match marea_syntax::parse(&src) {
+                Ok(module) => build_web(&module, out_dir),
+                Err(e) => {
+                    eprintln!("{}", e.render(&src));
+                    ExitCode::FAILURE
+                }
+            }
+        }
         other => {
             eprintln!("error: comando desconocido '{}'", other);
             print_usage();
@@ -141,6 +151,52 @@ fn build(module: &marea_syntax::Module, out_dir: &str) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+fn build_web(module: &marea_syntax::Module, out_dir: &str) -> ExitCode {
+    let wat = match marea_wasm::emit_wat(module) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("error de codegen WASM: {}", e);
+            return ExitCode::FAILURE;
+        }
+    };
+    let (html, glue) = marea_codegen::emit_web(module);
+    if let Err(e) = std::fs::create_dir_all(out_dir) {
+        eprintln!("error: no se pudo crear '{}': {}", out_dir, e);
+        return ExitCode::FAILURE;
+    }
+    let readme = "# App web de Marea\n\n\
+        Generada con `marea build-web`. Para correrla:\n\n\
+        ```sh\n\
+        wat2wasm module.wat -o module.wasm   # ensambla el WASM\n\
+        # sirve esta carpeta con un servidor estático y abre index.html, p.ej.:\n\
+        python3 -m http.server 8000\n\
+        ```\n\n\
+        El glue carga `module.wasm`, expone las funciones en `window.marea`\n\
+        (las cadenas se decodifican con `mareaCadena(ptr)`), y renderiza\n\
+        `vista()`/`main()` en `#salida`.\n";
+    let files = [
+        ("module.wat", wat),
+        ("index.html", html),
+        ("glue.mjs", glue),
+        ("README.md", readme.to_string()),
+    ];
+    for (name, contents) in files {
+        let path = format!("{}/{}", out_dir, name);
+        if let Err(e) = std::fs::write(&path, contents) {
+            eprintln!("error: no se pudo escribir '{}': {}", path, e);
+            return ExitCode::FAILURE;
+        }
+        println!("  escrito {}", path);
+    }
+    println!(
+        "\nlisto. Ensambla y sirve:\n  \
+         wat2wasm {dir}/module.wat -o {dir}/module.wasm\n  \
+         (sirve {dir}/ con un servidor estático y abre index.html)",
+        dir = out_dir
+    );
+    ExitCode::SUCCESS
+}
+
 fn print_usage() {
     eprintln!("Marea — compilador del lenguaje (v0)\n");
     eprintln!("uso:");
@@ -149,4 +205,5 @@ fn print_usage() {
     eprintln!("  marea check      <archivo.mar>        verifica los tipos");
     eprintln!("  marea build      <archivo.mar> [dir]  transpila a TypeScript");
     eprintln!("  marea build-wasm <archivo.mar> [out]  compila a WebAssembly (WAT)");
+    eprintln!("  marea build-web  <archivo.mar> [dir]  genera una app web (WASM + DOM)");
 }

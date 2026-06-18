@@ -60,7 +60,11 @@ Lo que ya funciona:
   en vivo (errores de parser y de tipos), document symbols, completado, ir a la
   definición y hover. Reusa el mismo `parse` + `check` del compilador. Las deps
   externas quedan aisladas aquí; los crates de compilador siguen 100% std.
-- **CLI** `marea` con `tokens`, `parse`, `check`, `build` y `build-wasm`.
+- **App web** (`marea build-web`): genera `index.html` + `glue.mjs` + `module.wat`
+  para correr un módulo WASM de Marea en el navegador (el glue carga el `.wasm`,
+  expone las funciones en `window.marea` decodificando cadenas, y renderiza
+  `vista()`/`main()` en el DOM).
+- **CLI** `marea` con `tokens`, `parse`, `check`, `build`, `build-wasm` y `build-web`.
 
 Lo que **todavía no** existe: chequeo de tipos y resolución de nombres robustos,
 el modelo reactivo en runtime, y WASM para tipos no numéricos (cadenas/structs,
@@ -157,7 +161,8 @@ cargo clippy --all-targets
 - [x] **WASM (listas)** — Listas sobre memoria + indexado `xs[i]`, tipadas `List<T>`
 - [x] **v3 (reactividad)** — `reactive mut`/`reactive`/`effect` → signals/memo/effect en TS
 - [x] **LSP** — Servidor de lenguaje: diagnósticos en vivo, symbols, completion, definition, hover
-- [ ] **glue DOM/red** — Pegamento mínimo para apps WASM completas
+- [x] **Recuperación de errores** — el parser reporta múltiples diagnósticos (no fail-fast)
+- [x] **glue DOM (web)** — `marea build-web` genera una app WASM para el navegador
 
 ## Licencia
 
