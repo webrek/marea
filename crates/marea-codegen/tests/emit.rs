@@ -168,3 +168,12 @@ fn store_builtins_no_se_awaitan() {
     // guardar/todos son síncronos: sin await.
     assert!(p.server.contains("guardar(x)") && !p.server.contains("(await guardar"), "{}", p.server);
 }
+
+#[test]
+fn store_persiste_a_disco() {
+    let p = build("@server fn g(x: Int) { guardar(x); }");
+    // El runtime carga el store del archivo y lo reescribe en cada guardar.
+    assert!(p.runtime.contains("readFileSync"), "{}", p.runtime);
+    assert!(p.runtime.contains("writeFileSync"), "{}", p.runtime);
+    assert!(p.runtime.contains("MAREA_STORE"), "{}", p.runtime);
+}

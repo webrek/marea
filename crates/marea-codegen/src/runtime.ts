@@ -6,6 +6,7 @@
 // Más los builtins del lenguaje.
 
 import http from "node:http";
+import fs from "node:fs";
 
 const MAREA_PORT = 8787;
 const MAREA_URL = `http://127.0.0.1:${MAREA_PORT}/__marea`;
@@ -221,13 +222,32 @@ export function len(xs: unknown[]): number {
   return xs.length;
 }
 
-// --- estado del servidor: un store en memoria (persiste entre peticiones del
-// mismo proceso). 'guardar' añade; 'todos' devuelve una copia. Como el runtime
-// del servidor es único por proceso, las funciones @server comparten este store
-// a través de las llamadas RPC.
-const __store: unknown[] = [];
+// --- estado del servidor: un store PERSISTENTE A DISCO. Se carga del archivo
+// al iniciar el proceso y se reescribe en cada 'guardar', así los datos
+// sobreviven a reinicios del servidor. La ruta es MAREA_STORE o './marea-store.json'.
+// Las funciones @server comparten este store a través de las llamadas RPC.
+const __STORE_FILE = process.env.MAREA_STORE ?? "marea-store.json";
+
+function __loadStore(): unknown[] {
+  try {
+    const data = fs.readFileSync(__STORE_FILE, "utf8");
+    const parsed = JSON.parse(data);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    // Sin archivo aún (o ilegible): store vacío.
+    return [];
+  }
+}
+
+const __store: unknown[] = __loadStore();
+
 export function guardar(x: unknown): void {
   __store.push(x);
+  try {
+    fs.writeFileSync(__STORE_FILE, JSON.stringify(__store));
+  } catch (e) {
+    console.error("[marea] no se pudo persistir el store:", e);
+  }
 }
 export function todos(): unknown[] {
   return __store.slice();
