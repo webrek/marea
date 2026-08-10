@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Marea 🌊 — un lenguaje para la web, con las dos fronteras como primitivas</title>
+<meta name="description" content="Marea es un lenguaje de programación enfocado a la web: la frontera de red (@server/@client → RPC) y la del tiempo (reactividad → signals) son primitivas del lenguaje, no librerías.">
+<style>
+  :root { --marino: #0b1b3a; --azul: #1e5bd6; --mar: #2a9ec5; --tinta: #0e1726; --gris: #5b6b7f; --fondo: #f5f8fc; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--tinta); background: var(--fondo); line-height: 1.6; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 1.25rem; }
+  header.hero { background: linear-gradient(160deg, var(--marino), #123a6b 70%, var(--mar)); color: #eaf2ff; padding: 4rem 0 3.5rem; }
+  .hero h1 { font-size: clamp(2.2rem, 6vw, 3.4rem); margin: 0 0 .4rem; letter-spacing: -.02em; }
+  .hero .tagline { font-size: 1.25rem; color: #bcd4f5; margin: 0 0 1.6rem; max-width: 40ch; }
+  .badges { display: flex; gap: .5rem; flex-wrap: wrap; font-size: .82rem; }
+  .badge { background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.18); padding: .25rem .7rem; border-radius: 999px; }
+  section { padding: 2.6rem 0; border-bottom: 1px solid #e3ebf5; }
+  h2 { font-size: 1.5rem; margin: 0 0 .4rem; color: var(--marino); }
+  h2 .n { color: var(--mar); font-variant-numeric: tabular-nums; }
+  p.lead { color: var(--gris); margin: 0 0 1.4rem; }
+  pre { background: var(--tinta); color: #e7eefc; padding: 1.1rem 1.2rem; border-radius: 12px; overflow-x: auto; font-size: .9rem; line-height: 1.5; box-shadow: 0 8px 24px rgba(11,27,58,.12); }
+  pre .k { color: #7cc4ff; } pre .s { color: #9fe6b0; } pre .c { color: #6b7d96; font-style: italic; } pre .f { color: #ffd479; }
+  .grid2 { display: grid; gap: 1.2rem; grid-template-columns: 1fr 1fr; }
+  @media (max-width: 680px) { .grid2 { grid-template-columns: 1fr; } }
+  .demo-box { background: #fff; border: 1px solid #dbe6f4; border-radius: 14px; padding: 1.4rem 1.5rem; box-shadow: 0 6px 20px rgba(11,27,58,.07); }
+  .demo-box h3 { margin: 0 0 .2rem; color: var(--marino); }
+  .demo-box .hint { color: var(--gris); font-size: .9rem; margin: 0 0 1rem; }
+  ul.feed { list-style: none; margin: 0; padding: 0; }
+  ul.feed .post { padding: .6rem .2rem; border-bottom: 1px solid #eef3fa; display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+  ul.feed .autor { font-weight: 600; color: var(--azul); }
+  button.like { margin-left: auto; background: #fff0f3; color: #d6336c; border: 1px solid #ffc9d6; border-radius: 999px; padding: .25rem .8rem; font-size: .85rem; cursor: pointer; transition: background .15s; }
+  button.like:hover { background: #ffe0e8; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid #e3ebf5; }
+  th { color: var(--gris); font-weight: 600; }
+  td.marea { font-weight: 600; color: var(--marino); }
+  .perf { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+  .perf .stat { flex: 1; min-width: 180px; background: #fff; border: 1px solid #dbe6f4; border-radius: 12px; padding: 1rem 1.2rem; }
+  .perf .stat .big { font-size: 1.8rem; font-weight: 700; color: var(--marino); }
+  .perf .stat .lbl { color: var(--gris); font-size: .85rem; }
+  footer { padding: 2.5rem 0 3rem; color: var(--gris); font-size: .9rem; }
+  footer a { color: var(--azul); }
+  code { background: #e8eef8; padding: .1rem .35rem; border-radius: 5px; font-size: .9em; }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>Marea 🌊</h1>
+    <p class="tagline">Un lenguaje para la web donde las <strong>dos fronteras</strong> son primitivas del lenguaje, no librerías que cableas.</p>
+    <div class="badges">
+      <span class="badge">@server / @client → RPC</span>
+      <span class="badge">reactive → signals</span>
+      <span class="badge">escrito en Rust</span>
+      <span class="badge">v0 de investigación</span>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>La tesis</h2>
+    <p class="lead">Toda app web cruza dos fronteras a mano: la de <strong>red</strong> (cliente↔servidor) y la del <strong>tiempo</strong> (cuándo se recalcula algo). Marea las vuelve parte del lenguaje: el compilador genera el RPC y la reactividad por ti.</p>
+    <div class="grid2">
+      <div>
+        <p class="lead" style="margin-bottom:.5rem"><strong>Frontera de red.</strong> <code>saludar</code> corre en el servidor; el cliente la llama como si fuera local.</p>
+<pre><span class="c">// el compilador genera el RPC; no escribes "capa de API"</span>
+<span class="k">@server</span>
+<span class="k">fn</span> <span class="f">saludar</span>(nombre: String) -&gt; String {
+    <span class="k">return</span> <span class="f">concat</span>(<span class="s">"Hola desde el servidor, "</span>, nombre);
+}
+
+<span class="k">@client</span>
+<span class="k">fn</span> <span class="f">main</span>() {
+    <span class="f">print</span>(<span class="f">saludar</span>(<span class="s">"Marea"</span>));
+}</pre>
+      </div>
+      <div>
+        <p class="lead" style="margin-bottom:.5rem"><strong>Frontera del tiempo.</strong> Asignar a una <code>reactive</code> propaga el cambio solo.</p>
+<pre><span class="c">// sin librería: signals/effect son del lenguaje</span>
+<span class="k">@client</span>
+<span class="k">fn</span> <span class="f">main</span>() {
+    <span class="k">reactive mut</span> n = <span class="s">0</span>;
+    <span class="k">reactive</span> doble = n * <span class="s">2</span>;
+    <span class="k">effect</span> { <span class="f">print</span>(doble); }
+    n = n + <span class="s">1</span>;   <span class="c">// imprime 0, luego 2</span>
+}</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Demo en vivo <span class="n">— corriendo Marea de verdad</span></h2>
+    <p class="lead">Esto no es un GIF. El widget de abajo está compilado desde un archivo <code>.mar</code> con <code>marea build-app</code> y corre en este mismo servidor. Dar like cruza la red por <strong>RPC</strong>, recarga el feed y el estado <code>reactive</code> <strong>re-pinta el DOM solo</strong>.</p>
+    <div class="demo-box">
+      <h3>Timeline X-mini</h3>
+      <p class="hint">Clic en ♥ → RPC al servidor → signal → el <code>&lt;li&gt;</code> se vuelve a pintar. Sin React, sin <code>fetch</code> a mano. (Los likes son compartidos; el estado se reinicia en cada arranque en frío.)</p>
+      <div id="app">cargando demo…</div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>¿Por qué un lenguaje, no una librería?</h2>
+    <p class="lead">La misma app ("X-mini") en cinco stacks. La diferencia no es "menos líneas", sino <strong>dónde vive cada frontera</strong>.</p>
+    <table>
+      <thead><tr><th>Stack</th><th>Frontera de red</th><th>Frontera del tiempo</th></tr></thead>
+      <tbody>
+        <tr><td class="marea">Marea</td><td>primitiva del lenguaje</td><td>primitiva del lenguaje</td></tr>
+        <tr><td>React + tRPC + Prisma</td><td>router + cliente + HTTP link (lo cableas)</td><td>React Query + useState</td></tr>
+        <tr><td>Phoenix LiveView</td><td>socket WS (framework)</td><td>assign + diff (framework)</td></tr>
+        <tr><td>Rust + Leptos</td><td>macro #[server] + Axum</td><td>signals (librería)</td></tr>
+        <tr><td>Laravel + Livewire</td><td>wire: AJAX (framework)</td><td>re-render por propiedad</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Rendimiento</h2>
+    <p class="lead">Marea tiene dos backends: TypeScript (frontera + reactividad) y WebAssembly (cómputo). Para un kernel <code>fib</code>, el WASM va a ras de nativo.</p>
+    <div class="perf">
+      <div class="stat"><div class="big">3.56 ms</div><div class="lbl">Marea → WASM · <code>fib(32)</code></div></div>
+      <div class="stat"><div class="big">3.27 ms</div><div class="lbl">Rust nativo -O3 (referencia)</div></div>
+      <div class="stat"><div class="big">~15 ms</div><div class="lbl">compilar un módulo (lex+parse+check+codegen)</div></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p><strong>Marea</strong> es un lenguaje de programación <strong>v0 de investigación</strong> escrito en Rust. No es para producción todavía: la idea es demostrar que las fronteras de la web caben en el lenguaje.</p>
+    <p>Esta misma página tiene un demo compilado desde Marea. &nbsp;·&nbsp; Hecho con 🌊 por Fay.</p>
+  </div>
+</footer>
+
+<script type="module" src="./client.js"></script>
+</body>
+</html>

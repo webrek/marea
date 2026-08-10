@@ -1,0 +1,70 @@
+// Demo VIVO para el landing: el widget de likes corriendo en el navegador.
+// Las @server cruzan por RPC; 'posts' (reactive de módulo) re-pinta el DOM.
+// Seed idempotente: solo siembra si el store está vacío (es un demo público).
+
+type Post = { autor: String, texto: String, likes: Int };
+
+store Post;
+
+@server
+fn publicar(autor: String, texto: String) {
+    guardar(Post { autor: autor, texto: texto, likes: 0 });
+}
+
+@server
+fn like(i: Int) {
+    let p = todos()[i];
+    actualizar(i, Post { autor: p.autor, texto: p.texto, likes: p.likes + 1 });
+}
+
+@server
+fn feed() -> List<Post> {
+    return todos();
+}
+
+reactive mut posts = [];
+
+fn fila(p: Post, i: Int) -> String {
+    return concat(
+        concat(
+            concat("<li class=\"post\"><span class=\"autor\">@", p.autor),
+            concat("</span> ", p.texto)
+        ),
+        concat(
+            concat(
+                concat(" <button class=\"like\" onclick=\"marea.darLike(", aTexto(i)),
+                concat(")\">♥ ", aTexto(p.likes))
+            ),
+            "</button></li>"
+        )
+    );
+}
+
+fn filas(ps: List<Post>, i: Int) -> String {
+    if i < len(ps) {
+        return concat(fila(ps[i], i), filas(ps, i + 1));
+    }
+    return "";
+}
+
+@client
+fn vista() -> String {
+    let ps = posts;
+    return concat("<ul class=\"feed\">", concat(filas(ps, 0), "</ul>"));
+}
+
+@client
+fn darLike(i: Int) {
+    like(i);
+    posts = feed();
+}
+
+@client
+fn main() {
+    let actual = feed();
+    if len(actual) < 1 {
+        publicar("ada", "Primer post en Marea 🌊");
+        publicar("grace", "El estado es reactivo en el navegador");
+    }
+    posts = feed();
+}
