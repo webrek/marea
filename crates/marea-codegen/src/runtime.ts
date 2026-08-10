@@ -8,7 +8,9 @@
 import http from "node:http";
 import fs from "node:fs";
 
-const MAREA_PORT = 8787;
+// El puerto: PORT (lo fija el entorno de hosting, p.ej. Cloud Run) tiene
+// prioridad, luego MAREA_PORT, y 8787 por defecto en local.
+const MAREA_PORT = Number(process.env.PORT ?? process.env.MAREA_PORT ?? 8787);
 // Escuchamos solo en loopback por defecto: la frontera de red es para el cliente
 // local de la app, no para exponer en la LAN. Se puede ampliar con MAREA_HOST.
 const MAREA_HOST = process.env.MAREA_HOST ?? "127.0.0.1";

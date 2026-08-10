@@ -163,7 +163,9 @@ pub fn emit_app(module: &Module) -> AppProject {
         // Sirve los estáticos (index.html, client.js) desde esta carpeta.\n\
         process.env.MAREA_WEB_ROOT ??= import.meta.dirname;\n\
         await startServer();\n\
-        console.log(\"[marea] app web en http://127.0.0.1:8787\");\n"
+        // Mismo orden de precedencia que runtime.ts: PORT (hosting) > MAREA_PORT > 8787.\n\
+        const __port = Number(process.env.PORT ?? process.env.MAREA_PORT ?? 8787);\n\
+        console.log(`[marea] app web en http://127.0.0.1:${__port}`);\n"
         .to_string();
 
     AppProject {
