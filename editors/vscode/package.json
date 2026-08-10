@@ -41,7 +41,7 @@
         "marea.serverPath": {
           "type": "string",
           "default": "marea-lsp",
-          "description": "Ruta al binario del servidor de lenguaje 'marea-lsp'. Por defecto se busca en el PATH; durante el desarrollo apúntalo a target/debug/marea-lsp."
+          "description": "Ruta al binario del servidor de lenguaje 'marea-lsp'. Por defecto se busca en el PATH (ponlo ahí con 'cargo install --path crates/marea-lsp'); durante el desarrollo apúntalo a ${workspaceFolder}/target/debug/marea-lsp."
         },
         "marea.trace.server": {
           "type": "string",

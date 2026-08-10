@@ -10,6 +10,16 @@
 #
 # Mismo algoritmo en todos (fib que llama a un add explícito), para que la
 # comparación sea manzana-con-manzana. fib(N) con N por defecto 32.
+# Ojo: el kernel de Marea calcula en i32 (lo único que emite hoy el backend WASM)
+# y el de Rust en i64; fib(32) cabe de sobra en ambos, pero no es el mismo ancho
+# de palabra (ver la nota de docs/BENCH.md).
+#
+# Prerequisitos (todos en el PATH):
+#   cargo / rustc  construir el binario `marea` y el baseline de Rust nativo
+#   node >= 22.18  correr los kernels WASM/JS y el .ts generado (strip de tipos
+#                  nativo, sin tsc ni paso de build)
+#   wat2wasm       del paquete wabt: ensambla el .wat a .wasm
+#   python3        el cronómetro de la parte de compilación + baseline CPython
 #
 # Uso:  bash scripts/bench.sh [N]
 set -euo pipefail
@@ -21,6 +31,14 @@ export PATH="$RUSTBIN:$PATH"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+# --- 0) prerequisitos: fallar temprano y con un mensaje claro ---
+for _cmd in cargo rustc node wat2wasm python3; do
+  if ! command -v "$_cmd" >/dev/null 2>&1; then
+    echo "error: falta '$_cmd' en el PATH (ver los prerequisitos al inicio de este script)" >&2
+    exit 1
+  fi
+done
+
 echo "== Marea · benchmark de tiempos =="
 echo "fib(N=$N) · mismo algoritmo (fib -> add) en todos los blancos"
 echo "máquina: $(uname -sm) · node $(node --version) · rustc $(rustc --version | awk '{print $2}') · python $(python3 --version | awk '{print $2}')"
@@ -28,27 +46,43 @@ echo
 
 # --- 1) compilación: construir el binario release una vez, luego cronometrarlo ---
 echo "-- construyendo el compilador (release, una vez) --"
-cargo build --release -p marea-cli >/dev/null 2>&1
+if ! cargo build --release -p marea-cli >"$WORK/cargo.log" 2>&1; then
+  echo "error: falló 'cargo build --release -p marea-cli'. Salida:" >&2
+  cat "$WORK/cargo.log" >&2
+  exit 1
+fi
 MAREA="$ROOT/target/release/marea"
 
-timed() { # imprime ms de un comando, promediando R corridas
+# Cronómetro: UN solo proceso python3 lanza el comando R veces y reporta el mejor
+# tiempo en ms con decimales.
+#
+# Antes se tomaban las marcas con dos `python3 -c` separados: el intervalo medido
+# se tragaba el arranque completo de un segundo intérprete CPython (decenas de ms,
+# más que el propio compilador) y además se truncaba a milisegundos enteros. Con
+# subprocess.run dentro de un único intérprete, el intervalo cubre solo el
+# fork/exec y la corrida de `marea`, que es justo lo que queremos medir.
+timed() { # imprime ms (mejor de R corridas) del comando dado
   local r="$1"; shift
-  local best=999999
-  for _ in $(seq "$r"); do
-    local t0 t1
-    t0=$(python3 -c 'import time;print(time.perf_counter_ns())')
-    "$@" >/dev/null 2>&1
-    t1=$(python3 -c 'import time;print(time.perf_counter_ns())')
-    local ms=$(( (t1 - t0) / 1000000 ))
-    (( ms < best )) && best=$ms
-  done
-  echo "$best"
+  python3 -c '
+import subprocess, sys, time
+r, cmd = int(sys.argv[1]), sys.argv[2:]
+best = float("inf")
+for _ in range(r):
+    t = time.perf_counter()
+    p = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    best = min(best, (time.perf_counter() - t) * 1000)
+    if p.returncode != 0:
+        sys.exit(f"error: {cmd[0]} salió con código {p.returncode}")
+print(f"{best:.2f}")
+' "$r" "$@"
 }
 
 C_TS=$(timed 5 "$MAREA" build "$ROOT/examples/math.mar" "$WORK/ts")
 C_WASM=$(timed 5 "$MAREA" build-wasm "$ROOT/examples/math.mar" "$WORK/math.wat")
-echo "compilar math.mar -> TypeScript : ${C_TS} ms (mejor de 5)"
-echo "compilar math.mar -> WAT        : ${C_WASM} ms (mejor de 5)"
+# Los build* verifican tipos antes de emitir, así que estos tiempos son
+# lex + parse + check + codegen (con --no-check se saltaría el check).
+echo "compilar math.mar -> TypeScript : ${C_TS} ms (mejor de 5, incluye check)"
+echo "compilar math.mar -> WAT        : ${C_WASM} ms (mejor de 5, incluye check)"
 wat2wasm "$WORK/math.wat" -o "$WORK/math.wasm"
 echo
 
@@ -138,3 +172,5 @@ echo
 echo "Nota: el kernel mide el BLANCO (WASM/V8/LLVM/CPython) + el codegen, no un"
 echo "runtime propio de Marea. La señal interesante es Marea->WASM ≈ nativo y el"
 echo "costo del 'async' uniforme en Marea->TS frente al JS a mano."
+echo "Ojo con el ancho de palabra: Marea->WASM calcula en i32 y el baseline de"
+echo "Rust en i64, así que es el mismo orden de magnitud, no un empate exacto."

@@ -64,11 +64,15 @@ Lo que ya funciona:
   para correr un módulo WASM de Marea en el navegador (el glue carga el `.wasm`,
   expone las funciones en `window.marea` decodificando cadenas, y renderiza
   `vista()`/`main()` en el DOM).
-- **CLI** `marea` con `tokens`, `parse`, `check`, `build`, `build-wasm` y `build-web`.
+- **CLI** `marea` con `tokens`, `parse`, `check`, `build`, `build-wasm`,
+  `build-web` y `build-app`. **Todos los `build*` verifican tipos antes de
+  emitir** (la garantía del verificador dejó de ser opt-in); `--no-check` la
+  omite si quieres compilar de todos modos.
 
-Lo que **todavía no** existe: chequeo de tipos y resolución de nombres robustos,
-el modelo reactivo en runtime, y WASM para tipos no numéricos (cadenas/structs,
-que requieren memoria lineal).
+Lo que **todavía no** existe: en el **backend WASM**, flotantes, `match`, tipos
+unión y registros inline (cada caso falla con un error claro, nunca con WAT
+roto). En el **lenguaje**, cierres/lambdas, genéricos en funciones, `import` y el
+operador de propagación de errores.
 
 ### La frontera de red, corriendo de verdad
 
@@ -82,6 +86,11 @@ node /tmp/demo/demo.ts                       # arranca servidor + cliente
 Un solo `.mar` con `saludar` (`@server`) y `main` (`@client`). Al correr, `main()`
 llama a `saludar()` como si fuera local; por debajo viaja un `fetch` real por
 HTTP al servidor. **Cero capa de API escrita a mano.**
+
+> **Requiere Node ≥ 22.18 (o ≥ 23.6).** La salida del transpilador son archivos
+> `.ts` que se ejecutan **directamente** con `node archivo.ts`, apoyándose en el
+> *type stripping* nativo de Node (sin `tsc`, sin `ts-node`, sin paso de build).
+> En versiones anteriores hay que activarlo con `--experimental-strip-types`.
 
 ### La misma fuente, ahora como WebAssembly
 
@@ -117,11 +126,17 @@ crates/
   marea-lsp/      # servidor de lenguaje (LSP) — deps externas aisladas aquí
   marea-cli/      # binario `marea`
 examples/         # programas .mar de muestra (+ check_fail/ que deben fallar)
+editors/vscode/   # extensión de VSCode: cliente LSP + resaltado TextMate
+site/             # la app de demo desplegable (salida de `marea build-app` + Dockerfile)
 docs/GRAMMAR.md   # la gramática de v0
 docs/COMPARACION.md  # la misma app en 5 stacks (Marea vs React/tRPC, LiveView, Leptos, Livewire)
 docs/BENCH.md        # tiempos: compilación + kernel CPU (Marea→WASM ≈ nativo)
 scripts/bench.sh     # el benchmark de tiempos, reproducible
 ```
+
+`site/` es la demo tal cual se despliega: `site/marea-demo.mar` es la fuente y
+`site/app/` la salida de `marea build-app` más un `Dockerfile` (Node 26) para
+subirla a un contenedor.
 
 ¿Por qué un lenguaje nuevo y no una librería? La respuesta en código está en
 **[docs/COMPARACION.md](docs/COMPARACION.md)**: la misma app ("X-mini": timeline
@@ -130,6 +145,10 @@ con el recuento honesto de archivos, líneas y **dónde vive cada frontera** (en
 lenguaje, en un framework, o en tu pegamento).
 
 ## Uso
+
+Herramientas necesarias: **Rust** (para construir el compilador), **Node ≥ 22.18**
+(o ≥ 23.6, para correr los `.ts` generados sin paso de build) y **`wat2wasm`** del
+paquete [wabt](https://github.com/WebAssembly/wabt) para ensamblar el `.wat`.
 
 ```sh
 # Ver los tokens de un archivo
@@ -153,6 +172,13 @@ wat2wasm /tmp/math.wat -o /tmp/math.wasm
 # Reactividad: un efecto que se re-ejecuta solo al cambiar una fuente
 cargo run --bin marea -- build examples/contador.mar /tmp/c
 node /tmp/c/demo.ts   # imprime 0, 2, 4 (el effect reacciona a cada n = n + 1)
+
+# App web completa (RPC + reactivo + DOM) en una sola página
+cargo run --bin marea -- build-app examples/web-likes.mar /tmp/app
+node /tmp/app/serve.ts   # abre http://127.0.0.1:8787
+
+# Los build* verifican tipos antes de emitir; para saltarse esa verificación:
+cargo run --bin marea -- build examples/saludo.mar /tmp/demo --no-check
 
 # Pruebas y linter
 cargo test

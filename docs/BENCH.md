@@ -7,6 +7,10 @@ con la máquina.
 > Máquina de referencia: **Darwin arm64 (Apple Silicon)** · Node v26 · rustc
 > 1.96 · Python 3.14.
 
+Prerequisitos del script (todos en el `PATH`): `cargo`/`rustc`, `node` ≥ 22.18,
+`wat2wasm` (paquete [wabt](https://github.com/WebAssembly/wabt)) y `python3`. El
+script los verifica al arrancar y aborta con un mensaje claro si falta alguno.
+
 ## Lo que mide y lo que NO
 
 Marea es un **transpilador**: no tiene runtime propio de ejecución. Por eso el
@@ -27,12 +31,24 @@ pre-calcular la recursión en tiempo de compilación.
 
 | Etapa | Tiempo (mejor de 5) |
 |---|---:|
-| `marea build math.mar` → TypeScript (lex + parse + check + codegen) | **~15 ms** |
-| `marea build-wasm math.mar` → WAT | **~15 ms** |
+| `marea build math.mar` → TypeScript (lex + parse + check + codegen) | **~2.1 ms** |
+| `marea build-wasm math.mar` → WAT (lex + parse + check + codegen) | **~1.6 ms** |
 
-Todo el front-end + un backend en ~15 ms para un archivo pequeño. (El binario
-`marea` se construye una vez con `cargo build --release`; eso no se cuenta aquí —
-es el compilador, no la compilación de tu programa.)
+El desglose de etapas es literal: **todos** los `build*` corren el verificador de
+tipos antes de emitir (`--no-check` lo omite), así que estos tiempos incluyen el
+`check` completo, no solo lex + parse + codegen.
+
+Todo el front-end + un backend en ~2 ms para un archivo pequeño, arranque del
+proceso incluido. (El binario `marea` se construye una vez con
+`cargo build --release`; eso no se cuenta aquí — es el compilador, no la
+compilación de tu programa.)
+
+> **Nota sobre estos números.** Una versión anterior del script cronometraba con
+> dos invocaciones separadas de `python3 -c`, así que el intervalo medido incluía
+> el arranque completo de un segundo intérprete CPython y reportaba ~15 ms para
+> ambas etapas: casi todo era el cronómetro, no el compilador. Ahora un solo
+> proceso `python3` lanza el comando con `subprocess.run` y mide con decimales;
+> las cifras de arriba son las reales.
 
 ## Ejecución — `fib(32)`, ms del cómputo puro
 
@@ -46,6 +62,16 @@ varias corridas)
 | JavaScript a mano (V8) | 10.36 ms | 2.9× |
 | **Marea → TypeScript** (async, V8) | **258.33 ms** | **72×** |
 | Python (CPython) | 186.99 ms | 53× |
+
+> **El ancho de los enteros no es el mismo en todos los blancos.** Marea → WASM
+> calcula en **`i32`** (el único entero del backend WASM hoy); el baseline de Rust
+> usa **`i64`**; JavaScript hace la aritmética en **doubles de 64 bits**; y
+> CPython, en enteros de precisión arbitraria. `fib(32) = 2178309` cabe de sobra
+> en todos, y en arm64 las sumas y comparaciones de 32 y 64 bits cuestan lo mismo,
+> pero el titular "Marea → WASM ≈ Rust nativo" **no es estrictamente
+> manzana-con-manzana**: léelo como "el mismo orden de magnitud, sin rendimiento
+> tirado a la basura", no como un empate medido al mismo ancho de palabra. Cuando
+> el backend WASM tenga `i64`, la comparación podrá cerrarse de verdad.
 
 ## Qué revela esto (honestamente)
 

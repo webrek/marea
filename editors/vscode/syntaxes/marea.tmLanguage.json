@@ -30,11 +30,11 @@
     },
     "keywords": {
       "name": "keyword.control.marea",
-      "match": "\\b(fn|let|mut|reactive|type|if|else|match|return|import|effect)\\b"
+      "match": "\\b(fn|let|mut|reactive|type|if|else|match|return|effect|store)\\b"
     },
     "types": {
       "name": "support.type.marea",
-      "match": "\\b(Int|Float|Bool|String|Record|List)\\b"
+      "match": "\\b(Int|Float|Bool|String|Unit|Record|List)\\b"
     },
     "constants": {
       "name": "constant.language.marea",
