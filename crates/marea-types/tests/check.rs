@@ -23,23 +23,67 @@ fn codes(errs: &[marea_types::TypeError]) -> Vec<String> {
 
 // ============================ GOLDEN: ejemplos ============================
 
+/// TODOS los ejemplos del repositorio deben tipar. Antes esta lista tenía cinco
+/// nombres escritos a mano y los diez restantes no tenían red: uno de ellos
+/// (`user.mar`) llegó a contener un patrón que generaba JavaScript inválido sin
+/// que ningún test lo notara. Ahora se recorre el directorio, así que un ejemplo
+/// nuevo entra en la red automáticamente.
 #[test]
 fn ejemplos_reales_tipan_sin_errores() {
-    for nombre in ["hello", "math", "saludo", "texto", "user"] {
-        let ruta = format!(
-            "{}/../../examples/{}.mar",
-            env!("CARGO_MANIFEST_DIR"),
-            nombre
-        );
+    let dir = format!("{}/../../examples", env!("CARGO_MANIFEST_DIR"));
+    let mut vistos = 0;
+    for entrada in std::fs::read_dir(&dir).expect("no se pudo leer examples/") {
+        let ruta = entrada.expect("entrada ilegible").path();
+        if ruta.extension().and_then(|e| e.to_str()) != Some("mar") {
+            continue;
+        }
         let src = std::fs::read_to_string(&ruta)
-            .unwrap_or_else(|_| panic!("no se pudo leer {ruta}"));
+            .unwrap_or_else(|_| panic!("no se pudo leer {}", ruta.display()));
         let errs = check_src(&src);
         assert!(
             errs.is_empty(),
-            "el ejemplo '{nombre}' debería tipar pero produjo: {:?}",
+            "el ejemplo '{}' debería tipar pero produjo: {:?}",
+            ruta.display(),
             codes(&errs)
         );
+        vistos += 1;
     }
+    assert!(vistos >= 14, "se esperaban al menos 14 ejemplos, se vieron {vistos}");
+}
+
+/// Los ejemplos de `examples/check_fail/` existen para FALLAR: cada uno ilustra
+/// una regla del verificador. Si alguno dejara de dar error, la regla se habría
+/// perdido sin que nada lo avisara.
+#[test]
+fn los_ejemplos_de_check_fail_fallan() {
+    let dir = format!("{}/../../examples/check_fail", env!("CARGO_MANIFEST_DIR"));
+    let mut vistos = 0;
+    for entrada in std::fs::read_dir(&dir).expect("no se pudo leer examples/check_fail/") {
+        let ruta = entrada.expect("entrada ilegible").path();
+        if ruta.extension().and_then(|e| e.to_str()) != Some("mar") {
+            continue;
+        }
+        let src = std::fs::read_to_string(&ruta).expect("no se pudo leer el ejemplo");
+        let module = marea_syntax::parse(&src).expect("el fuente debe parsear");
+        let errs = check(&module);
+        assert!(
+            !errs.is_empty(),
+            "'{}' debería producir un error de tipos y no produjo ninguno",
+            ruta.display()
+        );
+        vistos += 1;
+    }
+    assert!(vistos >= 3, "se esperaban al menos 3 casos negativos, se vieron {vistos}");
+}
+
+/// La demo desplegada en `site/` también entra en la red: es el artefacto que
+/// está en producción.
+#[test]
+fn la_demo_del_sitio_tipa() {
+    let ruta = format!("{}/../../site/marea-demo.mar", env!("CARGO_MANIFEST_DIR"));
+    let src = std::fs::read_to_string(&ruta).expect("no se pudo leer site/marea-demo.mar");
+    let errs = check_src(&src);
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
 
 // ============================ RESOLUCIÓN ============================
