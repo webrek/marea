@@ -388,6 +388,12 @@ export function aTexto(x: unknown): string {
 // Escapa un texto para incrustarlo en HTML. El lenguaje construye marcado
 // concatenando cadenas y 'render' lo inyecta por innerHTML, así que sin esto un
 // dato persistido vía RPC se ejecuta como marcado en todos los clientes.
+// Marca una cadena como marcado ya seguro. En runtime es la identidad:
+// la garantía es estática (el tipo Html), esto solo la hace explícita
+// en el fuente para que se vea en una revisión.
+export function html(s: string): string {
+  return s;
+}
 export function escapar(x: unknown): string {
   return String(x)
     .replace(/&/g, "&amp;")

@@ -24,7 +24,7 @@ fn feed() -> List<Post> {
 
 reactive mut posts = [];
 
-fn fila(p: Post, i: Int) -> String {
+fn fila(p: Post, i: Int) -> Html {
     return concat(
         concat(
             concat("<li class=\"post\"><span class=\"autor\">@", escapar(p.autor)),
@@ -40,7 +40,7 @@ fn fila(p: Post, i: Int) -> String {
     );
 }
 
-fn filas(ps: List<Post>, i: Int) -> String {
+fn filas(ps: List<Post>, i: Int) -> Html {
     if i < len(ps) {
         return concat(fila(ps[i], i), filas(ps, i + 1));
     }
@@ -48,7 +48,7 @@ fn filas(ps: List<Post>, i: Int) -> String {
 }
 
 @client
-fn vista() -> String {
+fn vista() -> Html {
     let ps = posts;
     return concat("<ul class=\"feed\">", concat(filas(ps, 0), "</ul>"));
 }

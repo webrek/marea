@@ -14,6 +14,12 @@ pub enum Ty {
     Bool,
     String,
     Unit,
+    /// Marcado seguro para incrustar en el DOM. En runtime es una cadena; la
+    /// distinción es puramente estática y existe para que el escapado deje de
+    /// ser opcional: `render` solo acepta `Html`, y a `Html` solo se llega por
+    /// `escapar(...)`, por `html("...")` (confianza explícita) o desde un
+    /// literal del propio fuente, que es de confianza por construcción.
+    Html,
     /// Referencia a un alias de tipo declarado por el usuario (`User`).
     Named(String),
     /// Unión de variantes nominales (`User | NotFound`). Valor opaco: sólo se
@@ -36,7 +42,7 @@ pub enum Ty {
 impl Ty {
     /// ¿Es un escalar primitivo?
     pub fn is_scalar(&self) -> bool {
-        matches!(self, Ty::Int | Ty::Float | Ty::Bool | Ty::String)
+        matches!(self, Ty::Int | Ty::Float | Ty::Bool | Ty::String | Ty::Html)
     }
 
     /// Nombre legible para mensajes de error.
@@ -47,6 +53,7 @@ impl Ty {
             Ty::Bool => "Bool".to_string(),
             Ty::String => "String".to_string(),
             Ty::Unit => "Unit".to_string(),
+            Ty::Html => "Html".to_string(),
             Ty::Named(n) => n.clone(),
             Ty::Union(vs) => vs.join(" | "),
             Ty::Fn { params, ret, .. } => {

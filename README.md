@@ -86,6 +86,29 @@ Lo que ya funciona:
   emitir** (la garantía del verificador dejó de ser opt-in); `--no-check` la
   omite si quieres compilar de todos modos.
 
+### El escapado no es opcional: el tipo `Html`
+
+El sumidero del DOM (`render`) solo acepta `Html`, y a `Html` solo se llega por
+tres caminos: `escapar(x)`, un literal del propio fuente (lo escribiste tú, es
+de confianza por construcción) o `html(s)`, la confianza explícita que se ve en
+una revisión de código. Un `String` que venga del store o de la red **no** es
+`Html`, así que incrustarlo sin escapar no compila:
+
+```marea
+render(concat("<li>", p.texto))            // error: se esperaba 'Html'
+render(concat("<li>", escapar(p.texto)))   // ✅
+```
+
+`Html` es subtipo de `String` (el marcado seguro vale donde va texto) pero no al
+revés — ahí está la garantía. `aTexto` de un número o un booleano ya es `Html`,
+porque no pueden contener marcado; el de un `String`, no. En tiempo de ejecución
+`Html` es una cadena: la distinción es puramente estática y no cuesta nada.
+
+Queda un hueco honesto: la garantía se aplica en `render`. En `marea build-app`
+la vista se monta directamente en el DOM, así que declara `vista() -> Html`
+(como hacen `examples/web-likes.mar` y `site/marea-demo.mar`) para que el
+compilador la cubra igual.
+
 Lo que **todavía no** existe: en el **backend WASM**, flotantes, `match`, tipos
 unión y registros inline (cada caso falla con un error claro, nunca con WAT
 roto). En el **lenguaje**, cierres/lambdas, genéricos en funciones, `import` y el

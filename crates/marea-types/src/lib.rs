@@ -476,6 +476,14 @@ impl Checker {
                 let bind_ty = if let Some(decl) = &l.ty {
                     self.validate_type_exists(decl);
                     let declared = self.ty_from_syntax(decl);
+                    // Un literal del fuente vale como Html (confianza directa).
+                    let value_ty = if matches!(declared, Ty::Html)
+                        && matches!(l.value, Expr::Str { .. })
+                    {
+                        Ty::Html
+                    } else {
+                        value_ty.clone()
+                    };
                     // `reactive` es laxo: no exige el subtipado estricto.
                     if !l.reactive && !self.is_subtype(&value_ty, &declared) {
                         self.error(TypeError::new(
@@ -512,11 +520,13 @@ impl Checker {
                     .insert(l.name.clone(), (bind_ty, l.mutable));
             }
             Stmt::Return { value, span } => {
+                let expected = self.current_return.clone();
+                // Un literal del fuente es de confianza: vale como Html.
                 let ret_ty = match value {
+                    Some(e) if matches!(expected, Ty::Html) => self.check_expr_html(e),
                     Some(e) => self.check_expr(e),
                     None => Ty::Unit,
                 };
-                let expected = self.current_return.clone();
                 if !self.is_subtype(&ret_ty, &expected) {
                     let s = value.as_ref().map(|e| e.span()).unwrap_or(*span);
                     self.error(TypeError::new(
@@ -611,6 +621,19 @@ impl Checker {
             Expr::List { elements, span } => self.check_list(elements, *span),
             Expr::Index { object, index, .. } => self.check_index(object, index),
         }
+    }
+
+    /// Como `check_expr`, pero tratando los literales de cadena del propio
+    /// fuente como `Html`. Un literal lo escribió el programador, no un usuario:
+    /// es de confianza por construcción. Gracias a esto el idioma habitual
+    /// —`concat("<li>", escapar(x))`— sigue tipando sin conversiones, mientras
+    /// que `concat(p.texto, ...)` (dato del store) NO produce Html.
+    fn check_expr_html(&mut self, e: &Expr) -> Ty {
+        let t = self.check_expr(e);
+        if matches!(e, Expr::Str { .. }) && matches!(t, Ty::String) {
+            return Ty::Html;
+        }
+        t
     }
 
     fn resolve_ident(&mut self, name: &str, span: Span) -> Ty {
@@ -900,6 +923,34 @@ impl Checker {
                         ));
                     }
                 }
+                // Un Int/Float/Bool no puede contener marcado, así que su
+                // texto es seguro para el DOM: se tipa como Html y el idioma
+                // `concat(html, aTexto(n))` sigue funcionando sin conversiones.
+                // Un String sí puede traer marcado: sigue siendo String.
+                return match arg_tys.first() {
+                    Some(Ty::Int) | Some(Ty::Float) | Some(Ty::Bool) => Ty::Html,
+                    _ => Ty::String,
+                };
+            }
+            // `concat` propaga la seguridad: si los dos lados son marcado
+            // seguro, el resultado lo es. Con un solo lado inseguro cae a String
+            // y entonces no puede llegar a `render`, que es el objetivo.
+            if name == "concat" {
+                let arg_tys: Vec<Ty> = args.iter().map(|a| self.check_expr_html(a)).collect();
+                if self.arity("concat", &arg_tys, 2, span) {
+                    for (i, t) in arg_tys.iter().enumerate() {
+                        if !matches!(t, Ty::String | Ty::Html | Ty::Unknown) {
+                            self.error(TypeError::new(
+                                "E_ARG_TYPE",
+                                format!("concat espera String, no '{}'", t.display()),
+                                args[i].span(),
+                            ));
+                        }
+                    }
+                    if arg_tys.iter().all(|t| matches!(t, Ty::Html)) {
+                        return Ty::Html;
+                    }
+                }
                 return Ty::String;
             }
         }
@@ -928,6 +979,14 @@ impl Checker {
                     ));
                 } else {
                     for (i, (pty, aty)) in params.iter().zip(arg_tys.iter()).enumerate() {
+                        // Un literal de cadena del propio fuente es de confianza:
+                        // vale donde se espera marcado seguro (`render("...")`).
+                        let literal_confiable = matches!(pty, Ty::Html)
+                            && matches!(aty, Ty::String)
+                            && matches!(args[i], Expr::Str { .. });
+                        if literal_confiable {
+                            continue;
+                        }
                         if !self.is_subtype(aty, pty) {
                             self.error(TypeError::new(
                                 "E_ARG_TYPE",
@@ -1613,6 +1672,10 @@ impl Checker {
         }
         match (sub, sup) {
             (a, b) if a == b => true,
+            // Un marcado seguro vale donde se espera texto; lo contrario no,
+            // que es justamente lo que impide que un dato sin escapar llegue al
+            // DOM. La conversión String -> Html es explícita: `escapar`/`html`.
+            (Ty::Html, Ty::String) => true,
             // Una variante nominal individual es subtipo de la unión que la contiene.
             (Ty::Named(n), Ty::Union(vs)) => vs.contains(n),
             // Una unión es subtipo de otra si todas sus variantes están contenidas.
@@ -1701,7 +1764,7 @@ impl Checker {
 fn es_builtin_sincrono(name: &str) -> bool {
     matches!(
         name,
-        "print" | "concat" | "render" | "len" | "aTexto" | "escapar"
+        "print" | "concat" | "render" | "len" | "aTexto" | "escapar" | "html"
     )
 }
 
@@ -1733,7 +1796,7 @@ fn callee_name(callee: &Expr) -> String {
 /// ¿Es un tipo serializable a través de la frontera de red?
 fn is_serializable(ty: &Ty) -> bool {
     match ty {
-        Ty::Int | Ty::Float | Ty::Bool | Ty::String | Ty::Unit | Ty::Unknown => true,
+        Ty::Int | Ty::Float | Ty::Bool | Ty::String | Ty::Html | Ty::Unit | Ty::Unknown => true,
         // Las uniones de etiquetas/escalares son serializables (etiqueta + datos).
         Ty::Union(_) => true,
         Ty::Named(_) => true,

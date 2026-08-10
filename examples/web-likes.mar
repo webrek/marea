@@ -37,7 +37,7 @@ reactive mut posts = [];
 // 'autor' y 'texto' vienen del store, que se llena por RPC: se escapan antes de
 // incrustarlos, si no cualquiera podría persistir marcado y ejecutarlo en el
 // navegador de todos los visitantes.
-fn fila(p: Post, i: Int) -> String {
+fn fila(p: Post, i: Int) -> Html {
     return concat(
         concat(
             concat("<li>", concat(escapar(p.autor), concat(": ", escapar(p.texto)))),
@@ -50,7 +50,7 @@ fn fila(p: Post, i: Int) -> String {
     );
 }
 
-fn filas(ps: List<Post>, i: Int) -> String {
+fn filas(ps: List<Post>, i: Int) -> Html {
     if i < len(ps) {
         return concat(fila(ps[i], i), filas(ps, i + 1));
     }
@@ -59,7 +59,7 @@ fn filas(ps: List<Post>, i: Int) -> String {
 
 // La vista lee 'posts' (reactiva) en su parte síncrona y devuelve el HTML.
 @client
-fn vista() -> String {
+fn vista() -> Html {
     let ps = posts;
     return concat("<ul>", concat(filas(ps, 0), "</ul>"));
 }

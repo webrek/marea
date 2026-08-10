@@ -650,6 +650,7 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String, String> {
                     | "print"
                     | "render"
                     | "escapar"
+                    | "html"
             ) {
                 return Err(format!(
                     "'{name}' es un builtin del runtime de TypeScript; no existe en el backend WASM"

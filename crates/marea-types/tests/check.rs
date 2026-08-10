@@ -903,3 +903,66 @@ fn una_reactive_derivada_local_es_inmutable() {
     );
     assert!(has_code(&errs, "E_ASSIGN_IMMUTABLE"), "{:?}", codes(&errs));
 }
+
+// --- el tipo Html: el escapado deja de ser opcional ---
+
+// Un dato del store incrustado en el DOM sin escapar es ahora un error de
+// compilación, no un XSS que hay que acordarse de evitar.
+#[test]
+fn un_dato_sin_escapar_no_llega_al_dom() {
+    let errs = check_src(
+        "type Post = { texto: String };\n\
+         @client fn vista(p: Post) { render(concat(\"<li>\", p.texto)); }",
+    );
+    assert!(has_code(&errs, "E_ARG_TYPE"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn el_mismo_dato_escapado_si_llega() {
+    let errs = check_src(
+        "type Post = { texto: String };\n\
+         @client fn vista(p: Post) { render(concat(\"<li>\", escapar(p.texto))); }",
+    );
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// Un literal del propio fuente lo escribió el programador: es de confianza y no
+// necesita conversión, ni como argumento ni como retorno.
+#[test]
+fn los_literales_del_fuente_valen_como_html() {
+    let errs = check_src("@client fn f() { render(\"no existe\"); }");
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+    let errs = check_src("fn f() -> Html { return \"\"; }");
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// La confianza explícita existe, pero se ve en el fuente (y en una revisión).
+#[test]
+fn html_marca_una_cadena_como_segura() {
+    let errs = check_src("@client fn f(s: String) { render(html(s)); }");
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// Un número no puede contener marcado: su texto es seguro y el idioma
+// `concat(literal, aTexto(n))` sigue funcionando sin conversiones.
+#[test]
+fn el_texto_de_un_numero_es_seguro() {
+    let errs = check_src("@client fn f(n: Int) { render(concat(\"n=\", aTexto(n))); }");
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// Pero el de un String no: puede traer marcado.
+#[test]
+fn el_texto_de_un_string_no_es_seguro() {
+    let errs = check_src("@client fn f(s: String) { render(concat(\"x=\", aTexto(s))); }");
+    assert!(has_code(&errs, "E_ARG_TYPE"), "{:?}", codes(&errs));
+}
+
+// Html vale donde se espera texto; lo contrario no, que es la garantía.
+#[test]
+fn html_es_subtipo_de_string_pero_no_al_reves() {
+    let errs = check_src("@client fn f(s: String) -> String { return escapar(s); }");
+    assert!(errs.is_empty(), "Html debe valer como String: {:?}", codes(&errs));
+    let errs = check_src("@client fn f(s: String) -> Html { return s; }");
+    assert!(has_code(&errs, "E_RETURN_TYPE_MISMATCH"), "{:?}", codes(&errs));
+}

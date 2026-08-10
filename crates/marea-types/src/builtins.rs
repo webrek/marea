@@ -24,8 +24,9 @@ pub fn lookup(name: &str) -> Option<Ty> {
             ret: Box::new(Ty::String),
             location: None,
         }),
+        // 'render' solo acepta marcado seguro: es el sumidero del DOM.
         "render" => Some(Ty::Fn {
-            params: vec![Ty::Unknown],
+            params: vec![Ty::Html],
             ret: Box::new(Ty::Unit),
             location: None,
         }),
@@ -47,7 +48,14 @@ pub fn lookup(name: &str) -> Option<Ty> {
         // se ejecuta como marcado en el navegador de todos los visitantes.
         "escapar" => Some(Ty::Fn {
             params: vec![Ty::Unknown],
-            ret: Box::new(Ty::String),
+            ret: Box::new(Ty::Html),
+            location: None,
+        }),
+        // Confianza explícita: marca una cadena como marcado ya seguro. Es la
+        // única puerta de String a Html, y por eso se ve en la revisión.
+        "html" => Some(Ty::Fn {
+            params: vec![Ty::String],
+            ret: Box::new(Ty::Html),
             location: None,
         }),
         // Estado del servidor: 'guardar(x)' añade al store; 'todos()' lo lee.
@@ -84,6 +92,7 @@ pub fn type_lookup(name: &str) -> Option<Ty> {
         "Float" => Some(Ty::Float),
         "Bool" => Some(Ty::Bool),
         "String" => Some(Ty::String),
+        "Html" => Some(Ty::Html),
         "Unit" => Some(Ty::Unit),
         // `Record` es el tipo registro abierto: acceso a campo → Unknown.
         "Record" => Some(Ty::Unknown),
@@ -102,6 +111,7 @@ pub const VALUE_NAMES: &[&str] = &[
     "len",
     "aTexto",
     "escapar",
+    "html",
     "guardar",
     "todos",
     "actualizar",
@@ -112,7 +122,7 @@ pub const VALUE_NAMES: &[&str] = &[
 /// Todos los nombres de tipo builtin. `List` no está en `type_lookup` (se trata
 /// como caso especial por su argumento) pero sí es un nombre de tipo válido.
 pub const TYPE_NAMES: &[&str] = &[
-    "Int", "Float", "Bool", "String", "Unit", "Record", "List",
+    "Int", "Float", "Bool", "String", "Unit", "Html", "Record", "List",
 ];
 
 #[cfg(test)]
