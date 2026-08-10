@@ -15,9 +15,13 @@ fn getUser(id: UserId) -> User | NotFound {
 
 @client
 fn perfil(id: UserId) {
-    // 'reactive': cuando el valor cambie, la vista se recomputa sola.
-    reactive usuario = getUser(id);
+    // El cruce de la frontera es asíncrono, así que se hace en el cuerpo de la
+    // función y no en el inicializador de una 'reactive' (que se compila a un
+    // memo síncrono: no habría dónde esperar la respuesta).
+    let usuario = getUser(id);
 
+    // El retorno es una unión opaca: no se puede leer '.nombre' sin pasar por
+    // un 'match', que estrecha cada rama a su variante.
     match usuario {
         NotFound => render("Usuario no encontrado"),
         _ => render(usuario.nombre),

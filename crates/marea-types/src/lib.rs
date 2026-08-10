@@ -89,6 +89,10 @@ struct Checker {
     scopes: Vec<HashMap<String, (Ty, bool)>>,
     /// Ubicación de la función que se está chequeando (Fase B).
     current_location: Option<Location>,
+    /// Contexto de inicializador que NO puede cruzar la red: el de una variable
+    /// `reactive` (se compila a un memo síncrono) o el de una global de módulo
+    /// (se evalúa al importar). Lleva la etiqueta para el mensaje de error.
+    init_context: Option<&'static str>,
     /// Tipo de retorno declarado de la función actual.
     current_return: Ty,
     errors: Vec<TypeError>,
@@ -106,6 +110,7 @@ impl Checker {
             reactive_globals: std::collections::HashSet::new(),
             scopes: Vec::new(),
             current_location: None,
+            init_context: None,
             current_return: Ty::Unit,
             errors: Vec::new(),
             crossings: Vec::new(),
@@ -126,13 +131,28 @@ impl Checker {
                 // referir funciones, builtins y literales, no variables locales).
                 self.scopes = vec![HashMap::new()];
                 self.current_location = None;
+                self.init_context = Some("el inicializador de una variable de módulo");
                 let ty = match &l.ty {
                     Some(t) => {
                         self.validate_type_exists(t);
+                        // Se tipa igual el valor, para reportar sus errores.
+                        self.check_expr(&l.value);
                         self.ty_from_syntax(t)
                     }
                     None => self.check_expr(&l.value),
                 };
+                self.init_context = None;
+                // Una global no puede llamarse como un builtin: el bundle
+                // generado importa los builtins del runtime, así que declararla
+                // produce un `const` que redeclara el import (SyntaxError, el
+                // archivo entero no carga). Misma regla que para las funciones.
+                if builtins::lookup(&l.name).is_some() {
+                    self.error(TypeError::new(
+                        "E_REDEFINE_BUILTIN",
+                        format!("no se puede redefinir el builtin '{}'", l.name),
+                        l.span,
+                    ));
+                }
                 self.globals.insert(l.name.clone(), (ty, l.mutable));
                 if l.reactive {
                     self.reactive_globals.insert(l.name.clone());
@@ -407,7 +427,14 @@ impl Checker {
     fn check_stmt(&mut self, stmt: &Stmt) {
         match stmt {
             Stmt::Let(l) => {
+                // Una `reactive` se compila a un memo con cuerpo SÍNCRONO, así
+                // que su inicializador no puede contener un cruce de red.
+                let prev_init = self.init_context;
+                if l.reactive {
+                    self.init_context = Some("el inicializador de una variable 'reactive'");
+                }
                 let value_ty = self.check_expr(&l.value);
+                self.init_context = prev_init;
                 // Tipo destino, si se anotó.
                 let bind_ty = if let Some(decl) = &l.ty {
                     self.validate_type_exists(decl);
@@ -914,6 +941,22 @@ impl Checker {
             None | Some(Location::Client) | Some(Location::Edge)
         );
         if is_valid_target && is_valid_source {
+            // Un cruce de red es asíncrono. Dentro de un inicializador que se
+            // evalúa de forma síncrona no hay dónde esperarlo: el memo de una
+            // `reactive` se compilaba a `__memo(() => (await f()))` —un await en
+            // una arrow no-async, es decir un SyntaxError que impide cargar el
+            // módulo— y una global de módulo disparaba el RPC al importar,
+            // antes de que el servidor existiera. Mejor un error claro aquí.
+            if let Some(ctx) = self.init_context {
+                self.error(TypeError::new(
+                    "E_BOUNDARY_IN_INIT",
+                    format!(
+                        "'{callee_name}' cruza la frontera de red y no puede llamarse en \
+                         {ctx}; llámala dentro de una función @client y asigna el resultado"
+                    ),
+                    span,
+                ));
+            }
             self.crossings.push(BoundaryCrossing {
                 callee: callee_name.clone(),
                 from,

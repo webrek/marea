@@ -22,13 +22,21 @@ fn getUser(id: UserId) -> User | NotFound {
 
 @client
 fn perfil(id: UserId) {
-    reactive usuario = getUser(id);   // se llama como si fuera local
-    match usuario {
+    let usuario = getUser(id);   // se llama como si fuera local
+    match usuario {             // la unión es opaca: obliga a un match
         NotFound => render("no existe"),
         _        => render(usuario.nombre),
     }
 }
 ```
+
+> **Las dos fronteras aún no se componen.** Cruzar la red es asíncrono y una
+> `reactive` se compila a un memo síncrono, así que hoy
+> `reactive x = llamadaRemota()` es un error del verificador
+> (`E_BOUNDARY_IN_INIT`) y no un programa válido: se cruza dentro de una función
+> y se asigna el resultado a la reactiva (como en `examples/web-likes.mar`).
+> Resolver esa intersección —previsiblemente con una primitiva de recurso cuyo
+> tipo sea `Cargando | T | Fallo`— es el siguiente paso del diseño.
 
 ## Estado: front-end + transpilador a TypeScript
 

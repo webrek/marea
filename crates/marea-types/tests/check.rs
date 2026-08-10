@@ -704,3 +704,51 @@ fn una_global_no_reactiva_si_es_visible_desde_server() {
     let errs = check_src("let saludo = \"hola\";\n@server fn dime() -> String { return saludo; }");
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
+
+// Fuga 1 de la auditoría: el patrón insignia `reactive x = llamadaRemota()` se
+// compilaba a `__memo(() => (await f()))` —await en una arrow no-async, o sea
+// un SyntaxError que impedía cargar el módulo entero—. Ahora es un error claro
+// del verificador en vez de código generado inválido.
+#[test]
+fn e_boundary_in_init_reactive() {
+    let errs = check_src(
+        "@server fn getUser(id: Int) -> Int | NotFound { return 1; }\n\
+         @client fn perfil(id: Int) { reactive u = getUser(id); print(u); }",
+    );
+    assert!(has_code(&errs, "E_BOUNDARY_IN_INIT"), "{:?}", codes(&errs));
+}
+
+// Una global de módulo se evalúa al importar, antes de que exista el servidor:
+// el RPC fallaba con ECONNREFUSED nada más cargar.
+#[test]
+fn e_boundary_in_init_global() {
+    let errs = check_src(
+        "@server fn suma(a: Int, b: Int) -> Int { return a + b; }\nlet x = suma(1, 2);",
+    );
+    assert!(has_code(&errs, "E_BOUNDARY_IN_INIT"), "{:?}", codes(&errs));
+}
+
+// El patrón correcto (cruzar dentro del cuerpo) sigue siendo válido.
+#[test]
+fn cruzar_la_frontera_en_el_cuerpo_es_valido() {
+    let errs = check_src(
+        "@server fn getUser(id: Int) -> Int { return 1; }\n\
+         @client fn perfil(id: Int) { let u = getUser(id); print(u); }",
+    );
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// Una reactiva local que NO cruza la red sigue siendo válida.
+#[test]
+fn reactive_sin_cruce_de_frontera_es_valida() {
+    let errs = check_src("@client fn f() { reactive mut n = 0; reactive doble = n * 2; print(doble); }");
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// Una global no puede llamarse como un builtin: el bundle importa los builtins
+// del runtime y el `const` generado los redeclaraba (SyntaxError al cargar).
+#[test]
+fn e_redefine_builtin_en_global() {
+    let errs = check_src("let render = 1;\n@client fn m() { print(render); }");
+    assert!(has_code(&errs, "E_REDEFINE_BUILTIN"), "{:?}", codes(&errs));
+}
