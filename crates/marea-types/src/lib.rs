@@ -1332,11 +1332,25 @@ impl Checker {
 
     /// Traduce un `Type` sintáctico al `Ty` interno (sin validar existencia).
     fn ty_from_syntax(&self, t: &Type) -> Ty {
+        self.ty_from_syntax_guarded(t, &mut std::collections::HashSet::new())
+    }
+
+    /// Igual que `ty_from_syntax`, pero con un conjunto de alias en expansión para
+    /// cortar los tipos registro estructuralmente recursivos (p.ej.
+    /// `type Nodo = { siguiente: Nodo }`, una lista enlazada perfectamente válida).
+    /// Sin esta guarda, expandir el campo `siguiente` vuelve a `Nodo` y recurre
+    /// hasta desbordar la pila. Nótese que estos tipos NO son un error —los ciclos
+    /// de alias *transparentes* (`type A = A`) sí, y esos ya se marcan en `cyclic`.
+    fn ty_from_syntax_guarded(
+        &self,
+        t: &Type,
+        expanding: &mut std::collections::HashSet<String>,
+    ) -> Ty {
         match t {
             Type::Name { name, args, .. } if name == "List" => {
                 // `List` o `List<T>`: el elemento es el argumento, o desconocido.
                 let elem = match args.first() {
-                    Some(a) => self.ty_from_syntax(a),
+                    Some(a) => self.ty_from_syntax_guarded(a, expanding),
                     None => Ty::Unknown,
                 };
                 Ty::List(Box::new(elem))
@@ -1353,7 +1367,16 @@ impl Checker {
                 // Alias a registro → registro; alias a otra cosa → su Ty;
                 // de lo contrario, Named opaco.
                 if let Some(alias) = self.aliases.get(name) {
-                    return self.ty_from_syntax(alias);
+                    // Si ya estábamos expandiendo este alias, la referencia es
+                    // recursiva: la dejamos opaca (`Named`) en vez de recurrir.
+                    // El acceso posterior (`n.siguiente`) la re-resuelve un nivel
+                    // por vez vía `resolve_named_to_record`.
+                    if !expanding.insert(name.clone()) {
+                        return Ty::Named(name.clone());
+                    }
+                    let ty = self.ty_from_syntax_guarded(alias, expanding);
+                    expanding.remove(name);
+                    return ty;
                 }
                 Ty::Named(name.clone())
             }
@@ -1371,7 +1394,7 @@ impl Checker {
             Type::Record { fields, .. } => Ty::Record(
                 fields
                     .iter()
-                    .map(|f| (f.name.clone(), self.ty_from_syntax(&f.ty)))
+                    .map(|f| (f.name.clone(), self.ty_from_syntax_guarded(&f.ty, expanding)))
                     .collect(),
             ),
         }
@@ -1416,6 +1439,21 @@ impl Checker {
 
     /// Relación de subtipado. `Unknown` es subtipo y supertipo de todo (silencia).
     fn is_subtype(&self, sub: &Ty, sup: &Ty) -> bool {
+        self.is_subtype_rec(sub, sup, &mut std::collections::HashSet::new())
+    }
+
+    /// Igual que `is_subtype`, pero con un conjunto de nombres de alias ya
+    /// desplegados para dar subtipado *coinductivo* sobre tipos registro
+    /// mutuamente recursivos (`type A = { x: B }; type B = { y: A }`). Sin la
+    /// guarda, `is_subtype` alterna desplegando `A`→`B`→`A`… hasta desbordar la
+    /// pila. Al reencontrar un nombre en despliegue lo aceptamos: es la regla
+    /// estándar de subtipado equirecursivo (asumir la meta y verla cumplida).
+    fn is_subtype_rec(
+        &self,
+        sub: &Ty,
+        sup: &Ty,
+        unfolding: &mut std::collections::HashSet<String>,
+    ) -> bool {
         if matches!(sub, Ty::Unknown) || matches!(sup, Ty::Unknown) {
             return true;
         }
@@ -1428,12 +1466,12 @@ impl Checker {
             // Listas: covariantes en el elemento. `List<?>` (lista vacía o de
             // elemento desconocido) es subtipo de cualquier `List<T>` porque el
             // elemento Unknown es subtipo de todo.
-            (Ty::List(ea), Ty::List(eb)) => self.is_subtype(ea, eb),
+            (Ty::List(ea), Ty::List(eb)) => self.is_subtype_rec(ea, eb, unfolding),
             // Registros estructurales: ancho + profundidad.
             (Ty::Record(sa), Ty::Record(sb)) => sb.iter().all(|(n, tb)| {
                 sa.iter()
                     .find(|(na, _)| na == n)
-                    .map(|(_, ta)| self.is_subtype(ta, tb))
+                    .map(|(_, ta)| self.is_subtype_rec(ta, tb, unfolding))
                     .unwrap_or(false)
             }),
             // Un nombre de tipo que resuelve a un registro estructural es
@@ -1441,17 +1479,36 @@ impl Checker {
             // (tipado nominalmente como su alias) es subtipo del mismo `type` que
             // se declaró como `{ ... }` (p.ej. `fn origen() -> Punto` que devuelve
             // `Punto { x, y }`), y viceversa.
-            (Ty::Named(n), Ty::Record(_)) => match self.resolve_named_to_record(n) {
-                Some(Some(fields)) => self.is_subtype(&Ty::Record(fields), sup),
-                // `Record` abierto: acepta cualquier registro estructural.
-                Some(None) => true,
-                None => false,
-            },
-            (Ty::Record(_), Ty::Named(n)) => match self.resolve_named_to_record(n) {
-                Some(Some(fields)) => self.is_subtype(sub, &Ty::Record(fields)),
-                Some(None) => true,
-                None => false,
-            },
+            (Ty::Named(n), Ty::Record(_)) => {
+                // Ya en despliegue → aceptar (regla coinductiva).
+                if !unfolding.insert(n.clone()) {
+                    return true;
+                }
+                let ok = match self.resolve_named_to_record(n) {
+                    Some(Some(fields)) => {
+                        self.is_subtype_rec(&Ty::Record(fields), sup, unfolding)
+                    }
+                    // `Record` abierto: acepta cualquier registro estructural.
+                    Some(None) => true,
+                    None => false,
+                };
+                unfolding.remove(n);
+                ok
+            }
+            (Ty::Record(_), Ty::Named(n)) => {
+                if !unfolding.insert(n.clone()) {
+                    return true;
+                }
+                let ok = match self.resolve_named_to_record(n) {
+                    Some(Some(fields)) => {
+                        self.is_subtype_rec(sub, &Ty::Record(fields), unfolding)
+                    }
+                    Some(None) => true,
+                    None => false,
+                };
+                unfolding.remove(n);
+                ok
+            }
             _ => false,
         }
     }

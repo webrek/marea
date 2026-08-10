@@ -101,6 +101,43 @@ fn e_cyclic_type() {
     assert!(has_code(&errs, "E_CYCLIC_TYPE"), "{:?}", codes(&errs));
 }
 
+// Regresión C-1: un tipo registro *estructuralmente* recursivo (lista enlazada)
+// es válido y NO debe ser un ciclo transparente. Antes desbordaba la pila al
+// expandir el campo recursivo en `ty_from_syntax`; ahora la referencia queda
+// opaca y se re-resuelve un nivel por vez.
+#[test]
+fn tipo_registro_recursivo_directo_no_crashea() {
+    let errs = check_src(
+        "type Nodo = { valor: Int, siguiente: Nodo };\n\
+         fn cabeza(n: Nodo) -> Int { return n.valor; }",
+    );
+    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+}
+
+// Regresión C-1: recursión mutua entre registros. Antes desbordaba la pila en
+// `is_subtype`, que alternaba desplegando A→B→A…; ahora el subtipado es
+// coinductivo sobre los nombres en despliegue.
+#[test]
+fn tipos_registro_mutuamente_recursivos_no_crashean() {
+    let errs = check_src(
+        "type A = { x: B };\n\
+         type B = { y: A };\n\
+         fn f(a: A) -> B { return a.x; }",
+    );
+    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+}
+
+// Regresión C-1: un `store` de tipo recursivo también entraba por la misma vía.
+#[test]
+fn store_recursivo_no_crashea() {
+    let errs = check_src(
+        "type Nodo = { v: Int, sig: Nodo };\n\
+         store Nodo;\n\
+         @server fn add(n: Nodo) { guardar(n); }",
+    );
+    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+}
+
 // ============================ TIPOS ============================
 
 #[test]
