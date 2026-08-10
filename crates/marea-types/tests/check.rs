@@ -682,3 +682,25 @@ fn escapar_es_un_builtin() {
     let errs = check_src("@client fn f(s: String) -> String { return escapar(s); }");
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
+
+// A-2b: una global `reactive` es estado de UI y solo existe en el bundle del
+// cliente. Leerla desde @server compilaba a un ReferenceError en cada RPC;
+// ahora es un error de ubicación, simétrico a E_STATE_OFF_SERVER.
+#[test]
+fn e_reactive_off_client() {
+    let errs = check_src("reactive mut contador = 0;\n@server fn leer() -> Int { return contador; }");
+    assert!(has_code(&errs, "E_REACTIVE_OFF_CLIENT"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn leer_una_reactiva_desde_client_es_valido() {
+    let errs = check_src("reactive mut contador = 0;\n@client fn leer() -> Int { return contador; }");
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// Una global NO reactiva sí es visible desde el servidor (es una constante).
+#[test]
+fn una_global_no_reactiva_si_es_visible_desde_server() {
+    let errs = check_src("let saludo = \"hola\";\n@server fn dime() -> String { return saludo; }");
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}

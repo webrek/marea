@@ -79,6 +79,10 @@ struct Checker {
     /// Variables de nivel superior (`let`/`reactive` de módulo) y su mutabilidad.
     /// Visibles desde cualquier función; son el estado reactivo de la app.
     globals: HashMap<String, (Ty, bool)>,
+    /// Nombres de las globales declaradas `reactive`. Son estado de UI que vive
+    /// en el cliente, así que leerlas desde `@server` es un error de ubicación
+    /// (simétrico a `E_STATE_OFF_SERVER` para el store).
+    reactive_globals: std::collections::HashSet<String>,
     /// Pila de scopes léxicos de variables (Fase B). El bool es la mutabilidad
     /// (`true` si se declaró `mut`/`reactive`); se usa para rechazar reasignar
     /// un binding inmutable.
@@ -99,6 +103,7 @@ impl Checker {
             cyclic: std::collections::HashSet::new(),
             store_elem: None,
             globals: HashMap::new(),
+            reactive_globals: std::collections::HashSet::new(),
             scopes: Vec::new(),
             current_location: None,
             current_return: Ty::Unit,
@@ -129,6 +134,9 @@ impl Checker {
                     None => self.check_expr(&l.value),
                 };
                 self.globals.insert(l.name.clone(), (ty, l.mutable));
+                if l.reactive {
+                    self.reactive_globals.insert(l.name.clone());
+                }
             }
         }
         self.scopes = Vec::new();
@@ -539,8 +547,26 @@ impl Checker {
             }
         }
         // Variable global (estado reactivo de módulo).
-        if let Some((ty, _)) = self.globals.get(name) {
-            return ty.clone();
+        if let Some(ty) = self.globals.get(name).map(|(t, _)| t.clone()) {
+            // Una global `reactive` es estado de UI: solo existe en el bundle
+            // del cliente. Leerla desde @server compilaba a un `ReferenceError`
+            // en cada RPC, así que se rechaza aquí con un mensaje accionable.
+            if self.reactive_globals.contains(name)
+                && matches!(
+                    self.current_location,
+                    Some(Location::Server) | Some(Location::Edge)
+                )
+            {
+                self.error(TypeError::new(
+                    "E_REACTIVE_OFF_CLIENT",
+                    format!(
+                        "'{name}' es estado reactivo del cliente y no existe en el \
+                         servidor; pásalo como argumento o léelo desde una función @client"
+                    ),
+                    span,
+                ));
+            }
+            return ty;
         }
         // Función declarada.
         if let Some(sig) = self.fns.get(name) {

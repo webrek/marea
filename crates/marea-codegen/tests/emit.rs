@@ -431,3 +431,28 @@ fn el_builtin_escapar_esta_en_los_dos_runtimes() {
     assert!(p.runtime.contains("export function escapar"), "falta en runtime.ts");
     assert!(p.client.contains("escapar"), "{}", p.client);
 }
+
+// A-3: una función sin anotación es local desde cualquier lado, así que debe
+// existir en AMBOS bundles. Antes solo se emitía en el cliente y extraer un
+// helper usado por un @server daba ReferenceError en cada RPC.
+#[test]
+fn las_funciones_compartidas_llegan_al_servidor() {
+    let p = build("fn ayuda(x: Int) -> Int { return x * 2; }\n@server fn calc(n: Int) -> Int { return ayuda(n); }");
+    assert!(p.server.contains("function ayuda"), "falta el helper:\n{}", p.server);
+}
+
+// Una @client NO debe filtrarse al bundle del servidor.
+#[test]
+fn las_funciones_client_no_llegan_al_servidor() {
+    let p = build("@client fn ui() { print(\"x\"); }\n@server fn s() { print(\"y\"); }");
+    assert!(!p.server.contains("function ui"), "@client no debe ir al servidor:\n{}", p.server);
+}
+
+// A-2: una global no reactiva es una constante de módulo visible desde
+// cualquier función; antes se descartaba y daba ReferenceError.
+#[test]
+fn las_globales_no_reactivas_se_emiten_en_ambos_bundles() {
+    let p = build("let saludo = \"hola\";\n@server fn dime() -> String { return saludo; }\n@client fn m() { print(saludo); }");
+    assert!(p.server.contains("const saludo"), "falta en server:\n{}", p.server);
+    assert!(p.client.contains("const saludo"), "falta en client:\n{}", p.client);
+}

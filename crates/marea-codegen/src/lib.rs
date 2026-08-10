@@ -47,16 +47,31 @@ fn is_remote(f: &FnDecl) -> bool {
 pub fn emit(module: &Module) -> Project {
     let mut remote = Vec::new();
     let mut local = Vec::new();
+    // Sin anotación = local desde cualquier lado: va a AMBOS bundles.
+    let mut shared = Vec::new();
     for item in &module.items {
         if let Item::Fn(f) = item {
             if is_remote(f) {
                 remote.push(f);
             } else {
+                if f.location.is_none() {
+                    shared.push(f);
+                }
                 local.push(f);
             }
         }
-        // Los `type` y `let` de nivel superior se ignoran en esta fase.
     }
+    // Las globales no reactivas son constantes de módulo: el verificador las
+    // declara visibles desde cualquier función, así que deben existir en los dos
+    // bundles (antes se descartaban y daban ReferenceError).
+    let plain_globals: Vec<&LetStmt> = module
+        .items
+        .iter()
+        .filter_map(|it| match it {
+            Item::Let(l) if !l.reactive => Some(l),
+            _ => None,
+        })
+        .collect();
 
     // El archivo del store por defecto lleva la firma del esquema de `store T;`,
     // para que dos apps con esquemas distintos no compartan archivo.
@@ -80,8 +95,8 @@ pub fn emit(module: &Module) -> Project {
 
     Project {
         runtime,
-        server: emit_server(&remote),
-        client: emit_client(&remote, &local),
+        server: emit_server(&remote, &shared, &plain_globals),
+        client: emit_client(&remote, &local, &plain_globals),
         demo: emit_demo(&local),
     }
 }
@@ -137,15 +152,27 @@ fn build_node_runtime(module: &Module) -> String {
 pub fn emit_app(module: &Module) -> AppProject {
     let mut remote = Vec::new();
     let mut local = Vec::new();
+    let mut shared = Vec::new();
     for item in &module.items {
         if let Item::Fn(f) = item {
             if is_remote(f) {
                 remote.push(f);
             } else {
+                if f.location.is_none() {
+                    shared.push(f);
+                }
                 local.push(f);
             }
         }
     }
+    let plain_globals: Vec<&LetStmt> = module
+        .items
+        .iter()
+        .filter_map(|it| match it {
+            Item::Let(l) if !l.reactive => Some(l),
+            _ => None,
+        })
+        .collect();
     let top_reactives: Vec<&LetStmt> = module
         .items
         .iter()
@@ -170,7 +197,7 @@ pub fn emit_app(module: &Module) -> AppProject {
 
     AppProject {
         runtime: build_node_runtime(module),
-        server: emit_server(&remote),
+        server: emit_server(&remote, &shared, &plain_globals),
         serve,
         client_js: emit_client_js(&remote, &local, &top_reactives, &reactive_names),
         index_html: APP_HTML.to_string(),
@@ -470,10 +497,30 @@ globalThis.marea = marea;
 globalThis.mareaCadena = decodificarCadena;
 "#;
 
-fn emit_server(remote: &[&FnDecl]) -> String {
+/// El lado servidor: handlers `@server`/`@edge` MÁS las funciones sin anotación
+/// y las globales no reactivas que aquéllos puedan usar. Sin esto, extraer un
+/// helper compartido (el refactor más común que existe) dejaba `server.ts` con
+/// una llamada a algo que no está declarado: `ReferenceError` en cada RPC, sobre
+/// código que el verificador había aprobado.
+fn emit_server(remote: &[&FnDecl], shared: &[&FnDecl], globals: &[&LetStmt]) -> String {
     let mut s = String::new();
     s.push_str("// Generado por Marea — lado servidor.\n");
     s.push_str(&format!("import {} from \"./runtime.ts\";\n\n", BUILTINS));
+    let no_reactive: HashSet<String> = HashSet::new();
+    for l in globals {
+        s.push_str(&format!(
+            "const {} = {};\n",
+            l.name,
+            emit_expr(&l.value, &no_reactive)
+        ));
+    }
+    if !globals.is_empty() {
+        s.push('\n');
+    }
+    for f in shared {
+        s.push_str(&emit_fn_def(f, false));
+        s.push('\n');
+    }
     for f in remote {
         s.push_str(&emit_fn_def(f, false));
         s.push('\n');
@@ -491,10 +538,21 @@ fn emit_server(remote: &[&FnDecl]) -> String {
     s
 }
 
-fn emit_client(remote: &[&FnDecl], local: &[&FnDecl]) -> String {
+fn emit_client(remote: &[&FnDecl], local: &[&FnDecl], globals: &[&LetStmt]) -> String {
     let mut s = String::new();
     s.push_str("// Generado por Marea — lado cliente.\n");
     s.push_str(&format!("import {} from \"./runtime.ts\";\n\n", BUILTINS));
+    let no_reactive: HashSet<String> = HashSet::new();
+    for l in globals {
+        s.push_str(&format!(
+            "const {} = {};\n",
+            l.name,
+            emit_expr(&l.value, &no_reactive)
+        ));
+    }
+    if !globals.is_empty() {
+        s.push('\n');
+    }
     for f in remote {
         s.push_str(&emit_stub(f));
         s.push('\n');
