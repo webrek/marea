@@ -657,3 +657,28 @@ fn variable_inexistente_sigue_siendo_error() {
     let errs = check_src("@client fn f() -> Int { return fantasma; }");
     assert!(has_code(&errs, "E_UNRESOLVED_NAME"), "códigos: {:?}", codes(&errs));
 }
+
+// A-4: un `let` de primer nivel que redeclara un parámetro generaba
+// `function f(x) { const x = 2; }` → SyntaxError en JS (y dos locales con el
+// mismo nombre en WASM). El cuerpo comparte scope con los parámetros.
+#[test]
+fn let_que_redeclara_un_parametro_es_error() {
+    let errs = check_src("@client fn f(x: Int) -> Int { let x = 2; return x; }");
+    assert!(has_code(&errs, "E_DUPLICATE_BINDING"), "{:?}", codes(&errs));
+}
+
+// Pero el shadowing en un bloque ANIDADO sigue siendo legal, igual que en JS.
+#[test]
+fn shadowing_de_parametro_en_bloque_anidado_es_valido() {
+    let errs = check_src(
+        "@client fn f(x: Int) -> Int { if true { let x = 2; print(x); } return x; }",
+    );
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// El builtin de escapado de HTML existe y tipa como String.
+#[test]
+fn escapar_es_un_builtin() {
+    let errs = check_src("@client fn f(s: String) -> String { return escapar(s); }");
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}

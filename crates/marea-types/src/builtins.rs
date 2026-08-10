@@ -42,6 +42,15 @@ pub fn lookup(name: &str) -> Option<Ty> {
             ret: Box::new(Ty::String),
             location: None,
         }),
+        // Neutraliza un texto para incrustarlo en HTML. Necesario porque el
+        // HTML se construye concatenando y `render` lo inyecta tal cual: sin
+        // esto, cualquier dato que haya cruzado el RPC (que no valida tipos)
+        // se ejecuta como marcado en el navegador de todos los visitantes.
+        "escapar" => Some(Ty::Fn {
+            params: vec![Ty::Unknown],
+            ret: Box::new(Ty::String),
+            location: None,
+        }),
         // Estado del servidor: 'guardar(x)' añade al store; 'todos()' lo lee.
         "guardar" => Some(Ty::Fn {
             params: vec![Ty::Unknown],
@@ -82,5 +91,57 @@ pub fn type_lookup(name: &str) -> Option<Ty> {
         // `Record` es el tipo registro abierto: acceso a campo → Unknown.
         "Record" => Some(Ty::Unknown),
         _ => None,
+    }
+}
+
+/// Todos los nombres de valor builtin, para consumidores externos (el servidor
+/// de lenguaje los ofrece en el completado). Es la ÚNICA fuente: antes el LSP
+/// mantenía su propia copia "espejo" y se desincronizó —no ofrecía ninguno de
+/// los builtins del store—, así que aquí se exporta y allá se consume.
+pub const VALUE_NAMES: &[&str] = &[
+    "print",
+    "concat",
+    "render",
+    "len",
+    "aTexto",
+    "escapar",
+    "guardar",
+    "todos",
+    "actualizar",
+    "borrar",
+    "db",
+    "NotFound",
+];
+
+/// Todos los nombres de tipo builtin. `List` no está en `type_lookup` (se trata
+/// como caso especial por su argumento) pero sí es un nombre de tipo válido.
+pub const TYPE_NAMES: &[&str] = &[
+    "Int", "Float", "Bool", "String", "Unit", "Record", "List",
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// La lista exportada y la tabla real no pueden divergir.
+    #[test]
+    fn value_names_coincide_con_lookup() {
+        for n in VALUE_NAMES {
+            assert!(lookup(n).is_some(), "'{n}' está en VALUE_NAMES pero no en lookup()");
+        }
+    }
+
+    #[test]
+    fn type_names_coincide_con_type_lookup() {
+        for n in TYPE_NAMES {
+            // `List` es el único caso especial sin entrada en type_lookup.
+            if *n == "List" {
+                continue;
+            }
+            assert!(
+                type_lookup(n).is_some(),
+                "'{n}' está en TYPE_NAMES pero no en type_lookup()"
+            );
+        }
     }
 }

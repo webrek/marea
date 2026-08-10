@@ -5,26 +5,28 @@
 //! lo hace el cliente. La única decisión contextual es la ubicación tras `@`,
 //! donde Marea solo admite `server`/`client`/`edge`.
 //!
-//! Builtins ESPEJO: los nombres se duplican aquí como listas propias (no se
-//! importan de los crates del compilador) para que el servidor de lenguaje
-//! quede aislado. Si el compilador cambia su tabla de builtins, estas listas
-//! deben actualizarse a la par.
+//! Builtins: se consumen de `marea_types::builtins`, que es la fuente única.
+//! Antes se duplicaban aquí como listas "espejo" y se desincronizaron (el
+//! completado no ofrecía ninguno de los builtins del store), así que ahora se
+//! importan del propio compilador y no pueden divergir.
 
 use lsp_types::{CompletionItem, CompletionItemKind, Position};
 
 use crate::documents::Document;
 
-/// Palabras clave del lenguaje (ESPEJO de la tabla del lexer).
+/// Palabras clave del lenguaje. `import` es token del lexer pero el parser no
+/// lo acepta como item, así que NO se ofrece: aceptar la sugerencia produciría
+/// un error de sintaxis.
 const KEYWORDS: &[&str] = &[
     "fn", "let", "mut", "reactive", "type", "if", "else", "match", "return",
-    "import", "effect",
+    "effect", "store", "true", "false",
 ];
 
-/// Valores builtin (ESPEJO). Nota: incluye `NotFound` y NO incluye `Error`.
-const BUILTIN_VALUES: &[&str] = &["print", "concat", "render", "db", "NotFound"];
+/// Valores builtin: la tabla real del compilador.
+const BUILTIN_VALUES: &[&str] = marea_types::builtins::VALUE_NAMES;
 
-/// Tipos builtin (ESPEJO).
-const BUILTIN_TYPES: &[&str] = &["Int", "Float", "Bool", "String", "Record", "List"];
+/// Tipos builtin: la tabla real del compilador.
+const BUILTIN_TYPES: &[&str] = marea_types::builtins::TYPE_NAMES;
 
 /// Ubicaciones válidas tras `@` (ESPEJO de [`marea_syntax::ast::Location`]).
 const LOCATIONS: &[&str] = &["server", "client", "edge"];

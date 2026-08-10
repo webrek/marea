@@ -34,10 +34,13 @@ fn feed() -> List<Post> {
 reactive mut posts = [];
 
 // --- render: cada post a HTML; el botón llama a marea.darLike(i) ---
+// 'autor' y 'texto' vienen del store, que se llena por RPC: se escapan antes de
+// incrustarlos, si no cualquiera podría persistir marcado y ejecutarlo en el
+// navegador de todos los visitantes.
 fn fila(p: Post, i: Int) -> String {
     return concat(
         concat(
-            concat("<li>", concat(p.autor, concat(": ", p.texto))),
+            concat("<li>", concat(escapar(p.autor), concat(": ", escapar(p.texto)))),
             concat("  (", concat(aTexto(p.likes), " likes)  "))
         ),
         concat(

@@ -349,3 +349,85 @@ fn store_file_lleva_la_firma_del_esquema() {
     assert!(p.runtime.contains("marea-store.Post-a.log"), "{}", p.runtime);
     assert!(!p.runtime.contains("__MAREA_STORE_DEFAULT__"), "placeholder sin sustituir");
 }
+
+// --- regresiones de codegen (auditoría) ---
+
+// A-1: una rama atrapa-todo en primera posición emitía `else` sin `if` previo,
+// es decir JS que no parsea y tumba el módulo entero al cargarlo.
+#[test]
+fn match_con_catch_all_primero_no_emite_else_suelto() {
+    let p = build("@client fn f(r: Int) { match r { x => print(x) } }");
+    assert!(
+        !p.client.contains("else {"),
+        "no debe haber `else` sin `if` previo:\n{}",
+        p.client
+    );
+}
+
+#[test]
+fn match_con_comodin_unico_no_emite_else_suelto() {
+    let p = build("@client fn f(r: Int) { match r { _ => print(1) } }");
+    assert!(!p.client.contains("else {"), "{}", p.client);
+}
+
+// Tras una rama atrapa-todo, el resto es inalcanzable: emitirla daría
+// `else if` después de un `else`.
+#[test]
+fn match_descarta_ramas_tras_el_catch_all() {
+    let p = build("@client fn g(r: Int) { match r { _ => print(1), A => print(2) } }");
+    assert!(!p.client.contains("else if"), "{}", p.client);
+    assert!(!p.client.contains("print(2)"), "rama inalcanzable emitida:\n{}", p.client);
+}
+
+// El caso que SÍ debe encadenar sigue haciéndolo.
+#[test]
+fn match_con_variantes_sigue_encadenando() {
+    let p = build("@client fn f(r: Int) { match r { A => print(1), B => print(2), _ => print(3) } }");
+    assert!(p.client.contains("else if"), "{}", p.client);
+    assert!(p.client.contains("else {"), "{}", p.client);
+}
+
+// C-3: la carga del store se memoiza como promesa; sin eso dos RPC concurrentes
+// creaban dos backends y el segundo pisaba al primero (ids duplicados / pérdida
+// silenciosa de escrituras en el backend de archivo).
+#[test]
+fn ensure_store_memoiza_la_promesa_de_carga() {
+    let p = build("store Int;\n@server fn g(x: Int) { guardar(x); }");
+    assert!(p.runtime.contains("__loading"), "la carga debe memoizarse:\n{}", p.runtime);
+}
+
+// M-11: un valor de entorno mal formado daba NaN, y `size > NaN` es siempre
+// false → el tope del cuerpo quedaba desactivado.
+#[test]
+fn los_limites_de_entorno_son_a_prueba_de_nan() {
+    let p = build("@client fn f() { print(\"x\"); }");
+    assert!(p.runtime.contains("__envInt"), "{}", p.runtime);
+    assert!(
+        !p.runtime.contains("Number(process.env.MAREA_MAX_BODY"),
+        "MAREA_MAX_BODY no debe parsearse con Number() crudo"
+    );
+}
+
+// C-2d: la raíz estática es el propio directorio de salida, así que sin lista
+// blanca `GET /server.ts` filtraba los handlers y `GET /*.log` el store.
+#[test]
+fn los_estaticos_solo_sirven_extensiones_en_lista_blanca() {
+    let p = build("@client fn f() { print(\"x\"); }");
+    assert!(
+        p.runtime.contains("const mime = __MIME[ext];"),
+        "debe resolver el MIME antes de leer el archivo:\n{}",
+        p.runtime
+    );
+    assert!(
+        !p.runtime.contains("application/octet-stream"),
+        "no debe haber tipo de reserva: eso servía .ts y .log"
+    );
+}
+
+// C-2c: el builtin de escapado debe llegar a ambos runtimes.
+#[test]
+fn el_builtin_escapar_esta_en_los_dos_runtimes() {
+    let p = build("@client fn f() { print(escapar(\"<b>\")); }");
+    assert!(p.runtime.contains("export function escapar"), "falta en runtime.ts");
+    assert!(p.client.contains("escapar"), "{}", p.client);
+}

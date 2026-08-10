@@ -27,8 +27,8 @@ reactive mut posts = [];
 fn fila(p: Post, i: Int) -> String {
     return concat(
         concat(
-            concat("<li class=\"post\"><span class=\"autor\">@", p.autor),
-            concat("</span> ", p.texto)
+            concat("<li class=\"post\"><span class=\"autor\">@", escapar(p.autor)),
+            concat("</span> ", escapar(p.texto))
         ),
         concat(
             concat(

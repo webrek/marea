@@ -11,7 +11,7 @@
 //! (no asignable a `A`, sin campos) y sólo se consume con `match`, que estrecha
 //! (narrowing) cada rama a su variante.
 
-mod builtins;
+pub mod builtins;
 mod error;
 mod ty;
 
@@ -359,7 +359,13 @@ impl Checker {
             self.validate_type_exists(rt);
         }
 
-        self.check_block(&f.body);
+        // El cuerpo comparte el scope de los parámetros en vez de empujar uno
+        // nuevo: así un `let` de primer nivel que redeclare un parámetro se
+        // detecta. En JS `function f(x) { let x = 2; }` es un SyntaxError (y en
+        // WASM da dos locales con el mismo nombre), así que dejarlo pasar
+        // producía código que no carga. El shadowing en bloques ANIDADOS sigue
+        // siendo legal, igual que en JS.
+        self.check_block_in_current_scope(&f.body);
 
         // Funciones con retorno no-Unit deben terminar en todo camino.
         if !matches!(self.current_return, Ty::Unit | Ty::Unknown) && !block_terminates(&f.body) {
@@ -377,10 +383,17 @@ impl Checker {
 
     fn check_block(&mut self, block: &Block) {
         self.scopes.push(HashMap::new());
+        self.check_block_in_current_scope(block);
+        self.scopes.pop();
+    }
+
+    /// Chequea las sentencias sin abrir un scope propio (el llamador ya abrió
+    /// el suyo). Lo usa el cuerpo de una función para compartir el scope con
+    /// sus parámetros.
+    fn check_block_in_current_scope(&mut self, block: &Block) {
         for stmt in &block.stmts {
             self.check_stmt(stmt);
         }
-        self.scopes.pop();
     }
 
     fn check_stmt(&mut self, stmt: &Stmt) {

@@ -8,15 +8,30 @@
 import http from "node:http";
 import fs from "node:fs";
 
+// Lee un entero positivo del entorno. Un valor ausente o mal formado cae al
+// valor por defecto en vez de convertirse en NaN: `size > NaN` es siempre false,
+// así que un `MAREA_MAX_BODY=ilimitado` desactivaría el tope del cuerpo, y un
+// timeout NaN desactivaría las defensas anti-slowloris que decimos aplicar.
+function __envInt(name: string, def: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return def;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    console.warn(`[marea] ${name}='${raw}' no es un entero positivo; se usa ${def}`);
+    return def;
+  }
+  return Math.floor(n);
+}
+
 // El puerto: PORT (lo fija el entorno de hosting, p.ej. Cloud Run) tiene
 // prioridad, luego MAREA_PORT, y 8787 por defecto en local.
-const MAREA_PORT = Number(process.env.PORT ?? process.env.MAREA_PORT ?? 8787);
+const MAREA_PORT = __envInt("PORT", __envInt("MAREA_PORT", 8787));
 // Escuchamos solo en loopback por defecto: la frontera de red es para el cliente
 // local de la app, no para exponer en la LAN. Se puede ampliar con MAREA_HOST.
 const MAREA_HOST = process.env.MAREA_HOST ?? "127.0.0.1";
 const MAREA_URL = `http://127.0.0.1:${MAREA_PORT}/__marea`;
 // Tope del cuerpo RPC (configurable) para no acumular memoria sin límite.
-const MAREA_MAX_BODY = Number(process.env.MAREA_MAX_BODY ?? 1_048_576); // 1 MiB
+const MAREA_MAX_BODY = __envInt("MAREA_MAX_BODY", 1_048_576); // 1 MiB
 
 type Handler = (args: unknown[]) => unknown | Promise<unknown>;
 // Tabla sin prototipo: así `fn` no puede resolver a métodos heredados de
@@ -50,6 +65,18 @@ function __serveStatic(req: http.IncomingMessage, res: http.ServerResponse): boo
     res.end();
     return true;
   }
+  // Lista blanca de extensiones servibles. Sin ella, la raíz estática (que es
+  // el propio directorio de salida) expone `server.ts` —la lista completa de
+  // handlers, anulando la anti-enumeración del endpoint— y el `.log` del store
+  // de archivo, es decir todos los datos persistidos.
+  const dot = path.lastIndexOf(".");
+  const ext = dot === -1 ? "" : path.slice(dot);
+  const mime = __MIME[ext];
+  if (mime === undefined) {
+    res.statusCode = 404;
+    res.end();
+    return true;
+  }
   const file = root + path;
   let data: Buffer;
   try {
@@ -59,8 +86,7 @@ function __serveStatic(req: http.IncomingMessage, res: http.ServerResponse): boo
     res.end();
     return true;
   }
-  const dot = path.lastIndexOf(".");
-  res.setHeader("content-type", __MIME[path.slice(dot)] ?? "application/octet-stream");
+  res.setHeader("content-type", mime);
   res.end(data);
   return true;
 }
@@ -126,8 +152,8 @@ export function startServer(): Promise<void> {
       });
     });
     // Cortar conexiones lentas/colgadas (defensa contra slowloris y fugas).
-    __server.requestTimeout = Number(process.env.MAREA_REQUEST_TIMEOUT ?? 15_000);
-    __server.headersTimeout = Number(process.env.MAREA_HEADERS_TIMEOUT ?? 10_000);
+    __server.requestTimeout = __envInt("MAREA_REQUEST_TIMEOUT", 15_000);
+    __server.headersTimeout = __envInt("MAREA_HEADERS_TIMEOUT", 10_000);
     __server.listen(MAREA_PORT, MAREA_HOST, () => {
       console.log(`[marea] servidor escuchando en ${MAREA_URL}`);
       resolve();
@@ -303,6 +329,17 @@ export function len(xs: unknown[]): number {
 }
 export function aTexto(x: unknown): string {
   return String(x);
+}
+// Escapa un texto para incrustarlo en HTML. El lenguaje construye marcado
+// concatenando cadenas y 'render' lo inyecta por innerHTML, así que sin esto un
+// dato persistido vía RPC se ejecuta como marcado en todos los clientes.
+export function escapar(x: unknown): string {
+  return String(x)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 // Indexado de lista con verificación de rango: un índice fuera de rango lanza
 // un error claro en vez de devolver 'undefined' (que reventaría más tarde).
@@ -654,15 +691,32 @@ let __store: unknown[] | null = null; // valores, por posición (lo que ve el .m
 let __ids: number[] = []; // id persistente paralelo a cada posición de __store
 let __nextId = 1; // contador de ids nuevos
 
+// La carga se memoiza como PROMESA, no como resultado. El servidor atiende
+// peticiones concurrentemente: si solo se comprobara `__store === null`, dos RPC
+// simultáneos entrarían ambos en la rama durante el `await load()` (que cede),
+// crearían dos backends, y el segundo pisaría el `__store` del primero
+// reiniciando `__nextId` → ids duplicados (violación de PK en SQL/Mongo) y, en
+// el backend de archivo, pérdida silenciosa de escrituras por "última gana".
+let __loading: Promise<unknown[]> | null = null;
+
 async function __ensureStore(): Promise<unknown[]> {
-  if (__store === null) {
-    if (__backend === null) __backend = __makeBackend();
-    const rows = await __backend.load();
-    __store = rows.map((r) => r.item);
-    __ids = rows.map((r) => r.id);
-    __nextId = rows.reduce((m, r) => Math.max(m, r.id), 0) + 1;
+  if (__store !== null) return __store;
+  if (__loading === null) {
+    __loading = (async () => {
+      if (__backend === null) __backend = __makeBackend();
+      const rows = await __backend.load();
+      __store = rows.map((r) => r.item);
+      __ids = rows.map((r) => r.id);
+      __nextId = rows.reduce((m, r) => Math.max(m, r.id), 0) + 1;
+      return __store;
+    })().catch((e) => {
+      // Un fallo de carga no debe dejar el store envenenado para siempre:
+      // se limpia la promesa para que el siguiente intento reintente.
+      __loading = null;
+      throw e;
+    });
   }
-  return __store;
+  return __loading;
 }
 
 export async function guardar(x: unknown): Promise<void> {

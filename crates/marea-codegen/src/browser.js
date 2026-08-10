@@ -125,6 +125,15 @@ export function len(xs) {
 export function aTexto(x) {
   return String(x);
 }
+// Gemelo de runtime.ts: escapa un texto para incrustarlo en HTML.
+export function escapar(x) {
+  return String(x)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 export function __index(xs, i) {
   if (i < 0 || i >= xs.length) {
     throw new Error(`índice fuera de rango: ${i} (longitud ${xs.length})`);

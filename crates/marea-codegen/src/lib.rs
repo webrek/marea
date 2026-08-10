@@ -36,7 +36,7 @@ pub struct AppProject {
 }
 
 /// Builtins provistos por el runtime; no se transpilan ni se registran.
-const BUILTINS: &str = "{ __register, __rpc, print, concat, render, len, aTexto, __index, \
+const BUILTINS: &str = "{ __register, __rpc, print, concat, render, len, aTexto, escapar, __index, \
      guardar, todos, actualizar, borrar, __marea_is, __signal, __memo, __effect }";
 
 /// Una función con `@server` o `@edge` corre "remota": handler + stub RPC.
@@ -687,6 +687,7 @@ fn emit_match(
     let pin = pad(indent + 1);
     let mut s = format!("{p}{{\n{pin}const __m = {};\n", emit_expr(scrut, reactive));
     let mut chained = false; // ¿ya emitimos algún if/else-if?
+    let mut caught_all = false; // ¿ya se emitió una rama atrapa-todo?
     for arm in arms {
         let body = match &arm.body {
             Expr::If { .. } | Expr::Match { .. } => emit_control(&arm.body, indent + 2, reactive),
@@ -697,9 +698,20 @@ fn emit_match(
             ),
             _ => format!("{}{};", pad(indent + 2), emit_expr(&arm.body, reactive)),
         };
+        // Tras una rama atrapa-todo el resto es inalcanzable: emitirlas daría
+        // `else if` después de un `else` (JS inválido).
+        if caught_all {
+            continue;
+        }
         match &arm.pattern {
             Pattern::Wildcard { .. } => {
-                s.push_str(&format!("{pin}else {{\n{body}\n{pin}}}\n"));
+                // Sin `if` previo no puede haber `else`: se emite un bloque plano.
+                if chained {
+                    s.push_str(&format!("{pin}else {{\n{body}\n{pin}}}\n"));
+                } else {
+                    s.push_str(&format!("{pin}{{\n{body}\n{pin}}}\n"));
+                }
+                caught_all = true;
             }
             Pattern::Binding { name, .. } => {
                 if name.chars().next().is_some_and(|c| c.is_uppercase()) {
@@ -711,7 +723,16 @@ fn emit_match(
                     chained = true;
                 } else {
                     // Enlace (minúscula): captura todo y nombra el valor.
-                    s.push_str(&format!("{pin}else {{ const {name} = __m;\n{body}\n{pin}}}\n"));
+                    if chained {
+                        s.push_str(&format!(
+                            "{pin}else {{ const {name} = __m;\n{body}\n{pin}}}\n"
+                        ));
+                    } else {
+                        s.push_str(&format!(
+                            "{pin}{{ const {name} = __m;\n{body}\n{pin}}}\n"
+                        ));
+                    }
+                    caught_all = true;
                 }
             }
             Pattern::Int { value, .. } => {
