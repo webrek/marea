@@ -476,3 +476,36 @@ fn escapar_no_se_emite_con_await() {
     let p = build("@client fn f(s: String) -> String { return escapar(s); }");
     assert!(!p.client.contains("await escapar"), "{}", p.client);
 }
+
+/// `site/app/` es un artefacto GENERADO que está commiteado, y el Dockerfile lo
+/// copia tal cual: es literalmente lo que se despliega. Estuvo cuatro meses sin
+/// regenerar y se desplegó con un XSS y una fuga de código fuente que el
+/// compilador ya tenía arreglados. Este test falla si vuelve a divergir; el
+/// arreglo es `marea build-app site/marea-demo.mar site/app`.
+///
+/// `index.html` queda fuera a propósito: es una landing escrita a mano, y por
+/// eso `build-app` respeta el que ya exista.
+#[test]
+fn el_artefacto_desplegable_no_se_desincroniza() {
+    let raiz = format!("{}/../..", env!("CARGO_MANIFEST_DIR"));
+    let fuente = std::fs::read_to_string(format!("{raiz}/site/marea-demo.mar"))
+        .expect("no se pudo leer site/marea-demo.mar");
+    let module = marea_syntax::parse(&fuente).expect("la demo del sitio debe parsear");
+    let app = marea_codegen::emit_app(&module);
+
+    for (nombre, esperado) in [
+        ("runtime.ts", &app.runtime),
+        ("server.ts", &app.server),
+        ("serve.ts", &app.serve),
+        ("client.js", &app.client_js),
+    ] {
+        let ruta = format!("{raiz}/site/app/{nombre}");
+        let actual = std::fs::read_to_string(&ruta)
+            .unwrap_or_else(|_| panic!("falta {ruta}"));
+        assert_eq!(
+            &actual, esperado,
+            "site/app/{nombre} no coincide con el codegen actual; \
+             regenera con: marea build-app site/marea-demo.mar site/app"
+        );
+    }
+}
