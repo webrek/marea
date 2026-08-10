@@ -126,6 +126,15 @@ export function len(xs) {
 export function aTexto(x) {
   return String(x);
 }
+// Gemelo de runtime.ts: escapa un texto para incrustarlo en HTML.
+export function escapar(x) {
+  return String(x)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 export function __index(xs, i) {
   if (i < 0 || i >= xs.length) {
     throw new Error(`índice fuera de rango: ${i} (longitud ${xs.length})`);
@@ -171,7 +180,7 @@ async function feed() {
   return await __rpc("feed", []);
 }
 async function fila(p, i) {
-  return concat(concat(concat("<li class=\"post\"><span class=\"autor\">@", p.autor), concat("</span> ", p.texto)), concat(concat(concat(" <button class=\"like\" onclick=\"marea.darLike(", aTexto(i)), concat(")\">♥ ", aTexto(p.likes))), "</button></li>"));
+  return concat(concat(concat("<li class=\"post\"><span class=\"autor\">@", escapar(p.autor)), concat("</span> ", escapar(p.texto))), concat(concat(concat(" <button class=\"like\" onclick=\"marea.darLike(", aTexto(i)), concat(")\">♥ ", aTexto(p.likes))), "</button></li>"));
 }
 async function filas(ps, i) {
   if ((i < len(ps))) {

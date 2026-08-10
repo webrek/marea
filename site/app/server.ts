@@ -1,5 +1,18 @@
 // Generado por Marea — lado servidor.
-import { __register, __rpc, print, concat, render, len, aTexto, __index, guardar, todos, actualizar, borrar, __marea_is, __signal, __memo, __effect } from "./runtime.ts";
+import { __register, __rpc, print, concat, render, len, aTexto, escapar, __index, guardar, todos, actualizar, borrar, __marea_is, __signal, __memo, __effect } from "./runtime.ts";
+
+// fn fila(p: Post, i: Int) -> String
+async function fila(p: Post, i: number) {
+  return concat(concat(concat("<li class=\"post\"><span class=\"autor\">@", escapar(p.autor)), concat("</span> ", escapar(p.texto))), concat(concat(concat(" <button class=\"like\" onclick=\"marea.darLike(", aTexto(i)), concat(")\">♥ ", aTexto(p.likes))), "</button></li>"));
+}
+
+// fn filas(ps: List<Post>, i: Int) -> String
+async function filas(ps: Post[], i: number) {
+  if ((i < len(ps))) {
+    return concat((await fila(__index(ps, i), i)), (await filas(ps, (i + 1))));
+  }
+  return "";
+}
 
 // @server fn publicar(autor: String, texto: String)
 async function publicar(autor: string, texto: string) {

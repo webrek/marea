@@ -4,17 +4,22 @@
 // variante NotFound y no tiene comodín, así que falta la variante User: el
 // verificador lo reporta como no exhaustivo.
 
-type User = Record;
+type User = { nombre: String };
+
+store User;
 
 @server
 fn buscar(id: Int) -> User | NotFound {
-    let u = db.users.find(id);
-    return u;
+    let usuarios = todos();
+    if id < len(usuarios) {
+        return usuarios[id];
+    }
+    return NotFound;
 }
 
 @client
 fn ver(id: Int) {
-    reactive usuario = buscar(id);
+    let usuario = buscar(id);
 
     match usuario {
         NotFound => render("no encontrado"),

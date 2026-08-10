@@ -257,7 +257,7 @@ fn e_field_on_union_sin_match() {
     let src = r#"
         type User = Record;
         @server
-        fn getUser() -> User | NotFound { let u = db.find(); return u; }
+        fn getUser() -> User | NotFound { return NotFound; }
         @client
         fn perfil() {
             let u = getUser();
@@ -336,7 +336,7 @@ fn e_non_exhaustive_match_falta_variante() {
     let src = r#"
         type User = Record;
         @server
-        fn getUser() -> User | NotFound | Error { let u = db.find(); return u; }
+        fn getUser() -> User | NotFound | Error { return NotFound; }
         @client
         fn perfil() {
             let u = getUser();
@@ -365,7 +365,7 @@ fn e_unknown_variant() {
     let src = r#"
         type User = Record;
         @server
-        fn getUser() -> User | NotFound { let u = db.find(); return u; }
+        fn getUser() -> User | NotFound { return NotFound; }
         @client
         fn perfil() {
             let u = getUser();
@@ -385,7 +385,7 @@ fn narrowing_ok_dentro_de_la_rama() {
     let src = r#"
         type User = Record;
         @server
-        fn getUser() -> User | NotFound { let u = db.find(); return u; }
+        fn getUser() -> User | NotFound { return NotFound; }
         @client
         fn perfil() {
             let u = getUser();
@@ -409,7 +409,7 @@ fn e_arg_type_pasando_union_donde_se_espera_user() {
     let src = r#"
         type User = { nombre: String };
         @server
-        fn getUser() -> User | NotFound { let u = db.find(); return u; }
+        fn getUser() -> User | NotFound { return NotFound; }
         fn saluda(u: User) -> String { return u.nombre; }
         @client
         fn perfil() {
@@ -795,4 +795,111 @@ fn reactive_sin_cruce_de_frontera_es_valida() {
 fn e_redefine_builtin_en_global() {
     let errs = check_src("let render = 1;\n@client fn m() { print(render); }");
     assert!(has_code(&errs, "E_REDEFINE_BUILTIN"), "{:?}", codes(&errs));
+}
+
+// --- regresiones de la segunda ronda de revisión ---
+
+// El subtipado coinductivo usaba un conjunto de NOMBRES, así que al reencontrar
+// un alias aceptaba contra cualquier cosa: el mismo par se rechazaba a
+// profundidad 3 y se aceptaba a 4. Ahora la clave es el par (sub, sup).
+#[test]
+fn el_subtipado_recursivo_no_depende_de_la_profundidad() {
+    let p3 = check_src(
+        "type A = { x: A };\n\
+         fn f(a: A) -> Int { let t: { x: { x: { x: Int } } } = a; return 1; }",
+    );
+    let p4 = check_src(
+        "type A = { x: A };\n\
+         fn f(a: A) -> Int { let t: { x: { x: { x: { x: Int } } } } = a; return 1; }",
+    );
+    assert!(!p3.is_empty(), "profundidad 3 debe rechazarse");
+    assert!(!p4.is_empty(), "profundidad 4 debe rechazarse igual que la 3");
+}
+
+// Un registro estructural vale donde se espera una unión que lo contiene: es el
+// patrón de devolver un elemento del store desde una función que puede fallar.
+#[test]
+fn un_registro_es_subtipo_de_la_union_que_lo_contiene() {
+    let errs = check_src(
+        "type User = { nombre: String };\n\
+         store User;\n\
+         @server fn buscar(i: Int) -> User | NotFound {\n\
+             let us = todos();\n\
+             if i < len(us) { return us[i]; }\n\
+             return NotFound;\n\
+         }",
+    );
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// E_BOUNDARY_IN_INIT solo miraba cruces de red, pero CUALQUIER función del
+// usuario se compila a async: `reactive t = doble(n)` daba el mismo await en
+// arrow no-async.
+#[test]
+fn una_llamada_local_en_un_init_reactive_tambien_es_error() {
+    let errs = check_src(
+        "fn doble(n: Int) -> Int { return n * 2; }\n\
+         @client fn main() { reactive mut n = 0; reactive t = doble(n); print(t); }",
+    );
+    assert!(has_code(&errs, "E_BOUNDARY_IN_INIT"), "{:?}", codes(&errs));
+}
+
+// Los builtins síncronos sí pueden usarse ahí (no generan await).
+#[test]
+fn los_builtins_sincronos_si_valen_en_un_init_reactive() {
+    let errs = check_src(
+        "@client fn main() { reactive mut n = 0; reactive t = concat(\"n=\", aTexto(n)); print(t); }",
+    );
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// Escribir una reactiva tiene la misma restricción de ubicación que leerla.
+#[test]
+fn escribir_una_reactive_desde_server_es_error() {
+    let errs = check_src("reactive mut n = 0;\n@server fn poner() { n = 1; }");
+    assert!(has_code(&errs, "E_REACTIVE_OFF_CLIENT"), "{:?}", codes(&errs));
+}
+
+// Una función sin anotación se emite también en el servidor, donde el estado
+// reactivo no existe.
+#[test]
+fn usar_una_reactive_desde_una_fn_sin_anotacion_es_error() {
+    let errs = check_src(
+        "reactive mut posts = [];\nfn cuantos() -> Int { return len(posts); }",
+    );
+    assert!(has_code(&errs, "E_REACTIVE_OFF_CLIENT"), "{:?}", codes(&errs));
+}
+
+// Una global no puede chocar con una función ni con un identificador que el
+// bundle importa del runtime: ambos producen archivos que no cargan.
+#[test]
+fn una_global_no_puede_chocar_con_una_funcion() {
+    let errs = check_src("fn saluda() -> Int { return 1; }\nlet saluda = 2;");
+    assert!(has_code(&errs, "E_DUPLICATE_ITEM"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn una_global_no_puede_llamarse_como_un_interno_del_runtime() {
+    let errs = check_src("let __rpc = 1;\n@client fn m() { print(__rpc); }");
+    assert!(has_code(&errs, "E_REDEFINE_BUILTIN"), "{:?}", codes(&errs));
+}
+
+// El codegen descarta las ramas posteriores a un atrapa-todo; borrar código en
+// silencio es peor que avisar.
+#[test]
+fn e_unreachable_arm() {
+    let errs = check_src(
+        "@client fn f(x: Int) { match x { 1 => print(\"uno\"), _ => print(\"otro\"), 2 => print(\"dos\") } }",
+    );
+    assert!(has_code(&errs, "E_UNREACHABLE_ARM"), "{:?}", codes(&errs));
+}
+
+// `reactive` derivada es de solo lectura, igual que las globales: antes el
+// navegador lanzaba y Node lo ignoraba en silencio para el mismo .mar.
+#[test]
+fn una_reactive_derivada_local_es_inmutable() {
+    let errs = check_src(
+        "@client fn f() { reactive mut n = 1; reactive doble = n * 2; doble = 99; print(doble); }",
+    );
+    assert!(has_code(&errs, "E_ASSIGN_IMMUTABLE"), "{:?}", codes(&errs));
 }

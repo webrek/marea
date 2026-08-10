@@ -172,6 +172,15 @@ fn build_app(module: &marea_syntax::Module, out_dir: &str) -> ExitCode {
     ];
     for (name, contents) in files {
         let path = format!("{}/{}", out_dir, name);
+        // El index.html es una plantilla mínima pensada para arrancar, no un
+        // archivo de salida: si ya existe se respeta, porque suele estar escrito
+        // a mano (la landing de site/ lo está). Los demás son código generado y
+        // se sobrescriben siempre — así regenerar tras arreglar el compilador no
+        // destruye la página.
+        if name == "index.html" && std::path::Path::new(&path).exists() {
+            println!("  conservado {} (ya existía)", path);
+            continue;
+        }
         if let Err(e) = std::fs::write(&path, contents) {
             eprintln!("error: no se pudo escribir '{}': {}", path, e);
             return ExitCode::FAILURE;

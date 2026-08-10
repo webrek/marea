@@ -10,7 +10,6 @@ use crate::ty::Ty;
 /// - `print(x) -> Unit`
 /// - `concat(String, String) -> String`
 /// - `render(x) -> Unit`
-/// - `db`: objeto abierto (acceso a campo y llamada → `Unknown`)
 /// - `NotFound`: variante nominal (se modela como `Union(["NotFound"])`)
 /// - `Record`: tipo abierto (acceso a campo → `Unknown`)
 pub fn lookup(name: &str) -> Option<Ty> {
@@ -72,8 +71,6 @@ pub fn lookup(name: &str) -> Option<Ty> {
             ret: Box::new(Ty::Unit),
             location: None,
         }),
-        // Objeto abierto: cualquier miembro o llamada se resuelve a Unknown.
-        "db" => Some(Ty::Unknown),
         // Variante nominal usable como etiqueta en uniones / patrones.
         "NotFound" => Some(Ty::Union(vec!["NotFound".to_string()])),
         _ => None,
@@ -109,7 +106,6 @@ pub const VALUE_NAMES: &[&str] = &[
     "todos",
     "actualizar",
     "borrar",
-    "db",
     "NotFound",
 ];
 

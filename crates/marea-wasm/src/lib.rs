@@ -634,11 +634,22 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String, String> {
             if name == "len" && parts.len() == 1 {
                 return Ok(format!("(i32.load {})", parts[0]));
             }
-            // Builtins del runtime de TypeScript (estado del servidor y aTexto):
-            // no existen en WASM y producirían WAT inválido.
+            // Builtins del runtime de TypeScript: no existen en WASM y
+            // producirían WAT que ni siquiera ensambla ("undefined function
+            // variable"). La lista debe cubrir TODOS los de
+            // `marea_types::builtins::VALUE_NAMES` que WASM no implementa; antes
+            // faltaban print/render/escapar y el error salía en wat2wasm, no en
+            // el compilador, contra lo que promete el README.
             if matches!(
                 name.as_str(),
-                "guardar" | "todos" | "actualizar" | "borrar" | "aTexto"
+                "guardar"
+                    | "todos"
+                    | "actualizar"
+                    | "borrar"
+                    | "aTexto"
+                    | "print"
+                    | "render"
+                    | "escapar"
             ) {
                 return Err(format!(
                     "'{name}' es un builtin del runtime de TypeScript; no existe en el backend WASM"

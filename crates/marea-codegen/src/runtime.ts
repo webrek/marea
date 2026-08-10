@@ -25,11 +25,21 @@ function __envInt(name: string, def: number): number {
 
 // El puerto: PORT (lo fija el entorno de hosting, p.ej. Cloud Run) tiene
 // prioridad, luego MAREA_PORT, y 8787 por defecto en local.
-const MAREA_PORT = __envInt("PORT", __envInt("MAREA_PORT", 8787));
+// PORT (hosting) tiene prioridad; si no está, MAREA_PORT; si no, 8787. Se elige
+// la variable ANTES de convertir, para no avisar de una que no se va a usar.
+const MAREA_PORT = __envInt(
+  process.env.PORT !== undefined && process.env.PORT !== "" ? "PORT" : "MAREA_PORT",
+  8787,
+);
 // Escuchamos solo en loopback por defecto: la frontera de red es para el cliente
 // local de la app, no para exponer en la LAN. Se puede ampliar con MAREA_HOST.
 const MAREA_HOST = process.env.MAREA_HOST ?? "127.0.0.1";
 const MAREA_URL = `http://127.0.0.1:${MAREA_PORT}/__marea`;
+// El puerto ya resuelto y validado, para que quien informe al usuario no tenga
+// que recalcularlo (y no pueda equivocarse si el valor del entorno es basura).
+export function puerto(): number {
+  return MAREA_PORT;
+}
 // Tope del cuerpo RPC (configurable) para no acumular memoria sin límite.
 const MAREA_MAX_BODY = __envInt("MAREA_MAX_BODY", 1_048_576); // 1 MiB
 

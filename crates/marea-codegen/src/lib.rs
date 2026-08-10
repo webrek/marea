@@ -185,21 +185,21 @@ pub fn emit_app(module: &Module) -> AppProject {
         top_reactives.iter().map(|l| l.name.clone()).collect();
 
     let serve = "// Generado por Marea — arranca el servidor web y lo deja vivo.\n\
-        import { startServer } from \"./runtime.ts\";\n\
+        import { startServer, puerto } from \"./runtime.ts\";\n\
         import \"./server.ts\";\n\
         // Sirve los estáticos (index.html, client.js) desde esta carpeta.\n\
         process.env.MAREA_WEB_ROOT ??= import.meta.dirname;\n\
         await startServer();\n\
-        // Mismo orden de precedencia que runtime.ts: PORT (hosting) > MAREA_PORT > 8787.\n\
-        const __port = Number(process.env.PORT ?? process.env.MAREA_PORT ?? 8787);\n\
-        console.log(`[marea] app web en http://127.0.0.1:${__port}`);\n"
+        // El puerto se lee del runtime, que es quien lo resolvió y validó:\n\
+        // recalcularlo aquí haría que el mensaje mintiera si el valor es basura.\n\
+        console.log(`[marea] app web en http://127.0.0.1:${puerto()}`);\n"
         .to_string();
 
     AppProject {
         runtime: build_node_runtime(module),
         server: emit_server(&remote, &shared, &plain_globals),
         serve,
-        client_js: emit_client_js(&remote, &local, &top_reactives, &reactive_names),
+        client_js: emit_client_js(&remote, &local, &top_reactives, &reactive_names, &plain_globals),
         index_html: APP_HTML.to_string(),
     }
 }
@@ -211,11 +211,25 @@ fn emit_client_js(
     local: &[&FnDecl],
     top_reactives: &[&LetStmt],
     reactive: &HashSet<String>,
+    globals: &[&LetStmt],
 ) -> String {
     let mut s = String::new();
     s.push_str("// Generado por Marea — cliente de navegador (no editar).\n");
     s.push_str(BROWSER_RT);
     s.push_str("\n// --- programa ---\n");
+
+    // Constantes de módulo (globales no reactivas). Van antes que el estado
+    // reactivo porque éste puede leerlas en su inicializador.
+    {
+        let no_reactive: HashSet<String> = HashSet::new();
+        for l in globals {
+            s.push_str(&format!(
+                "const {} = {};\n",
+                l.name,
+                emit_expr(&l.value, &no_reactive)
+            ));
+        }
+    }
 
     // Estado reactivo de nivel superior: signal (mutable) o memo (derivado).
     for l in top_reactives {
@@ -869,7 +883,7 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
             let is_sync_builtin = matches!(
                 callee.as_ref(),
                 Expr::Ident { name, .. }
-                    if matches!(name.as_str(), "print" | "concat" | "render" | "len" | "aTexto")
+                    if matches!(name.as_str(), "print" | "concat" | "render" | "len" | "aTexto" | "escapar")
             );
             if is_sync_builtin {
                 format!("{}({})", callee_ts, a.join(", "))

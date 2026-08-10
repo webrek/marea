@@ -456,3 +456,23 @@ fn las_globales_no_reactivas_se_emiten_en_ambos_bundles() {
     assert!(p.server.contains("const saludo"), "falta en server:\n{}", p.server);
     assert!(p.client.contains("const saludo"), "falta en client:\n{}", p.client);
 }
+
+// El comando insignia (build-app) no declaraba las globales no reactivas en
+// client.js: se calculaban y solo se le pasaban al servidor, que no las usa.
+#[test]
+fn build_app_declara_las_globales_en_el_cliente() {
+    let m = marea_syntax::parse(
+        "let titulo = \"Marea\";\n@client fn vista() -> String { return escapar(titulo); }",
+    )
+    .expect("parsea");
+    let app = marea_codegen::emit_app(&m);
+    assert!(app.client_js.contains("const titulo"), "{}", app.client_js);
+}
+
+// `escapar` es síncrono: emitirlo con await rompe el rastreo de dependencias
+// reactivas en silencio.
+#[test]
+fn escapar_no_se_emite_con_await() {
+    let p = build("@client fn f(s: String) -> String { return escapar(s); }");
+    assert!(!p.client.contains("await escapar"), "{}", p.client);
+}

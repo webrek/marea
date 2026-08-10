@@ -1,16 +1,21 @@
 // La frontera de red como primitiva del lenguaje.
 //
 // 'getUser' lleva @server: corre en el servidor. Desde @client se llama como
-// si fuera local — el compilador generará el RPC, la serialización y la
-// validación del límite. No hay "capa de API" que escribir a mano.
+// si fuera local — el compilador genera el RPC y los tipos de ambos lados. No
+// hay "capa de API" que escribir a mano.
 
 type UserId = Int;
-type User = Record;
+type User = { nombre: String };
+
+store User;
 
 @server
 fn getUser(id: UserId) -> User | NotFound {
-    let usuario = db.users.find(id);
-    return usuario;
+    let usuarios = todos();
+    if id < len(usuarios) {
+        return usuarios[id];
+    }
+    return NotFound;
 }
 
 @client
@@ -24,6 +29,6 @@ fn perfil(id: UserId) {
     // un 'match', que estrecha cada rama a su variante.
     match usuario {
         NotFound => render("Usuario no encontrado"),
-        _ => render(usuario.nombre),
+        _ => render(escapar(usuario.nombre)),
     }
 }

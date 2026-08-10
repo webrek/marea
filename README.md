@@ -14,10 +14,17 @@ lenguaje** las dos fronteras que hoy se cruzan a mano y con pegamento.
 
 ```marea
 type UserId = Int;
+type User = { nombre: String };
+
+store User;
 
 @server
 fn getUser(id: UserId) -> User | NotFound {
-    db.users.find(id)
+    let usuarios = todos();
+    if id < len(usuarios) {
+        return usuarios[id];
+    }
+    return NotFound;
 }
 
 @client

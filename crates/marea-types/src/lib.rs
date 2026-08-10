@@ -121,6 +121,34 @@ impl Checker {
         self.errors.push(e);
     }
 
+    /// Comprueba el acceso (lectura o escritura) a una global `reactive`. Es
+    /// estado de UI: solo se emite en el bundle del cliente. Se prohíbe desde
+    /// `@server`/`@edge` —que compilaba a un `ReferenceError` en cada RPC— y
+    /// también desde una función SIN anotación, porque el codegen la duplica en
+    /// los dos bundles y el del servidor no tiene el estado. Simétrico a
+    /// `E_STATE_OFF_SERVER`, que exige lo contrario para el store.
+    fn check_reactive_access(&mut self, name: &str, span: Span) {
+        if !self.reactive_globals.contains(name) {
+            return;
+        }
+        let fuera_del_cliente = !matches!(self.current_location, Some(Location::Client));
+        if fuera_del_cliente {
+            let donde = match self.current_location {
+                Some(Location::Server) => "una función @server",
+                Some(Location::Edge) => "una función @edge",
+                _ => "una función sin anotación (se emite también en el servidor)",
+            };
+            self.error(TypeError::new(
+                "E_REACTIVE_OFF_CLIENT",
+                format!(
+                    "'{name}' es estado reactivo del cliente y no existe en el servidor; \
+                     no puede usarse desde {donde}: márcala @client o pásalo como argumento"
+                ),
+                span,
+            ));
+        }
+    }
+
     /// Registra las variables de nivel superior (`let`/`reactive` de módulo) como
     /// globales, tipándolas por su anotación o por su inicializador. Corre tras
     /// `collect` (necesita fns/alias/store ya resueltos) y antes de los cuerpos.
@@ -146,10 +174,19 @@ impl Checker {
                 // generado importa los builtins del runtime, así que declararla
                 // produce un `const` que redeclara el import (SyntaxError, el
                 // archivo entero no carga). Misma regla que para las funciones.
-                if builtins::lookup(&l.name).is_some() {
+                if builtins::lookup(&l.name).is_some() || es_interno_del_runtime(&l.name) {
                     self.error(TypeError::new(
                         "E_REDEFINE_BUILTIN",
                         format!("no se puede redefinir el builtin '{}'", l.name),
+                        l.span,
+                    ));
+                }
+                // Tampoco puede chocar con una función del módulo: ambas se
+                // emiten como declaraciones de primer nivel en el mismo archivo.
+                if self.fns.contains_key(&l.name) {
+                    self.error(TypeError::new(
+                        "E_DUPLICATE_ITEM",
+                        format!("'{}' ya está declarada como función", l.name),
                         l.span,
                     ));
                 }
@@ -177,7 +214,7 @@ impl Checker {
                     // No se puede redefinir un builtin (print/concat/render/db/
                     // NotFound): además de confundir, generaría TS inválido por
                     // colisión con el import del runtime.
-                    if builtins::lookup(&f.name).is_some() {
+                    if builtins::lookup(&f.name).is_some() || es_interno_del_runtime(&f.name) {
                         self.error(TypeError::new(
                             "E_REDEFINE_BUILTIN",
                             format!("no se puede redefinir el builtin '{}'", f.name),
@@ -468,7 +505,11 @@ impl Checker {
                 self.scopes
                     .last_mut()
                     .unwrap()
-                    .insert(l.name.clone(), (bind_ty, l.mutable || l.reactive));
+                    // Solo `mut` hace reasignable, igual que en las globales. Una
+                    // `reactive` derivada es de solo lectura: el navegador lanza
+                    // al asignarle y Node lo ignoraba en silencio, así que
+                    // dejarlo pasar daba dos comportamientos para el mismo .mar.
+                    .insert(l.name.clone(), (bind_ty, l.mutable));
             }
             Stmt::Return { value, span } => {
                 let ret_ty = match value {
@@ -501,6 +542,12 @@ impl Checker {
                 // Si no es una variable local, puede ser una global de módulo.
                 if target.is_none() {
                     target = self.globals.get(name).cloned();
+                    // Escribir una reactiva tiene la misma restricción de
+                    // ubicación que leerla: antes solo se comprobaba la lectura,
+                    // así que un @server podía asignarle y romper en runtime.
+                    if target.is_some() {
+                        self.check_reactive_access(name, *name_span);
+                    }
                 }
                 match target {
                     None => self.error(TypeError::new(
@@ -578,21 +625,7 @@ impl Checker {
             // Una global `reactive` es estado de UI: solo existe en el bundle
             // del cliente. Leerla desde @server compilaba a un `ReferenceError`
             // en cada RPC, así que se rechaza aquí con un mensaje accionable.
-            if self.reactive_globals.contains(name)
-                && matches!(
-                    self.current_location,
-                    Some(Location::Server) | Some(Location::Edge)
-                )
-            {
-                self.error(TypeError::new(
-                    "E_REACTIVE_OFF_CLIENT",
-                    format!(
-                        "'{name}' es estado reactivo del cliente y no existe en el \
-                         servidor; pásalo como argumento o léelo desde una función @client"
-                    ),
-                    span,
-                ));
-            }
+            self.check_reactive_access(name, span);
             return ty;
         }
         // Función declarada.
@@ -823,6 +856,27 @@ impl Checker {
     }
 
     fn check_call(&mut self, callee: &Expr, args: &[Expr], span: Span) -> Ty {
+        // Dentro de un inicializador que se evalúa de forma síncrona (el memo de
+        // una `reactive`, o una global de módulo) no puede haber ninguna llamada
+        // que el codegen emita con `await`: eso es todo salvo un puñado de
+        // builtins síncronos. El resultado era `__memo(() => (await f()))`, un
+        // await en una arrow no-async, o sea un SyntaxError que impide cargar el
+        // módulo entero. No basta con mirar los cruces de red: cualquier función
+        // del usuario se compila a `async`.
+        if let Some(ctx) = self.init_context {
+            let nombre = callee_name(callee);
+            if !es_builtin_sincrono(&nombre) {
+                self.error(TypeError::new(
+                    "E_BOUNDARY_IN_INIT",
+                    format!(
+                        "'{nombre}' se compila a una llamada asíncrona y no puede usarse en \
+                         {ctx}; llámala dentro de una función y asigna el resultado"
+                    ),
+                    span,
+                ));
+            }
+        }
+
         // Los builtins de ESTADO (`guardar`/`todos`) se chequean aparte: contra
         // el tipo del store y sólo dentro de @server/@edge.
         if let Expr::Ident { name, .. } = callee {
@@ -1100,6 +1154,16 @@ impl Checker {
         let mut arm_types: Vec<Ty> = Vec::new();
 
         for arm in arms {
+            // Tras una rama atrapa-todo el resto nunca se ejecuta, y el codegen
+            // las descarta al emitir (encadenarlas daría `else if` después de un
+            // `else`). Avisar es mejor que borrar código en silencio.
+            if has_catch_all {
+                self.error(TypeError::new(
+                    "E_UNREACHABLE_ARM",
+                    "esta rama nunca se ejecuta: una rama anterior ya cubre todos los casos",
+                    arm.pattern.span(),
+                ));
+            }
             match &arm.pattern {
                 Pattern::Binding { name, span: pspan } => {
                     let first = name.chars().next();
@@ -1524,6 +1588,14 @@ impl Checker {
         self.is_subtype_rec(sub, sup, &mut std::collections::HashSet::new())
     }
 
+    /// Clave del par que se está desplegando, para la regla de Amber. Se usa el
+    /// par COMPLETO (sub, sup) y no solo el nombre del alias: con un conjunto de
+    /// nombres, reencontrar `A` aceptaba contra cualquier cosa, así que el mismo
+    /// par se rechazaba a profundidad 3 y se aceptaba a profundidad 4.
+    fn par_clave(sub: &Ty, sup: &Ty) -> (String, String) {
+        (sub.display(), sup.display())
+    }
+
     /// Igual que `is_subtype`, pero con un conjunto de nombres de alias ya
     /// desplegados para dar subtipado *coinductivo* sobre tipos registro
     /// mutuamente recursivos (`type A = { x: B }; type B = { y: A }`). Sin la
@@ -1534,7 +1606,7 @@ impl Checker {
         &self,
         sub: &Ty,
         sup: &Ty,
-        unfolding: &mut std::collections::HashSet<String>,
+        unfolding: &mut std::collections::HashSet<(String, String)>,
     ) -> bool {
         if matches!(sub, Ty::Unknown) || matches!(sup, Ty::Unknown) {
             return true;
@@ -1562,8 +1634,9 @@ impl Checker {
             // se declaró como `{ ... }` (p.ej. `fn origen() -> Punto` que devuelve
             // `Punto { x, y }`), y viceversa.
             (Ty::Named(n), Ty::Record(_)) => {
-                // Ya en despliegue → aceptar (regla coinductiva).
-                if !unfolding.insert(n.clone()) {
+                // Par ya en despliegue → aceptar (regla de Amber).
+                let clave = Self::par_clave(sub, sup);
+                if !unfolding.insert(clave.clone()) {
                     return true;
                 }
                 let ok = match self.resolve_named_to_record(n) {
@@ -1574,11 +1647,12 @@ impl Checker {
                     Some(None) => true,
                     None => false,
                 };
-                unfolding.remove(n);
+                unfolding.remove(&clave);
                 ok
             }
             (Ty::Record(_), Ty::Named(n)) => {
-                if !unfolding.insert(n.clone()) {
+                let clave = Self::par_clave(sub, sup);
+                if !unfolding.insert(clave.clone()) {
                     return true;
                 }
                 let ok = match self.resolve_named_to_record(n) {
@@ -1588,15 +1662,66 @@ impl Checker {
                     Some(None) => true,
                     None => false,
                 };
-                unfolding.remove(n);
+                unfolding.remove(&clave);
                 ok
             }
+            // Un registro estructural es subtipo de una unión si coincide con
+            // alguna de sus variantes: `{nombre: String}` vale donde se espera
+            // `User | NotFound` si `User` es ese registro. Sin esta regla no se
+            // podía devolver el valor de un store tipado desde una función cuyo
+            // retorno es una unión, que es el patrón central del lenguaje.
+            (Ty::Record(_), Ty::Union(vs)) => vs.iter().any(|v| {
+                let clave = (sub.display(), v.clone());
+                if unfolding.contains(&clave) {
+                    return true;
+                }
+                match self.resolve_named_to_record(v) {
+                    Some(Some(fields)) => {
+                        let mut u = unfolding.clone();
+                        u.insert(clave);
+                        self.is_subtype_rec(sub, &Ty::Record(fields), &mut u)
+                    }
+                    Some(None) => true,
+                    None => false,
+                }
+            }),
             _ => false,
         }
     }
 }
 
-/// Nombre textual de un callee (`getUser`, `db.users.find`).
+/// Identificadores que el bundle importa del runtime. No son builtins del
+/// lenguaje (no se pueden llamar desde un `.mar`), pero sí ocupan el espacio de
+/// nombres del archivo generado: declarar uno produce un `const`/`function` que
+/// redeclara el import y el archivo entero deja de cargar.
+/// Builtins que el codegen emite SIN `await` (ver `is_sync_builtin` en
+/// `marea-codegen`). Las dos listas deben coincidir: si aquí sobra un nombre se
+/// generará un `await` en un contexto síncrono, y si falta se rechazará código
+/// válido.
+fn es_builtin_sincrono(name: &str) -> bool {
+    matches!(
+        name,
+        "print" | "concat" | "render" | "len" | "aTexto" | "escapar"
+    )
+}
+
+fn es_interno_del_runtime(name: &str) -> bool {
+    matches!(
+        name,
+        "__register"
+            | "__rpc"
+            | "__index"
+            | "__marea_is"
+            | "__signal"
+            | "__memo"
+            | "__effect"
+            | "startServer"
+            | "stopServer"
+            | "puerto"
+    )
+}
+
+/// Nombre textual de un callee (`getUser`, `todos`).
 fn callee_name(callee: &Expr) -> String {
     match callee {
         Expr::Ident { name, .. } => name.clone(),
