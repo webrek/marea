@@ -52,6 +52,14 @@ export function __register(name: string, fn: Handler): void {
   __handlers[name] = fn;
 }
 
+/// Error de validación del límite: lo provoca una petición mal formada, no un
+/// fallo del servidor, así que se responde 400 y no 500.
+export class __ErrorDeLimite extends Error {}
+
+export function __malFormado(detalle: string): never {
+  throw new __ErrorDeLimite(detalle);
+}
+
 let __server: http.Server | null = null;
 
 // Sirve archivos estáticos de la app web (index.html, client.js) desde la raíz
@@ -110,6 +118,36 @@ export function startServer(): Promise<void> {
         res.end();
         return;
       }
+      // Exigir JSON no es cosmético: sin esta comprobación un formulario
+      // cross-origin con enctype="text/plain" califica como "simple request",
+      // se salta el preflight de CORS y ejecuta el handler. La respuesta le
+      // queda opaca al atacante, pero el efecto lateral (guardar/borrar) ya
+      // ocurrió. Ambos clientes generados mandan este content-type.
+      const __ct = (req.headers["content-type"] ?? "").split(";")[0].trim();
+      if (__ct !== "application/json") {
+        res.statusCode = 415;
+        res.end(JSON.stringify({ error: "se requiere content-type: application/json" }));
+        return;
+      }
+      // Un navegador siempre manda Origin en una petición cross-origin. Si
+      // viene y no está permitido, se rechaza: cierra el CSRF que quedara y el
+      // DNS rebinding. MAREA_ALLOWED_ORIGINS lo amplía (lista separada por
+      // comas); sin él solo se acepta el mismo host que sirve la app.
+      const __origin = req.headers["origin"];
+      if (typeof __origin === "string" && __origin !== "") {
+        const permitidos = (process.env.MAREA_ALLOWED_ORIGINS ?? "")
+          .split(",")
+          .map((o) => o.trim())
+          .filter((o) => o !== "");
+        const host = req.headers["host"] ?? "";
+        const mismoHost =
+          __origin === `http://${host}` || __origin === `https://${host}`;
+        if (!mismoHost && !permitidos.includes(__origin)) {
+          res.statusCode = 403;
+          res.end(JSON.stringify({ error: "origen no permitido" }));
+          return;
+        }
+      }
       const chunks: Buffer[] = [];
       let size = 0;
       let aborted = false;
@@ -154,6 +192,13 @@ export function startServer(): Promise<void> {
           res.setHeader("content-type", "application/json");
           res.end(JSON.stringify({ ok: result }));
         } catch (e) {
+          if (e instanceof __ErrorDeLimite) {
+            // Petición mal formada: es culpa del cliente, no del servidor. No se
+            // hace eco del detalle para no dar un oráculo de las firmas.
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: "petición mal formada" }));
+            return;
+          }
           // El detalle se queda en el servidor; al cliente solo error genérico.
           console.error("[marea] error en handler:", e);
           res.statusCode = 500;

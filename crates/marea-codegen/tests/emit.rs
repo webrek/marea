@@ -244,7 +244,50 @@ fn handler_valida_aridad_de_args() {
     // M1: el wrapper RPC exige la aridad exacta antes de invocar la función,
     // para que un argumento faltante no se cuele como undefined.
     let p = build("@server fn pub(a: String, b: Int) {}");
-    assert!(p.server.contains(r#"if (args.length !== 2) throw new Error("aridad inválida")"#), "{}", p.server);
+    assert!(
+        p.server.contains(r#"if (args.length !== 2) __malFormado("aridad")"#),
+        "{}",
+        p.server
+    );
+}
+
+// El límite de red recibe JSON arbitrario: sin validar los TIPOS, la garantía
+// del verificador terminaba en el fetch y un String declarado podía llegar como
+// objeto y persistirse así.
+#[test]
+fn el_handler_valida_los_tipos_de_los_argumentos() {
+    let p = build("@server fn pub(a: String, b: Int) {}");
+    assert!(p.server.contains(r#"typeof args[0] === "string""#), "{}", p.server);
+    assert!(p.server.contains("Number.isInteger(args[1])"), "{}", p.server);
+}
+
+#[test]
+fn el_validador_recorre_listas_y_registros() {
+    let p = build(
+        "type Post = { autor: String, likes: Int };\n@server fn g(ps: List<Post>) {}",
+    );
+    assert!(p.server.contains("Array.isArray(args[0])"), "{}", p.server);
+    assert!(p.server.contains(r#"__e["autor"]"#), "{}", p.server);
+    assert!(p.server.contains(r#"__e["likes"]"#), "{}", p.server);
+}
+
+// Un fallo de validación es culpa del cliente: 400, no 500, y sin eco del
+// detalle (sería un oráculo de las firmas).
+#[test]
+fn los_errores_de_limite_responden_400() {
+    let p = build("@server fn g(a: Int) {}");
+    assert!(p.runtime.contains("__ErrorDeLimite"), "{}", p.runtime);
+    assert!(p.runtime.contains("res.statusCode = 400;"), "{}", p.runtime);
+}
+
+// Sin exigir JSON, un formulario cross-origin con enctype="text/plain" califica
+// como petición simple, se salta el preflight y ejecuta el handler.
+#[test]
+fn el_endpoint_exige_json_y_valida_el_origen() {
+    let p = build("@server fn g(a: Int) {}");
+    assert!(p.runtime.contains("res.statusCode = 415;"), "{}", p.runtime);
+    assert!(p.runtime.contains("MAREA_ALLOWED_ORIGINS"), "{}", p.runtime);
+    assert!(p.runtime.contains("origen no permitido"), "{}", p.runtime);
 }
 
 #[test]

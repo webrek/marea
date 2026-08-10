@@ -36,8 +36,21 @@ pub struct AppProject {
 }
 
 /// Builtins provistos por el runtime; no se transpilan ni se registran.
-const BUILTINS: &str = "{ __register, __rpc, print, concat, render, len, aTexto, escapar, __index, \
+const BUILTINS: &str = "{ __register, __malFormado, __rpc, print, concat, render, len, aTexto, escapar, __index, \
      guardar, todos, actualizar, borrar, __marea_is, __signal, __memo, __effect }";
+
+/// Los alias de `type` del módulo, para resolver los tipos declarados al emitir
+/// los validadores del límite de red.
+fn type_aliases(module: &Module) -> std::collections::HashMap<String, Type> {
+    module
+        .items
+        .iter()
+        .filter_map(|it| match it {
+            Item::Type(t) => Some((t.name.clone(), t.aliased.clone())),
+            _ => None,
+        })
+        .collect()
+}
 
 /// Una función con `@server` o `@edge` corre "remota": handler + stub RPC.
 fn is_remote(f: &FnDecl) -> bool {
@@ -95,7 +108,7 @@ pub fn emit(module: &Module) -> Project {
 
     Project {
         runtime,
-        server: emit_server(&remote, &shared, &plain_globals),
+        server: emit_server(&remote, &shared, &plain_globals, &type_aliases(module)),
         client: emit_client(&remote, &local, &plain_globals),
         demo: emit_demo(&local),
     }
@@ -197,7 +210,7 @@ pub fn emit_app(module: &Module) -> AppProject {
 
     AppProject {
         runtime: build_node_runtime(module),
-        server: emit_server(&remote, &shared, &plain_globals),
+        server: emit_server(&remote, &shared, &plain_globals, &type_aliases(module)),
         serve,
         client_js: emit_client_js(&remote, &local, &top_reactives, &reactive_names, &plain_globals),
         index_html: APP_HTML.to_string(),
@@ -516,7 +529,60 @@ globalThis.mareaCadena = decodificarCadena;
 /// helper compartido (el refactor más común que existe) dejaba `server.ts` con
 /// una llamada a algo que no está declarado: `ReferenceError` en cada RPC, sobre
 /// código que el verificador había aprobado.
-fn emit_server(remote: &[&FnDecl], shared: &[&FnDecl], globals: &[&LetStmt]) -> String {
+/// Expresión JS que valida que `expr` cumpla el tipo declarado `ty`.
+///
+/// El verificador garantiza los tipos DENTRO del programa, pero el límite de red
+/// recibe JSON arbitrario: sin esto la garantía terminaba en el `fetch` y un
+/// `String` declarado podía llegar como objeto o arreglo y persistirse así. El
+/// compilador ya conoce las firmas, de modo que emitir el guarda es mecánico.
+///
+/// Es deliberadamente estricto en escalares, listas y registros, y permisivo en
+/// uniones y tipos abiertos (`Record`, alias sin resolver), donde el lenguaje
+/// todavía no tiene una representación de runtime con la que discriminar.
+fn js_validator(ty: &Type, aliases: &std::collections::HashMap<String, Type>, expr: &str) -> String {
+    match ty {
+        Type::Name { name, args, .. } => match name.as_str() {
+            "Int" => format!("Number.isInteger({expr})"),
+            "Float" => format!("(typeof {expr} === \"number\" && Number.isFinite({expr}))"),
+            "Bool" => format!("typeof {expr} === \"boolean\""),
+            "String" => format!("typeof {expr} === \"string\""),
+            "List" => {
+                let elem = match args.first() {
+                    Some(a) => js_validator(a, aliases, "__e"),
+                    None => "true".to_string(),
+                };
+                format!("(Array.isArray({expr}) && {expr}.every((__e) => {elem}))")
+            }
+            // `Record` es el registro abierto: cualquier objeto vale.
+            "Record" => format!("({expr} !== null && typeof {expr} === \"object\")"),
+            otro => match aliases.get(otro) {
+                Some(t) => js_validator(t, aliases, expr),
+                // Variante nominal (NotFound, …): sin representación de runtime
+                // fiable, se acepta.
+                None => "true".to_string(),
+            },
+        },
+        Type::Record { fields, .. } => {
+            let mut partes = vec![format!(
+                "({expr} !== null && typeof {expr} === \"object\" && !Array.isArray({expr}))"
+            )];
+            for f in fields {
+                let acceso = format!("{expr}[{}]", js_string(&f.name));
+                partes.push(js_validator(&f.ty, aliases, &acceso));
+            }
+            format!("({})", partes.join(" && "))
+        }
+        // Una unión no tiene discriminante de runtime todavía: se acepta.
+        Type::Union { .. } => "true".to_string(),
+    }
+}
+
+fn emit_server(
+    remote: &[&FnDecl],
+    shared: &[&FnDecl],
+    globals: &[&LetStmt],
+    aliases: &std::collections::HashMap<String, Type>,
+) -> String {
     let mut s = String::new();
     s.push_str("// Generado por Marea — lado servidor.\n");
     s.push_str(&format!("import {} from \"./runtime.ts\";\n\n", BUILTINS));
@@ -542,8 +608,20 @@ fn emit_server(remote: &[&FnDecl], shared: &[&FnDecl], globals: &[&LetStmt]) -> 
         // aridad exacta para que un argumento faltante no se cuele como undefined.
         let pass: Vec<String> = (0..f.params.len()).map(|i| format!("args[{i}]")).collect();
         let n = f.params.len();
+        // Guarda por argumento derivado del tipo declarado.
+        let mut checks = String::new();
+        for (i, p) in f.params.iter().enumerate() {
+            let v = js_validator(&p.ty, aliases, &format!("args[{i}]"));
+            if v == "true" {
+                continue;
+            }
+            checks.push_str(&format!(
+                " if (!({v})) __malFormado(\"argumento {}\");",
+                i + 1
+            ));
+        }
         s.push_str(&format!(
-            "__register(\"{}\", (args) => {{ if (args.length !== {n}) throw new Error(\"aridad inválida\"); return {}({}); }});\n\n",
+            "__register(\"{}\", (args) => {{ if (args.length !== {n}) __malFormado(\"aridad\");{checks} return {}({}); }});\n\n",
             f.name,
             f.name,
             pass.join(", ")

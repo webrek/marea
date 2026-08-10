@@ -5,8 +5,10 @@ lenguaje** las dos fronteras que hoy se cruzan a mano y con pegamento.
 
 1. **La frontera de red** (cliente ↔ servidor). Una función lleva una anotación
    de ubicación (`@server`, `@client`, `@edge`) y el compilador genera el cruce:
-   RPC, serialización, validación del límite y tipos de ambos lados. No hay
-   "capa de API" que escribir.
+   RPC, serialización, tipos de ambos lados y la **validación del límite** —los
+   guardas de cada handler se derivan de la firma, así que un argumento con el
+   tipo equivocado se rechaza con un 400 antes de tocar tu código. No hay "capa
+   de API" que escribir.
 2. **La frontera del tiempo** (reactividad). Una variable `reactive` propaga sus
    cambios; el grafo de dependencias lo conoce el compilador, no una librería.
    `reactive mut` es una fuente (signal), `reactive` una derivada (memo), y
