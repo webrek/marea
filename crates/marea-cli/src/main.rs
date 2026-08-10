@@ -1,20 +1,37 @@
 //! CLI del lenguaje Marea.
 //!
-//!   marea tokens <archivo.mar>   muestra los tokens del lexer
-//!   marea parse  <archivo.mar>   muestra el AST del parser
-//!   marea check  <archivo.mar>   verifica los tipos del módulo
+//!   marea tokens     <archivo.mar>        muestra los tokens del lexer
+//!   marea parse      <archivo.mar>        muestra el AST del parser
+//!   marea check      <archivo.mar>        verifica los tipos del módulo
+//!   marea build      <archivo.mar> [dir]  transpila a TypeScript
+//!   marea build-wasm <archivo.mar> [out]  compila a WebAssembly (WAT)
+//!   marea build-web  <archivo.mar> [dir]  genera una app web (WASM + DOM)
+//!   marea build-app  <archivo.mar> [dir]  app web completa (RPC + reactivo + DOM)
+//!
+//! Todos los `build*` verifican tipos antes de emitir; `--no-check` lo omite.
 
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() < 3 {
+    // Separa banderas (`--flag`) de argumentos posicionales, para que
+    // `--no-check` pueda ir en cualquier posición sin desplazar la ruta ni el dir.
+    let positional: Vec<&str> = args
+        .iter()
+        .skip(1)
+        .map(String::as_str)
+        .filter(|a| !a.starts_with("--"))
+        .collect();
+    let no_check = args.iter().any(|a| a == "--no-check");
+
+    if positional.len() < 2 {
         print_usage();
         return ExitCode::FAILURE;
     }
 
-    let cmd = args[1].as_str();
-    let path = args[2].as_str();
+    let cmd = positional[0];
+    let path = positional[1];
+    let out_arg = positional.get(2).copied();
 
     let src = match std::fs::read_to_string(path) {
         Ok(s) => s,
@@ -47,45 +64,23 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        "check" => {
-            // Parser con recuperación: reporta TODOS los errores de sintaxis a
-            // la vez; los de tipos solo si la sintaxis está limpia.
-            let (module, syntax_errors) = marea_syntax::parse_recovering(&src);
-            if !syntax_errors.is_empty() {
-                for e in &syntax_errors {
-                    eprintln!("{}\n", e.render(&src));
-                }
-                let n = syntax_errors.len();
-                eprintln!("{} error{} de sintaxis", n, if n == 1 { "" } else { "es" });
-                ExitCode::FAILURE
-            } else {
-                let errores = marea_types::check(&module);
-                if errores.is_empty() {
-                    println!("  {} tipa sin errores", path);
-                    ExitCode::SUCCESS
-                } else {
-                    for e in &errores {
-                        eprintln!("{}\n", e.render(&src));
-                    }
-                    let n = errores.len();
-                    eprintln!("{} error{} de tipos", n, if n == 1 { "" } else { "es" });
-                    ExitCode::FAILURE
-                }
+        "check" => match frontend(&src, false) {
+            Ok(_) => {
+                println!("  {} tipa sin errores", path);
+                ExitCode::SUCCESS
             }
-        }
+            Err(code) => code,
+        },
         "build" => {
-            let out_dir = args.get(3).map(String::as_str).unwrap_or("marea-out");
-            match marea_syntax::parse(&src) {
+            let out_dir = out_arg.unwrap_or("marea-out");
+            match frontend(&src, no_check) {
                 Ok(module) => build(&module, out_dir),
-                Err(e) => {
-                    eprintln!("{}", e.render(&src));
-                    ExitCode::FAILURE
-                }
+                Err(code) => code,
             }
         }
         "build-wasm" => {
-            let out = args.get(3).map(String::as_str).unwrap_or("module.wat");
-            match marea_syntax::parse(&src) {
+            let out = out_arg.unwrap_or("module.wat");
+            match frontend(&src, no_check) {
                 Ok(module) => match marea_wasm::emit_wat(&module) {
                     Ok(wat) => match std::fs::write(out, wat) {
                         Ok(()) => {
@@ -103,30 +98,21 @@ fn main() -> ExitCode {
                         ExitCode::FAILURE
                     }
                 },
-                Err(e) => {
-                    eprintln!("{}", e.render(&src));
-                    ExitCode::FAILURE
-                }
+                Err(code) => code,
             }
         }
         "build-web" => {
-            let out_dir = args.get(3).map(String::as_str).unwrap_or("marea-web");
-            match marea_syntax::parse(&src) {
+            let out_dir = out_arg.unwrap_or("marea-web");
+            match frontend(&src, no_check) {
                 Ok(module) => build_web(&module, out_dir),
-                Err(e) => {
-                    eprintln!("{}", e.render(&src));
-                    ExitCode::FAILURE
-                }
+                Err(code) => code,
             }
         }
         "build-app" => {
-            let out_dir = args.get(3).map(String::as_str).unwrap_or("marea-app");
-            match marea_syntax::parse(&src) {
+            let out_dir = out_arg.unwrap_or("marea-app");
+            match frontend(&src, no_check) {
                 Ok(module) => build_app(&module, out_dir),
-                Err(e) => {
-                    eprintln!("{}", e.render(&src));
-                    ExitCode::FAILURE
-                }
+                Err(code) => code,
             }
         }
         other => {
@@ -135,6 +121,40 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Front-end común de los comandos de compilación: parsea con recuperación
+/// (reporta TODOS los errores de sintaxis a la vez, igual que `check`) y, salvo
+/// `--no-check`, verifica los tipos antes de dejar pasar el módulo al codegen.
+/// Así la garantía del verificador deja de ser opt-in: `build`/`build-app`/etc.
+/// ya no emiten código que el checker habría rechazado. Devuelve `Err(código)`
+/// con los diagnósticos ya impresos si algo falla.
+fn frontend(src: &str, no_check: bool) -> Result<marea_syntax::Module, ExitCode> {
+    let (module, syntax_errors) = marea_syntax::parse_recovering(src);
+    if !syntax_errors.is_empty() {
+        for e in &syntax_errors {
+            eprintln!("{}\n", e.render(src));
+        }
+        let n = syntax_errors.len();
+        eprintln!("{} error{} de sintaxis", n, if n == 1 { "" } else { "es" });
+        return Err(ExitCode::FAILURE);
+    }
+    if !no_check {
+        let errores = marea_types::check(&module);
+        if !errores.is_empty() {
+            for e in &errores {
+                eprintln!("{}\n", e.render(src));
+            }
+            let n = errores.len();
+            eprintln!(
+                "{} error{} de tipos (usa --no-check para compilar de todos modos)",
+                n,
+                if n == 1 { "" } else { "es" }
+            );
+            return Err(ExitCode::FAILURE);
+        }
+    }
+    Ok(module)
 }
 
 fn build_app(module: &marea_syntax::Module, out_dir: &str) -> ExitCode {
@@ -247,4 +267,6 @@ fn print_usage() {
     eprintln!("  marea build-wasm <archivo.mar> [out]  compila a WebAssembly (WAT)");
     eprintln!("  marea build-web  <archivo.mar> [dir]  genera una app web (WASM + DOM)");
     eprintln!("  marea build-app  <archivo.mar> [dir]  app web completa (RPC + reactivo + DOM)");
+    eprintln!("\nbanderas:");
+    eprintln!("  --no-check                            omite la verificación de tipos en los build*");
 }
