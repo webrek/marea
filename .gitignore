@@ -2,3 +2,5 @@
 **/*.rs.bk
 Cargo.lock
 .DS_Store
+# Datos de los almacenes: los genera el runtime, no son fuente.
+marea-store.*.log

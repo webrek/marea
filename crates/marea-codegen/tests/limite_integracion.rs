@@ -50,7 +50,7 @@ fn generar(dir: &str) {
 fn atacar(dir: &str, puerto: u16) -> String {
     let guion = format!(
         r#"
-process.env.MAREA_STORE = "{dir}/store.log";
+process.env.MAREA_STORE_DIR = "{dir}";
 process.env.PORT = "{puerto}";
 process.env.MAREA_WEB_ROOT = "{dir}";
 await import("{dir}/server.ts");
