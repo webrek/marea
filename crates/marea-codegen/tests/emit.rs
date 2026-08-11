@@ -568,3 +568,13 @@ fn el_validador_no_desborda_con_recursion_mutua() {
     let p = build("type A = { x: B };\ntype B = { y: A };\n@server fn g(a: A) { print(1); }");
     assert!(p.server.contains("__register(\"g\""), "{}", p.server);
 }
+
+#[test]
+fn los_builtins_de_lista_y_texto_llegan_al_runtime() {
+    let p = build("fn f(a: List<Int>, b: List<Int>) -> List<Int> { return unir(a, b); }");
+    for n in ["export function unir", "export function agregar", "export function contiene"] {
+        assert!(p.runtime.contains(n), "falta {n} en runtime.ts");
+    }
+    // Son síncronos: emitirlos con await rompería el rastreo reactivo.
+    assert!(!p.client.contains("await unir"), "{}", p.client);
+}

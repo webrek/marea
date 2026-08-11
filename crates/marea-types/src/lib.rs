@@ -985,6 +985,83 @@ impl Checker {
                     _ => Ty::String,
                 };
             }
+            // `unir` conserva el tipo del elemento: el verificador no tiene
+            // genéricos, así que la firma se calcula aquí a partir de los
+            // argumentos en vez de fijarla en la tabla.
+            if name == "unir" {
+                let ts: Vec<Ty> = args.iter().map(|a| self.check_expr(a)).collect();
+                if !self.arity("unir", &ts, 2, span) {
+                    return Ty::List(Box::new(Ty::Unknown));
+                }
+                let mut elems = Vec::new();
+                for (i, t) in ts.iter().enumerate() {
+                    match t {
+                        Ty::List(e) => elems.push((**e).clone()),
+                        Ty::Unknown => elems.push(Ty::Unknown),
+                        otro => {
+                            self.error(TypeError::new(
+                                "E_ARG_TYPE",
+                                format!("unir espera listas, no '{}'", otro.display()),
+                                args[i].span(),
+                            ));
+                            elems.push(Ty::Unknown);
+                        }
+                    }
+                }
+                // El resultado toma el elemento más concreto de los dos; si son
+                // incompatibles es un error (una lista es homogénea).
+                let (a, b) = (&elems[0], &elems[1]);
+                if matches!(a, Ty::Unknown) {
+                    return Ty::List(Box::new(b.clone()));
+                }
+                if matches!(b, Ty::Unknown) || a == b {
+                    return Ty::List(Box::new(a.clone()));
+                }
+                self.error(TypeError::new(
+                    "E_LIST_HETEROGENEOUS",
+                    format!(
+                        "no se pueden unir 'List<{}>' y 'List<{}>'",
+                        a.display(),
+                        b.display()
+                    ),
+                    span,
+                ));
+                return Ty::List(Box::new(Ty::Unknown));
+            }
+            // `agregar(xs, x)`: el elemento debe encajar con el de la lista.
+            if name == "agregar" {
+                let ts: Vec<Ty> = args.iter().map(|a| self.check_expr(a)).collect();
+                if !self.arity("agregar", &ts, 2, span) {
+                    return Ty::List(Box::new(Ty::Unknown));
+                }
+                let elem = match &ts[0] {
+                    Ty::List(e) => (**e).clone(),
+                    Ty::Unknown => Ty::Unknown,
+                    otro => {
+                        self.error(TypeError::new(
+                            "E_ARG_TYPE",
+                            format!("agregar espera una lista, no '{}'", otro.display()),
+                            args[0].span(),
+                        ));
+                        Ty::Unknown
+                    }
+                };
+                if matches!(elem, Ty::Unknown) {
+                    return Ty::List(Box::new(ts[1].clone()));
+                }
+                if !self.is_subtype(&ts[1], &elem) {
+                    self.error(TypeError::new(
+                        "E_LIST_HETEROGENEOUS",
+                        format!(
+                            "se agrega '{}' a una 'List<{}>'",
+                            ts[1].display(),
+                            elem.display()
+                        ),
+                        args[1].span(),
+                    ));
+                }
+                return Ty::List(Box::new(elem));
+            }
             // `concat` propaga la seguridad: si los dos lados son marcado
             // seguro, el resultado lo es. Con un solo lado inseguro cae a String
             // y entonces no puede llegar a `render`, que es el objetivo.
@@ -1849,6 +1926,7 @@ fn es_builtin_sincrono(name: &str) -> bool {
     matches!(
         name,
         "print" | "concat" | "render" | "len" | "aTexto" | "escapar" | "html"
+            | "unir" | "agregar" | "largo" | "contiene" | "minusculas"
     )
 }
 

@@ -86,6 +86,31 @@ Lo que ya funciona:
   emitir** (la garantía del verificador dejó de ser opt-in); `--no-check` la
   omite si quieres compilar de todos modos.
 
+### Listas y texto
+
+Sin construir listas en tiempo de ejecución no se puede escribir una búsqueda:
+el lenguaje no tiene bucles ni cierres, así que una función no podía devolver un
+subconjunto filtrado —sólo pintarlo—. `unir(a, b)` concatena dos listas y
+`agregar(xs, x)` añade un elemento; ambas conservan el tipo del elemento (el
+verificador no tiene genéricos, así que su firma se calcula desde los
+argumentos). Para el texto: `largo(s)`, `contiene(s, sub)` y `minusculas(s)`.
+
+```marea
+@server
+fn buscar(q: String, i: Int) -> List<Producto> {
+    let ps = todos();
+    if i < len(ps) {
+        let p = ps[i];
+        let resto = buscar(q, i + 1);
+        if contiene(minusculas(p.titulo), minusculas(q)) {
+            return unir([p], resto);   // el filtrado como DATOS, no como HTML
+        }
+        return resto;
+    }
+    return [];
+}
+```
+
 ### El escapado no es opcional: el tipo `Html`
 
 El sumidero del DOM (`render`) solo acepta `Html`, y a `Html` solo se llega por

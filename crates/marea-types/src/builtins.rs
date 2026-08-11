@@ -79,6 +79,39 @@ pub fn lookup(name: &str) -> Option<Ty> {
             ret: Box::new(Ty::Unit),
             location: None,
         }),
+        // --- listas ---
+        // `unir`/`agregar` se tipan aparte en `check_call` para conservar el
+        // tipo del elemento (el verificador no tiene genéricos). Estas firmas
+        // son la de reserva.
+        "unir" => Some(Ty::Fn {
+            params: vec![
+                Ty::List(Box::new(Ty::Unknown)),
+                Ty::List(Box::new(Ty::Unknown)),
+            ],
+            ret: Box::new(Ty::List(Box::new(Ty::Unknown))),
+            location: None,
+        }),
+        "agregar" => Some(Ty::Fn {
+            params: vec![Ty::List(Box::new(Ty::Unknown)), Ty::Unknown],
+            ret: Box::new(Ty::List(Box::new(Ty::Unknown))),
+            location: None,
+        }),
+        // --- texto ---
+        "largo" => Some(Ty::Fn {
+            params: vec![Ty::String],
+            ret: Box::new(Ty::Int),
+            location: None,
+        }),
+        "contiene" => Some(Ty::Fn {
+            params: vec![Ty::String, Ty::String],
+            ret: Box::new(Ty::Bool),
+            location: None,
+        }),
+        "minusculas" => Some(Ty::Fn {
+            params: vec![Ty::String],
+            ret: Box::new(Ty::String),
+            location: None,
+        }),
         // Variante nominal usable como etiqueta en uniones / patrones.
         "NotFound" => Some(Ty::Union(vec!["NotFound".to_string()])),
         _ => None,
@@ -116,6 +149,11 @@ pub const VALUE_NAMES: &[&str] = &[
     "todos",
     "actualizar",
     "borrar",
+    "unir",
+    "agregar",
+    "largo",
+    "contiene",
+    "minusculas",
     "NotFound",
 ];
 

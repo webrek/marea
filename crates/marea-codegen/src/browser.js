@@ -140,6 +140,24 @@ export function escapar(x) {
 export function html(s) {
   return s;
 }
+// --- listas: construir en runtime (el lenguaje no tiene bucles ni cierres, así
+// que sin esto una función no puede devolver un subconjunto filtrado) ---
+export function unir(a, b) {
+  return a.concat(b);
+}
+export function agregar(xs, x) {
+  return xs.concat([x]);
+}
+// --- texto ---
+export function largo(s) {
+  return Array.from(String(s)).length;
+}
+export function contiene(s, sub) {
+  return String(s).includes(String(sub));
+}
+export function minusculas(s) {
+  return String(s).toLowerCase();
+}
 export function __index(xs, i) {
   if (i < 0 || i >= xs.length) {
     throw new Error(`índice fuera de rango: ${i} (longitud ${xs.length})`);

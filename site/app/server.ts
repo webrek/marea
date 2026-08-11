@@ -1,5 +1,5 @@
 // Generado por Marea — lado servidor.
-import { __register, __malFormado, __rpc, print, concat, render, len, aTexto, escapar, html, __index, guardar, todos, actualizar, borrar, __marea_is, __signal, __memo, __effect } from "./runtime.ts";
+import { __register, __malFormado, __rpc, print, concat, render, len, aTexto, escapar, html, unir, agregar, largo, contiene, minusculas, __index, guardar, todos, actualizar, borrar, __marea_is, __signal, __memo, __effect } from "./runtime.ts";
 
 // fn fila(p: Post, i: Int) -> Html
 async function fila(p: Post, i: number) {

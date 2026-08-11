@@ -417,6 +417,24 @@ export function html(s: string): string {
 }
 // Indexado de lista con verificación de rango: un índice fuera de rango lanza
 // un error claro en vez de devolver 'undefined' (que reventaría más tarde).
+// --- listas: construir en runtime (el lenguaje no tiene bucles ni cierres, así
+// que sin esto una función no puede devolver un subconjunto filtrado) ---
+export function unir(a: unknown[], b: unknown[]): unknown[] {
+  return a.concat(b);
+}
+export function agregar(xs: unknown[], x: unknown): unknown[] {
+  return xs.concat([x]);
+}
+// --- texto ---
+export function largo(s: string): number {
+  return Array.from(String(s)).length;
+}
+export function contiene(s: string, sub: string): boolean {
+  return String(s).includes(String(sub));
+}
+export function minusculas(s: string): string {
+  return String(s).toLowerCase();
+}
 export function __index(xs: unknown[], i: number): unknown {
   if (i < 0 || i >= xs.length) {
     // Si el índice vino de la red es una petición mal formada (400), no un

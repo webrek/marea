@@ -1031,3 +1031,51 @@ fn html_no_vale_como_parametro_remoto() {
     let errs = check_src("@server fn publicar(c: Html) { print(c); }");
     assert!(has_code(&errs, "E_BOUNDARY_NOT_SERIALIZABLE"), "{:?}", codes(&errs));
 }
+
+// --- listas y texto: sin esto no se puede escribir una búsqueda ---
+
+// Construir una lista en runtime era imposible: no había concat de listas ni
+// append, así que una función no podía devolver un subconjunto filtrado. Con
+// `unir`/`agregar` el tipo del elemento se conserva (no hay genéricos: la firma
+// se calcula desde los argumentos).
+#[test]
+fn unir_conserva_el_tipo_del_elemento() {
+    let errs = check_src(
+        "type P = { t: String };\n\
+         fn f(a: List<P>, b: List<P>) -> List<P> { return unir(a, b); }",
+    );
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+#[test]
+fn unir_listas_de_tipos_distintos_es_error() {
+    let errs = check_src("fn f(a: List<Int>, b: List<String>) -> List<Int> { return unir(a, b); }");
+    assert!(has_code(&errs, "E_LIST_HETEROGENEOUS"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn agregar_exige_que_el_elemento_encaje() {
+    let ok = check_src("fn f(xs: List<Int>, x: Int) -> List<Int> { return agregar(xs, x); }");
+    assert!(ok.is_empty(), "{:?}", codes(&ok));
+    let mal = check_src("fn f(xs: List<Int>, s: String) -> List<Int> { return agregar(xs, s); }");
+    assert!(has_code(&mal, "E_LIST_HETEROGENEOUS"), "{:?}", codes(&mal));
+}
+
+#[test]
+fn unir_sobre_algo_que_no_es_lista_es_error() {
+    let errs = check_src("fn f(a: Int, b: List<Int>) -> List<Int> { return unir(a, b); }");
+    assert!(has_code(&errs, "E_ARG_TYPE"), "{:?}", codes(&errs));
+}
+
+// Búsqueda de texto: sin `contiene`/`minusculas`/`largo` no se podía comparar
+// cadenas más allá de la igualdad exacta.
+#[test]
+fn los_builtins_de_texto_tipan() {
+    let errs = check_src(
+        "fn f(t: String, q: String) -> Bool { \
+           if largo(q) < 1 { return true; } \
+           return contiene(minusculas(t), minusculas(q)); \
+         }",
+    );
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
