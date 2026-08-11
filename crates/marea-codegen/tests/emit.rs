@@ -552,3 +552,19 @@ fn el_artefacto_desplegable_no_se_desincroniza() {
         );
     }
 }
+
+// Los validadores del límite recursan sobre los campos de un registro, así que
+// un tipo recursivo (válido en el lenguaje) desbordaba la pila: `check` pasaba y
+// `build` moría. Es la misma clase de fallo que ya se había cerrado en el
+// verificador; aquí se cierra en el generador.
+#[test]
+fn el_validador_no_desborda_con_tipos_recursivos() {
+    let p = build("type Nodo = { v: Int, sig: Nodo };\n@server fn add(n: Nodo) { print(n.v); }");
+    assert!(p.server.contains("__register(\"add\""), "{}", p.server);
+}
+
+#[test]
+fn el_validador_no_desborda_con_recursion_mutua() {
+    let p = build("type A = { x: B };\ntype B = { y: A };\n@server fn g(a: A) { print(1); }");
+    assert!(p.server.contains("__register(\"g\""), "{}", p.server);
+}

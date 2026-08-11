@@ -540,6 +540,21 @@ globalThis.mareaCadena = decodificarCadena;
 /// uniones y tipos abiertos (`Record`, alias sin resolver), donde el lenguaje
 /// todavía no tiene una representación de runtime con la que discriminar.
 fn js_validator(ty: &Type, aliases: &std::collections::HashMap<String, Type>, expr: &str) -> String {
+    js_validator_guarded(ty, aliases, expr, &mut HashSet::new())
+}
+
+/// Igual, con un conjunto de alias en expansión. Un tipo registro recursivo
+/// (`type Nodo = { sig: Nodo }`) es válido en el lenguaje, y sin esta guarda el
+/// generador recursaba hasta desbordar la pila: `check` pasaba y `build` moría.
+/// Al reencontrar un alias ya en expansión se deja de profundizar y se acepta
+/// —validar una estructura de profundidad arbitraria en el límite no es el
+/// objetivo; el objetivo es que un String no llegue donde se declaró un Int—.
+fn js_validator_guarded(
+    ty: &Type,
+    aliases: &std::collections::HashMap<String, Type>,
+    expr: &str,
+    expanding: &mut HashSet<String>,
+) -> String {
     match ty {
         Type::Name { name, args, .. } => match name.as_str() {
             "Int" => format!("Number.isInteger({expr})"),
@@ -548,7 +563,7 @@ fn js_validator(ty: &Type, aliases: &std::collections::HashMap<String, Type>, ex
             "String" => format!("typeof {expr} === \"string\""),
             "List" => {
                 let elem = match args.first() {
-                    Some(a) => js_validator(a, aliases, "__e"),
+                    Some(a) => js_validator_guarded(a, aliases, "__e", expanding),
                     None => "true".to_string(),
                 };
                 format!("(Array.isArray({expr}) && {expr}.every((__e) => {elem}))")
@@ -556,7 +571,15 @@ fn js_validator(ty: &Type, aliases: &std::collections::HashMap<String, Type>, ex
             // `Record` es el registro abierto: cualquier objeto vale.
             "Record" => format!("({expr} !== null && typeof {expr} === \"object\")"),
             otro => match aliases.get(otro) {
-                Some(t) => js_validator(t, aliases, expr),
+                Some(t) => {
+                    // Ya en expansión → referencia recursiva: no profundizar.
+                    if !expanding.insert(otro.to_string()) {
+                        return "true".to_string();
+                    }
+                    let v = js_validator_guarded(t, aliases, expr, expanding);
+                    expanding.remove(otro);
+                    v
+                }
                 // Variante nominal (NotFound, …): sin representación de runtime
                 // fiable, se acepta.
                 None => "true".to_string(),
@@ -568,7 +591,7 @@ fn js_validator(ty: &Type, aliases: &std::collections::HashMap<String, Type>, ex
             )];
             for f in fields {
                 let acceso = format!("{expr}[{}]", js_string(&f.name));
-                partes.push(js_validator(&f.ty, aliases, &acceso));
+                partes.push(js_validator_guarded(&f.ty, aliases, &acceso, expanding));
             }
             format!("({})", partes.join(" && "))
         }
