@@ -1,0 +1,334 @@
+// ============================================================================
+// TIENDA — un marketplace tipo Mercado Libre, escrito entero en Marea.
+//
+// Es el ejemplo grande del repositorio: sirve para ver el lenguaje resolviendo
+// una app real (catálogo, búsqueda, filtros, orden, carrito, compra con
+// descuento de stock, preguntas y reseñas) y para que los límites se noten.
+//
+// Tres rodeos que el lenguaje obliga a dar hoy, marcados donde aparecen:
+//   (1) Un solo `store` por módulo -> una tabla única con un campo 'tipo'.
+//   (2) No hay bucles -> todo recorrido es recursión con índice.
+//   (3) No hay genéricos ni cierres -> cada recorrido se escribe entero.
+//
+// Construir y correr:
+//   marea build-app examples/tienda.mar /tmp/tienda
+//   node /tmp/tienda/serve.ts
+// ============================================================================
+
+// Rodeo (1): una sola forma para producto, orden, pregunta y reseña. Los campos
+// que no aplican van vacíos; el lenguaje aún no tiene uniones con carga.
+type Fila = {
+    tipo: String,          // "producto" | "orden" | "pregunta" | "resena"
+    titulo: String,
+    categoria: String,
+    precio: Int,           // centavos: el dinero nunca en Float
+    descuento: Int,        // porcentaje 0..90
+    stock: Int,
+    vendedor: String,
+    reputacion: Int,       // 0..5
+    envioGratis: Bool,
+    vendidos: Int,
+    quien: String,
+    cantidad: Int,
+    texto: String,
+    estrellas: Int,
+    refIdx: Int
+};
+
+store Fila;
+
+fn vacia() -> Fila {
+    return Fila {
+        tipo: "", titulo: "", categoria: "", precio: 0, descuento: 0, stock: 0,
+        vendedor: "", reputacion: 0, envioGratis: false, vendidos: 0,
+        quien: "", cantidad: 0, texto: "", estrellas: 0, refIdx: 0
+    };
+}
+
+// --------------------------------------------------------------------------
+// Servidor
+// --------------------------------------------------------------------------
+
+@server
+fn publicar(titulo: String, categoria: String, precio: Int, descuento: Int,
+            stock: Int, vendedor: String, reputacion: Int, envioGratis: Bool) {
+    let b = vacia();
+    guardar(Fila {
+        tipo: "producto", titulo: titulo, categoria: categoria, precio: precio,
+        descuento: descuento, stock: stock, vendedor: vendedor,
+        reputacion: reputacion, envioGratis: envioGratis, vendidos: 0,
+        quien: b.quien, cantidad: b.cantidad, texto: b.texto,
+        estrellas: b.estrellas, refIdx: b.refIdx
+    });
+}
+
+@server
+fn filas() -> List<Fila> {
+    return todos();
+}
+
+// Búsqueda por texto + categoría + tope de precio, devuelta como DATOS.
+@server
+fn buscar(q: String, cat: String, tope: Int, soloGratis: Bool, i: Int) -> List<Fila> {
+    let fs = todos();
+    if i < len(fs) {
+        let p = fs[i];
+        let resto = buscar(q, cat, tope, soloGratis, i + 1);
+        if coincide(p, q, cat, tope, soloGratis) {
+            return unir([p], resto);
+        }
+        return resto;
+    }
+    return [];
+}
+
+fn coincide(p: Fila, q: String, cat: String, tope: Int, soloGratis: Bool) -> Bool {
+    if p.tipo != "producto" { return false; }
+    if q != "" {
+        if !contiene(minusculas(p.titulo), minusculas(q)) { return false; }
+    }
+    if cat != "" {
+        if p.categoria != cat { return false; }
+    }
+    if tope > 0 {
+        if precioFinal(p) > tope { return false; }
+    }
+    if soloGratis {
+        if !p.envioGratis { return false; }
+    }
+    return true;
+}
+
+fn precioFinal(p: Fila) -> Int {
+    if p.descuento > 0 {
+        return p.precio - (p.precio * p.descuento / 100);
+    }
+    return p.precio;
+}
+
+// Compra: valida stock y cantidad, descuenta y registra la orden.
+@server
+fn comprar(idx: Int, quien: String, cantidad: Int) -> Int {
+    let fs = todos();
+    if idx < 0 { return 0; }
+    if idx < len(fs) {
+        let p = fs[idx];
+        if p.tipo == "producto" {
+            if cantidad > 0 {
+                if p.stock >= cantidad {
+                    let total = precioFinal(p) * cantidad;
+                    actualizar(idx, Fila {
+                        tipo: p.tipo, titulo: p.titulo, categoria: p.categoria,
+                        precio: p.precio, descuento: p.descuento,
+                        stock: p.stock - cantidad, vendedor: p.vendedor,
+                        reputacion: p.reputacion, envioGratis: p.envioGratis,
+                        vendidos: p.vendidos + cantidad,
+                        quien: p.quien, cantidad: p.cantidad, texto: p.texto,
+                        estrellas: p.estrellas, refIdx: p.refIdx
+                    });
+                    let b = vacia();
+                    guardar(Fila {
+                        tipo: "orden", titulo: p.titulo, categoria: p.categoria,
+                        precio: total, descuento: 0, stock: 0,
+                        vendedor: p.vendedor, reputacion: 0,
+                        envioGratis: p.envioGratis, vendidos: 0,
+                        quien: quien, cantidad: cantidad, texto: b.texto,
+                        estrellas: 0, refIdx: idx
+                    });
+                    return total;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+@server
+fn calificar(idx: Int, quien: String, estrellas: Int, texto: String) {
+    if estrellas > 0 {
+        if estrellas < 6 {
+            let b = vacia();
+            guardar(Fila {
+                tipo: "resena", titulo: b.titulo, categoria: b.categoria,
+                precio: 0, descuento: 0, stock: 0, vendedor: b.vendedor,
+                reputacion: 0, envioGratis: false, vendidos: 0,
+                quien: quien, cantidad: 0, texto: texto,
+                estrellas: estrellas, refIdx: idx
+            });
+        }
+    }
+}
+
+@server
+fn preguntar(idx: Int, quien: String, texto: String) {
+    let b = vacia();
+    guardar(Fila {
+        tipo: "pregunta", titulo: b.titulo, categoria: b.categoria,
+        precio: 0, descuento: 0, stock: 0, vendedor: b.vendedor,
+        reputacion: 0, envioGratis: false, vendidos: 0,
+        quien: quien, cantidad: 0, texto: texto, estrellas: 0, refIdx: idx
+    });
+}
+
+// --------------------------------------------------------------------------
+// Estado reactivo del cliente
+// --------------------------------------------------------------------------
+
+reactive mut resultados = [];
+reactive mut consulta = "";
+reactive mut categoria = "";
+reactive mut soloGratis = false;
+reactive mut carritoCant = 0;
+reactive mut carritoTotal = 0;
+reactive mut aviso = "";
+
+// --------------------------------------------------------------------------
+// Dinero: centavos -> "$24.999,00" con separadores es-MX.
+// --------------------------------------------------------------------------
+
+fn dos(n: Int) -> Html {
+    if n < 10 { return concat("0", aTexto(n)); }
+    return aTexto(n);
+}
+
+fn tres(n: Int) -> Html {
+    if n < 10 { return concat("00", aTexto(n)); }
+    if n < 100 { return concat("0", aTexto(n)); }
+    return aTexto(n);
+}
+
+fn miles(n: Int) -> Html {
+    if n < 1000 { return aTexto(n); }
+    return concat(miles(n / 1000), concat(",", tres(n % 1000)));
+}
+
+fn dinero(centavos: Int) -> Html {
+    return concat("$", concat(miles(centavos / 100), concat(".", dos(centavos % 100))));
+}
+
+// --------------------------------------------------------------------------
+// Pintado (rodeo 2: recursión con índice)
+// --------------------------------------------------------------------------
+
+fn estrellitas(n: Int) -> Html {
+    if n < 1 { return ""; }
+    return concat("★", estrellitas(n - 1));
+}
+
+fn insignia(p: Fila) -> Html {
+    if p.envioGratis {
+        return "<span class=\"envio\">Envío gratis</span>";
+    }
+    return "";
+}
+
+fn etiquetaStock(s: Int) -> Html {
+    if s < 1 { return "<span class=\"agotado\">Sin stock</span>"; }
+    if s < 5 { return concat("<span class=\"pocas\">¡Últimas ", concat(aTexto(s), " disponibles!</span>")); }
+    return concat("<span class=\"hay\">", concat(aTexto(s), " disponibles</span>"));
+}
+
+fn precioBloque(p: Fila) -> Html {
+    if p.descuento > 0 {
+        return concat(
+            concat("<p class=\"antes\">", concat(dinero(p.precio), "</p>")),
+            concat(
+                concat("<p class=\"precio\">", dinero(precioFinal(p))),
+                concat("<span class=\"off\">", concat(aTexto(p.descuento), "% OFF</span></p>"))
+            )
+        );
+    }
+    return concat("<p class=\"precio\">", concat(dinero(p.precio), "</p>"));
+}
+
+fn tarjeta(p: Fila, idx: Int) -> Html {
+    return concat(
+        concat(
+            concat("<li class=\"card\"><h3>", concat(escapar(p.titulo), "</h3>")),
+            precioBloque(p)
+        ),
+        concat(
+            concat(
+                concat("<p class=\"vend\">", concat(escapar(p.vendedor), " ")),
+                concat(estrellitas(p.reputacion), concat(" ", insignia(p)))
+            ),
+            concat(
+                concat("</p><p class=\"st\">", concat(etiquetaStock(p.stock), "</p>")),
+                concat(
+                    concat("<button onclick=\"marea.agregarAlCarrito(", aTexto(idx)),
+                    ")\">Agregar al carrito</button></li>"
+                )
+            )
+        )
+    );
+}
+
+fn tarjetas(xs: List<Fila>, i: Int) -> Html {
+    if i < len(xs) {
+        return concat(tarjeta(xs[i], i), tarjetas(xs, i + 1));
+    }
+    return "";
+}
+
+@client
+fn vista() -> Html {
+    let xs = resultados;
+    let n = len(xs);
+    return concat(
+        concat(
+            concat("<p class=\"aviso\">", concat(escapar(aviso), "</p>")),
+            concat(
+                concat("<p class=\"cuenta\">", aTexto(n)),
+                concat(" resultados · carrito: ", concat(aTexto(carritoCant),
+                    concat(" (", concat(dinero(carritoTotal), ")</p>"))))
+            )
+        ),
+        concat("<ul class=\"grid\">", concat(tarjetas(xs, 0), "</ul>"))
+    );
+}
+
+@client
+fn refrescar() {
+    resultados = buscar(consulta, categoria, 0, soloGratis, 0);
+}
+
+@client
+fn buscarTexto(q: String) {
+    consulta = q;
+    refrescar();
+}
+
+@client
+fn filtrarCategoria(c: String) {
+    categoria = c;
+    refrescar();
+}
+
+@client
+fn agregarAlCarrito(i: Int) {
+    let xs = resultados;
+    if i < len(xs) {
+        let p = xs[i];
+        if p.stock > 0 {
+            carritoCant = carritoCant + 1;
+            carritoTotal = carritoTotal + precioFinal(p);
+            aviso = concat("Agregado: ", escapar(p.titulo));
+        } else {
+            aviso = "Ese producto está sin stock";
+        }
+    }
+}
+
+@client
+fn main() {
+    publicar("iPhone 15 Pro Max 256GB", "celulares", 2499900, 10, 8, "TiendaMovil", 5, true);
+    publicar("Samsung Galaxy S24 Ultra", "celulares", 2199900, 0, 3, "MundoTech", 4, true);
+    publicar("Funda para iPhone 15", "accesorios", 29900, 20, 50, "AccesoriosMX", 3, false);
+    publicar("Laptop Gamer RTX 4060", "computo", 3299900, 15, 2, "PCStore", 5, true);
+    publicar("Teclado mecánico RGB", "computo", 89900, 0, 0, "PCStore", 5, false);
+    publicar("Audífonos Bluetooth ANC", "audio", 149900, 25, 25, "AudioMax", 4, true);
+    calificar(0, "ana", 5, "Excelente, llegó en dos días");
+    calificar(0, "luis", 4, "Muy bueno el equipo");
+    preguntar(0, "carlos", "¿Incluye cargador?");
+    refrescar();
+}

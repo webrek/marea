@@ -200,6 +200,7 @@ crates/
   marea-lsp/      # servidor de lenguaje (LSP) — deps externas aisladas aquí
   marea-cli/      # binario `marea`
 examples/         # programas .mar de muestra (+ check_fail/ que deben fallar)
+examples/tienda.mar  # el ejemplo grande: un marketplace tipo Mercado Libre
 editors/vscode/   # extensión de VSCode: cliente LSP + resaltado TextMate
 site/             # la app de demo desplegable (salida de `marea build-app` + Dockerfile)
 docs/GRAMMAR.md   # la gramática de v0
