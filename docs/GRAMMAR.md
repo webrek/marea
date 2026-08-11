@@ -22,7 +22,7 @@ param       = IDENT ":" type ;
 type_decl   = "type" IDENT "=" type ";" ;
 
 (* --- el estado del servidor: un solo tipo de elemento por módulo --- *)
-store_decl  = "store" type ";" ;
+store_decl  = "store" IDENT ":" type ";" ;
 
 (* --- tipos: el '|' construye uniones --- *)
 type        = type_primary ( "|" type_primary )* ;
@@ -88,7 +88,8 @@ pattern     = "_" | IDENT | INT | BOOL | STRING ;
 - **Asignación**: la parte izquierda es un identificador simple. `x.campo = e` y
   `xs[i] = e` **no** se parsean todavía. Se distingue de `==` mirando el token
   siguiente al identificador: solo un `=` suelto abre una asignación.
-- **`store T;`**: declara el tipo de elemento del estado del servidor y tipa los
+- **`store nombre: T;`**: declara un almacén del servidor con nombre. Un módulo
+  puede declarar varios; el nombre se pasa como primer argumento y tipa los
   builtins de CRUD (`guardar`, `todos`, `actualizar`, `borrar`). Es un item, y no
   admite atributo de ubicación.
 - **Tipos unión**: `User | NotFound` es la base de "errores como valores". El

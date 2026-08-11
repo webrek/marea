@@ -75,7 +75,10 @@ struct Checker {
     cyclic: std::collections::HashSet<String>,
     /// Tipo de elemento del store del servidor (Fase A), declarado con `store T;`.
     /// Tipa `guardar(T)` y `todos() -> List<T>`. `None` si no se declaró.
-    store_elem: Option<Ty>,
+    /// Almacenes declarados con `store nombre: T;`, por nombre. Un módulo puede
+    /// tener varios: el nombre se pasa como primer argumento a los builtins de
+    /// estado, así que `todos(productos)` y `todos(ordenes)` son distintos.
+    stores: HashMap<String, Ty>,
     /// Variables de nivel superior (`let`/`reactive` de módulo) y su mutabilidad.
     /// Visibles desde cualquier función; son el estado reactivo de la app.
     globals: HashMap<String, (Ty, bool)>,
@@ -105,7 +108,7 @@ impl Checker {
             fns: HashMap::new(),
             aliases: HashMap::new(),
             cyclic: std::collections::HashSet::new(),
-            store_elem: None,
+            stores: HashMap::new(),
             globals: HashMap::new(),
             reactive_globals: std::collections::HashSet::new(),
             scopes: Vec::new(),
@@ -170,6 +173,15 @@ impl Checker {
                     None => self.check_expr(&l.value),
                 };
                 self.init_context = None;
+                // Ni como un almacén: ambos son nombres de primer nivel del
+                // mismo módulo y el generado los declararía dos veces.
+                if self.stores.contains_key(&l.name) {
+                    self.error(TypeError::new(
+                        "E_DUPLICATE_ITEM",
+                        format!("'{}' ya está declarada como almacén", l.name),
+                        l.span,
+                    ));
+                }
                 // Una global no puede llamarse como un builtin: el bundle
                 // generado importa los builtins del runtime, así que declararla
                 // produce un `const` que redeclara el import (SyntaxError, el
@@ -206,7 +218,7 @@ impl Checker {
         let mut fn_spans: HashMap<String, Span> = HashMap::new();
         let mut type_spans: HashMap<String, Span> = HashMap::new();
         // Tipo sintáctico del `store T;` (se resuelve tras registrar los alias).
-        let mut store_decl: Option<&Type> = None;
+        let mut store_decls: Vec<(String, Span, &Type)> = Vec::new();
 
         for item in &module.items {
             match item {
@@ -256,15 +268,15 @@ impl Checker {
                     }
                 }
                 Item::Let(_) => {}
-                Item::Store { ty, span } => {
-                    if store_decl.is_some() {
+                Item::Store { name, name_span, ty, span } => {
+                    if store_decls.iter().any(|(n, _, _)| n == name) {
                         self.error(TypeError::new(
                             "E_DUPLICATE_STORE",
-                            "el store del servidor ya fue declarado",
+                            format!("el almacén '{name}' ya fue declarado"),
                             *span,
                         ));
                     } else {
-                        store_decl = Some(ty);
+                        store_decls.push((name.clone(), *name_span, ty));
                     }
                 }
             }
@@ -275,10 +287,26 @@ impl Checker {
         // de ciclo recurriría infinitamente (stack overflow).
         self.detect_cyclic_types(&type_spans);
 
-        // Resuelve el tipo del store ahora que los alias ya están registrados.
-        if let Some(ty) = store_decl {
+        // Resuelve los tipos de los almacenes ahora que los alias ya están
+        // registrados.
+        for (nombre, span, ty) in store_decls {
             self.validate_type_exists(ty);
-            self.store_elem = Some(self.ty_from_syntax(ty));
+            let elem = self.ty_from_syntax(ty);
+            if builtins::lookup(&nombre).is_some() || es_interno_del_runtime(&nombre) {
+                self.error(TypeError::new(
+                    "E_REDEFINE_BUILTIN",
+                    format!("no se puede llamar '{nombre}' a un almacén: es un builtin"),
+                    span,
+                ));
+            }
+            if self.fns.contains_key(&nombre) {
+                self.error(TypeError::new(
+                    "E_DUPLICATE_ITEM",
+                    format!("'{nombre}' ya está declarada como función"),
+                    span,
+                ));
+            }
+            self.stores.insert(nombre, elem);
         }
 
         // Registra las firmas (solo la primera de cada nombre).
@@ -696,6 +724,10 @@ impl Checker {
                 return ty.clone();
             }
         }
+        // Nombre de un almacén declarado con `store nombre: T;`.
+        if let Some(elem) = self.stores.get(name) {
+            return Ty::Store(name.to_string(), Box::new(elem.clone()));
+        }
         // Variable global (estado reactivo de módulo).
         if let Some(ty) = self.globals.get(name).map(|(t, _)| t.clone()) {
             // Una global `reactive` es estado de UI: solo existe en el bundle
@@ -858,26 +890,34 @@ impl Checker {
         }
         let arg_tys: Vec<Ty> = args.iter().map(|a| self.check_expr(a)).collect();
 
-        let elem = match &self.store_elem {
-            Some(t) => t.clone(),
-            None => {
+        // El PRIMER argumento es el almacén: `todos(productos)`. De ahí sale el
+        // tipo de los elementos, así que un módulo puede tener varios almacenes
+        // sin ambigüedad.
+        let elem = match arg_tys.first() {
+            Some(Ty::Store(_, e)) => (**e).clone(),
+            Some(Ty::Unknown) | None => Ty::Unknown,
+            Some(otro) => {
                 self.error(TypeError::new(
                     "E_NO_STORE",
-                    format!("'{name}' requiere declarar el tipo del store con 'store T;'"),
-                    span,
+                    format!(
+                        "el primer argumento de '{name}' debe ser un almacén declarado con \
+                         'store nombre: T;', no '{}'",
+                        otro.display()
+                    ),
+                    args.first().map(|a| a.span()).unwrap_or(span),
                 ));
                 Ty::Unknown
             }
         };
 
-        // Firma de cada builtin de estado: (aridad, posiciones de índice Int,
-        // posiciones de valor-del-store, ¿devuelve List<T>?).
+        // Firma de cada builtin de estado, contando el almacén: (aridad,
+        // posiciones de índice Int, posiciones de valor, ¿devuelve List<T>?).
         let (expected, idx_args, elem_args, returns_list): (usize, &[usize], &[usize], bool) =
             match name {
-                "todos" => (0, &[], &[], true),
-                "guardar" => (1, &[], &[0], false),
-                "borrar" => (1, &[0], &[], false),
-                "actualizar" => (2, &[0], &[1], false),
+                "todos" => (1, &[], &[], true),
+                "guardar" => (2, &[], &[1], false),
+                "borrar" => (2, &[1], &[], false),
+                "actualizar" => (3, &[1], &[2], false),
                 _ => (0, &[], &[], false),
             };
 
@@ -1959,6 +1999,8 @@ fn callee_name(callee: &Expr) -> String {
 fn is_serializable(ty: &Ty) -> bool {
     match ty {
         Ty::Int | Ty::Float | Ty::Bool | Ty::String | Ty::Html | Ty::Unit | Ty::Unknown => true,
+        // Un almacén es un asa del servidor: no tiene representación en el cable.
+        Ty::Store(_, _) => false,
         // Las uniones de etiquetas/escalares son serializables (etiqueta + datos).
         Ty::Union(_) => true,
         Ty::Named(_) => true,

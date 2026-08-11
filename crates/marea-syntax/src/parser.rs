@@ -196,9 +196,13 @@ impl Parser {
     /// `store Post;` — declara el tipo de elemento del store del servidor.
     fn parse_store(&mut self) -> PResult<Item> {
         let kw = self.expect(&TokenKind::Store, "'store'")?;
+        let (name, name_span) = self.expect_ident("el nombre del almacén")?;
+        self.expect(&TokenKind::Colon, "':' entre el nombre y el tipo del almacén")?;
         let ty = self.parse_type()?;
         let semi = self.expect(&TokenKind::Semicolon, "';' al final de 'store'")?;
         Ok(Item::Store {
+            name,
+            name_span,
             ty,
             span: kw.span.to(semi.span),
         })

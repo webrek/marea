@@ -176,8 +176,8 @@ fn tipos_registro_mutuamente_recursivos_no_crashean() {
 fn store_recursivo_no_crashea() {
     let errs = check_src(
         "type Nodo = { v: Int, sig: Nodo };\n\
-         store Nodo;\n\
-         @server fn add(n: Nodo) { guardar(n); }",
+         store almacen: Nodo;\n\
+         @server fn add(n: Nodo) { guardar(almacen, n); }",
     );
     assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
 }
@@ -601,62 +601,100 @@ fn lista_heterogenea_es_error() {
 fn store_del_servidor_tipa() {
     let errs = check_src(
         "type P = { t: String };\n\
-         store P;\n\
-         @server fn pub2(t: String) { guardar(P { t: t }); }\n\
-         @server fn feed() -> List<P> { return todos(); }",
+         store almacen: P;\n\
+         @server fn pub2(t: String) { guardar(almacen, P { t: t }); }\n\
+         @server fn feed() -> List<P> { return todos(almacen); }",
     );
     assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
 }
 
 #[test]
 fn estado_fuera_de_server_es_error() {
-    // 'todos()'/'guardar()' desde @client tocarían el store del proceso
+    // 'todos(almacen)'/'guardar(almacen, )' desde @client tocarían el store del proceso
     // equivocado: el typechecker lo rechaza.
-    let errs = check_src("@client fn main() { let d = todos(); print(len(d)); }");
+    let errs = check_src("@client fn main() { let d = todos(almacen); print(len(d)); }");
     assert!(has_code(&errs, "E_STATE_OFF_SERVER"), "códigos: {:?}", codes(&errs));
 }
 
 #[test]
 fn estado_en_server_es_valido() {
-    let errs = check_src("type P = { t: String };\n@server fn s() -> List<P> { guardar(P { t: \"a\" }); return todos(); }");
+    let errs = check_src("type P = { t: String };\n@server fn s() -> List<P> { guardar(almacen, P { t: \"a\" }); return todos(almacen); }");
     assert!(!has_code(&errs, "E_STATE_OFF_SERVER"), "códigos: {:?}", codes(&errs));
 }
 
 #[test]
 fn store_tipado_cierra_el_lavado_de_tipos() {
     // guardar un Int cuando el store es Post -> error (antes 'lavaba' tipos).
-    let errs = check_src("type Post = { a: String };\nstore Post;\n@server fn m() -> List<Post> { guardar(99); return todos(); }");
+    let errs = check_src("type Post = { a: String };\nstore almacen: Post;\n@server fn m() -> List<Post> { guardar(almacen, 99); return todos(almacen); }");
     assert!(has_code(&errs, "E_ARG_TYPE"), "códigos: {:?}", codes(&errs));
 }
 
 #[test]
 fn guardar_sin_store_declarado_es_error() {
-    let errs = check_src("@server fn f() -> List<Int> { guardar(1); return todos(); }");
+    // Con almacenes con nombre, usar uno no declarado es un nombre sin resolver:
+    // más preciso que el antiguo "no hay store".
+    let errs = check_src("@server fn f() -> List<Int> { guardar(almacen, 1); return todos(almacen); }");
+    assert!(has_code(&errs, "E_UNRESOLVED_NAME"), "códigos: {:?}", codes(&errs));
+}
+
+// Pasar algo que no es un almacén donde va uno.
+#[test]
+fn el_primer_argumento_debe_ser_un_almacen() {
+    let errs = check_src("@server fn f(n: Int) { guardar(n, 1); }");
     assert!(has_code(&errs, "E_NO_STORE"), "códigos: {:?}", codes(&errs));
+}
+
+// Varios almacenes en el mismo módulo, cada uno con su tipo.
+#[test]
+fn varios_almacenes_conviven() {
+    let errs = check_src(
+        "type P = { a: Int };\ntype O = { b: String };\n\
+         store productos: P;\nstore ordenes: O;\n\
+         @server fn f() { guardar(productos, P { a: 1 }); guardar(ordenes, O { b: \"x\" }); }\n\
+         @server fn g() -> List<O> { return todos(ordenes); }",
+    );
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// Y no se pueden confundir entre sí.
+#[test]
+fn no_se_puede_guardar_en_el_almacen_equivocado() {
+    let errs = check_src(
+        "type P = { a: Int };\ntype O = { b: String };\n\
+         store productos: P;\nstore ordenes: O;\n\
+         @server fn f() { guardar(ordenes, P { a: 1 }); }",
+    );
+    assert!(has_code(&errs, "E_ARG_TYPE"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn dos_almacenes_con_el_mismo_nombre_es_error() {
+    let errs = check_src("type P = { a: Int };\nstore x: P;\nstore x: P;");
+    assert!(has_code(&errs, "E_DUPLICATE_STORE"), "{:?}", codes(&errs));
 }
 
 #[test]
 fn store_tipado_correcto_no_es_error() {
-    let errs = check_src("type Post = { a: String };\nstore Post;\n@server fn pub(a: String) { guardar(Post { a: a }); }\n@server fn feed() -> List<Post> { return todos(); }");
+    let errs = check_src("type Post = { a: String };\nstore almacen: Post;\n@server fn pub(a: String) { guardar(almacen, Post { a: a }); }\n@server fn feed() -> List<Post> { return todos(almacen); }");
     assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
 }
 
 #[test]
 fn actualizar_y_borrar_tipados() {
-    // actualizar(i, x): i Int, x del tipo del store; borrar(i): i Int.
-    let ok = check_src("type P = { a: Int };\nstore P;\n@server fn f() { actualizar(0, P { a: 1 }); borrar(1); }");
+    // actualizar(i, x): i Int, x del tipo del store; borrar(almacen, i): i Int.
+    let ok = check_src("type P = { a: Int };\nstore almacen: P;\n@server fn f() { actualizar(almacen, 0, P { a: 1 }); borrar(almacen, 1); }");
     assert!(ok.is_empty(), "no debería haber errores: {:?}", codes(&ok));
     // Valor de tipo equivocado en actualizar.
-    let bad = check_src("type P = { a: Int };\nstore P;\n@server fn f() { actualizar(0, 99); }");
+    let bad = check_src("type P = { a: Int };\nstore almacen: P;\n@server fn f() { actualizar(almacen, 0, 99); }");
     assert!(has_code(&bad, "E_ARG_TYPE"), "{:?}", codes(&bad));
     // Índice no-Int en borrar.
-    let bad2 = check_src("type P = { a: Int };\nstore P;\n@server fn f() { borrar(\"x\"); }");
+    let bad2 = check_src("type P = { a: Int };\nstore almacen: P;\n@server fn f() { borrar(almacen, \"x\"); }");
     assert!(has_code(&bad2, "E_ARG_TYPE"), "{:?}", codes(&bad2));
 }
 
 #[test]
 fn actualizar_fuera_de_server_es_error() {
-    let errs = check_src("type P = { a: Int };\nstore P;\n@client fn f() { actualizar(0, P { a: 1 }); }");
+    let errs = check_src("type P = { a: Int };\nstore almacen: P;\n@client fn f() { actualizar(almacen, 0, P { a: 1 }); }");
     assert!(has_code(&errs, "E_STATE_OFF_SERVER"), "{:?}", codes(&errs));
 }
 
@@ -822,9 +860,9 @@ fn el_subtipado_recursivo_no_depende_de_la_profundidad() {
 fn un_registro_es_subtipo_de_la_union_que_lo_contiene() {
     let errs = check_src(
         "type User = { nombre: String };\n\
-         store User;\n\
+         store almacen: User;\n\
          @server fn buscar(i: Int) -> User | NotFound {\n\
-             let us = todos();\n\
+             let us = todos(almacen);\n\
              if i < len(us) { return us[i]; }\n\
              return NotFound;\n\
          }",
@@ -981,8 +1019,8 @@ fn unknown_no_se_cuela_en_html() {
 #[test]
 fn un_campo_de_tipo_abierto_no_es_html() {
     let errs = check_src(
-        "store Record;\n\
-         @server fn primero() -> Record { return todos()[0]; }\n\
+        "store almacen: Record;\n\
+         @server fn primero() -> Record { return todos(almacen)[0]; }\n\
          @client fn f() { let p = primero(); let x: Html = p.t; render(x); }",
     );
     assert!(!errs.is_empty(), "un campo abierto no puede ser Html");
@@ -1010,8 +1048,8 @@ fn reactive_no_relaja_el_subtipado_de_html() {
 fn la_vista_montada_debe_devolver_html() {
     let errs = check_src(
         "type P = { t: String };\n\
-         store P;\n\
-         @server fn feed() -> List<P> { return todos(); }\n\
+         store almacen: P;\n\
+         @server fn feed() -> List<P> { return todos(almacen); }\n\
          reactive mut posts = [];\n\
          @client fn vista() -> String { let ps = posts; return concat(\"<ul>\", ps[0].t); }",
     );

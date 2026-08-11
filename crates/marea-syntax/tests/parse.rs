@@ -318,6 +318,6 @@ fn recuperacion_no_descarta_item_valido() {
 
 #[test]
 fn parse_store() {
-    let m = parse("store Post;").unwrap();
+    let m = parse("store almacen: Post;").unwrap();
     assert!(matches!(&m.items[0], Item::Store { .. }));
 }

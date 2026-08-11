@@ -36,7 +36,7 @@ pub struct AppProject {
 }
 
 /// Builtins provistos por el runtime; no se transpilan ni se registran.
-const BUILTINS: &str = "{ __register, __malFormado, __rpc, print, concat, render, len, aTexto, escapar, html, unir, agregar, largo, contiene, minusculas, __index, \
+const BUILTINS: &str = "{ __almacen, __register, __malFormado, __rpc, print, concat, render, len, aTexto, escapar, html, unir, agregar, largo, contiene, minusculas, __index, \
      guardar, todos, actualizar, borrar, __marea_is, __signal, __memo, __effect }";
 
 /// Los alias de `type` del módulo, para resolver los tipos declarados al emitir
@@ -90,25 +90,16 @@ pub fn emit(module: &Module) -> Project {
     // para que dos apps con esquemas distintos no compartan archivo.
     // Extensión .log: el backend de archivo es un log append-only JSONL (no un
     // arreglo JSON), una línea por mutación.
-    let store_file = match store_signature(module) {
-        Some(sig) => format!("marea-store.{sig}.log"),
-        None => "marea-store.log".to_string(),
-    };
+
     // Sustitución en UNA pasada: cada centinela del template se reemplaza una
     // vez y el contenido inyectado nunca se vuelve a escanear. Así un nombre de
     // tipo/campo que coincida con otro centinela (p.ej. un campo llamado como el
     // placeholder) no puede corromper la sustitución siguiente.
-    let runtime = fill_template(
-        RUNTIME_TS,
-        &[
-            ("__MAREA_STORE_DEFAULT__", &store_file),
-            ("__MAREA_STORE_SCHEMA__", &store_schema_literal(module)),
-        ],
-    );
+    let runtime = RUNTIME_TS.to_string();
 
     Project {
         runtime,
-        server: emit_server(&remote, &shared, &plain_globals, &type_aliases(module)),
+        server: emit_server(&remote, &shared, &plain_globals, &type_aliases(module), &store_decls(module)),
         client: emit_client(&remote, &local, &plain_globals),
         demo: emit_demo(&local),
     }
@@ -145,17 +136,8 @@ fn fill_template(tpl: &str, subs: &[(&str, &str)]) -> String {
 /// El runtime Node con los centinelas del store sustituidos (compartido por
 /// `emit` y `emit_app`).
 fn build_node_runtime(module: &Module) -> String {
-    let store_file = match store_signature(module) {
-        Some(sig) => format!("marea-store.{sig}.log"),
-        None => "marea-store.log".to_string(),
-    };
-    fill_template(
-        RUNTIME_TS,
-        &[
-            ("__MAREA_STORE_DEFAULT__", &store_file),
-            ("__MAREA_STORE_SCHEMA__", &store_schema_literal(module)),
-        ],
-    )
+
+    RUNTIME_TS.to_string()
 }
 
 /// Genera una app web COMPLETA a partir de un módulo: servidor Node (runtime +
@@ -210,7 +192,7 @@ pub fn emit_app(module: &Module) -> AppProject {
 
     AppProject {
         runtime: build_node_runtime(module),
-        server: emit_server(&remote, &shared, &plain_globals, &type_aliases(module)),
+        server: emit_server(&remote, &shared, &plain_globals, &type_aliases(module), &store_decls(module)),
         serve,
         client_js: emit_client_js(&remote, &local, &top_reactives, &reactive_names, &plain_globals),
         index_html: APP_HTML.to_string(),
@@ -358,18 +340,28 @@ fn type_signature(ty: &Type, module: &Module) -> String {
     }
 }
 
+/// Los almacenes del módulo: (nombre, literal JS de su esquema).
+fn store_decls(module: &Module) -> Vec<(String, String)> {
+    module
+        .items
+        .iter()
+        .filter_map(|it| match it {
+            Item::Store { name, ty, .. } => {
+                Some((name.clone(), schema_literal_de(ty, name, module)))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 /// Literal JS del esquema del store (`{ table, columns: [{name,kind}] }`) para
 /// el runtime, o `"null"` si no hay store. Los backends SQL/Mongo derivan de aquí
 /// la tabla y las columnas.
-fn store_schema_literal(module: &Module) -> String {
-    let store_ty = match module.items.iter().find_map(|it| match it {
-        Item::Store { ty, .. } => Some(ty),
-        _ => None,
-    }) {
-        Some(t) => t,
-        None => return "null".to_string(),
-    };
-    let (table, columns) = resolve_store_fields(store_ty, module);
+fn schema_literal_de(store_ty: &Type, nombre: &str, module: &Module) -> String {
+    // La tabla toma el NOMBRE del almacén, no el del tipo: dos almacenes del
+    // mismo tipo son dos tablas distintas, que es justo lo que se quiere.
+    let (_, columns) = resolve_store_fields(store_ty, module);
+    let table = nombre.to_lowercase();
     let cols: Vec<String> = columns
         .iter()
         .map(|(n, k)| format!("{{ name: {}, kind: {} }}", js_string(n), js_string(k)))
@@ -618,10 +610,19 @@ fn emit_server(
     shared: &[&FnDecl],
     globals: &[&LetStmt],
     aliases: &std::collections::HashMap<String, Type>,
+    stores: &[(String, String)],
 ) -> String {
     let mut s = String::new();
     s.push_str("// Generado por Marea — lado servidor.\n");
     s.push_str(&format!("import {} from \"./runtime.ts\";\n\n", BUILTINS));
+    // Un almacén por `store nombre: T;`. Vive solo aquí: el verificador ya
+    // impide usar el estado del servidor fuera de @server.
+    for (nombre, esquema) in stores {
+        s.push_str(&format!("const {nombre} = __almacen({}, {esquema});\n", js_string(nombre)));
+    }
+    if !stores.is_empty() {
+        s.push('\n');
+    }
     let no_reactive: HashSet<String> = HashSet::new();
     for l in globals {
         s.push_str(&format!(

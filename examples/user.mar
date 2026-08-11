@@ -7,11 +7,11 @@
 type UserId = Int;
 type User = { nombre: String };
 
-store User;
+store usuarios: User;
 
 @server
 fn getUser(id: UserId) -> User | NotFound {
-    let usuarios = todos();
+    let usuarios = todos(usuarios);
     if id < len(usuarios) {
         return usuarios[id];
     }

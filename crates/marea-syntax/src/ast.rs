@@ -19,7 +19,10 @@ pub enum Item {
     Let(LetStmt),
     /// Declara el tipo de elemento del store del servidor: `store Post;`.
     /// Tipa los builtins de estado `guardar(T)` y `todos() -> List<T>`.
-    Store { ty: Type, span: Span },
+    /// `store nombre: Tipo;` — declara un almacén con nombre. El nombre es un
+    /// valor de primera clase que se pasa a `guardar`/`todos`/`actualizar`/
+    /// `borrar`, de modo que un módulo puede tener varios almacenes.
+    Store { name: String, name_span: Span, ty: Type, span: Span },
 }
 
 /// Dónde se ejecuta una función. El compilador genera el cruce de frontera

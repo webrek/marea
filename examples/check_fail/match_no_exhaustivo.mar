@@ -6,11 +6,11 @@
 
 type User = { nombre: String };
 
-store User;
+store usuarios: User;
 
 @server
 fn buscar(id: Int) -> User | NotFound {
-    let usuarios = todos();
+    let usuarios = todos(usuarios);
     if id < len(usuarios) {
         return usuarios[id];
     }

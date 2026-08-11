@@ -18,13 +18,13 @@ lenguaje** las dos fronteras que hoy se cruzan a mano y con pegamento.
 type UserId = Int;
 type User = { nombre: String };
 
-store User;
+store usuarios: User;
 
 @server
 fn getUser(id: UserId) -> User | NotFound {
-    let usuarios = todos();
-    if id < len(usuarios) {
-        return usuarios[id];
+    let us = todos(usuarios);
+    if id < len(us) {
+        return us[id];
     }
     return NotFound;
 }
@@ -34,7 +34,7 @@ fn perfil(id: UserId) {
     let usuario = getUser(id);   // se llama como si fuera local
     match usuario {             // la unión es opaca: obliga a un match
         NotFound => render("no existe"),
-        _        => render(usuario.nombre),
+        _        => render(escapar(usuario.nombre)),
     }
 }
 ```
@@ -260,20 +260,31 @@ cargo test
 cargo clippy --all-targets
 ```
 
-## Persistencia: un `store` con backends intercambiables
+## Persistencia: almacenes con nombre y backends intercambiables
 
-El estado del servidor se declara con `store T;` y se opera con cuatro builtins
-(CRUD): `guardar(x)`, `todos()`, `actualizar(i, x)` y `borrar(i)`. El código
-`.mar` no sabe **dónde** vive ese estado: el backend se elige al correr, con
-variables de entorno, sin tocar el lenguaje.
+El estado del servidor se declara con `store nombre: T;` y se opera con cuatro
+builtins (CRUD) que reciben el almacén como primer argumento: `guardar(a, x)`,
+`todos(a)`, `actualizar(a, i, x)` y `borrar(a, i)`. **Un módulo puede declarar
+todos los almacenes que necesite** —cada uno con su tipo, su tabla y su
+archivo—, que es lo que separa una app real de una demo. El código `.mar` no
+sabe **dónde** vive ese estado: el backend se elige al correr, con variables de
+entorno, sin tocar el lenguaje.
 
 ```mar
-type Post = { autor: String, texto: String, likes: Int };
-store Post;
+type Producto = { titulo: String, precio: Int };
+type Orden = { comprador: String, total: Int };
 
-@server fn publicar(a: String, t: String) { guardar(Post { autor: a, texto: t, likes: 0 }); }
-@server fn feed() -> List<Post> { return todos(); }
+store productos: Producto;
+store ordenes: Orden;
+
+@server fn publicar(t: String, p: Int) { guardar(productos, Producto { titulo: t, precio: p }); }
+@server fn catalogo() -> List<Producto> { return todos(productos); }
+@server fn ventas() -> List<Orden> { return todos(ordenes); }
 ```
+
+Guardar en el almacén equivocado es un error de tipos: `guardar(ordenes, p)` con
+un `Producto` no compila. `examples/tienda.mar` usa cuatro (`productos`,
+`ordenes`, `preguntas`, `resenas`).
 
 ```sh
 # Por defecto: archivo (log JSONL append-only, cero dependencias)
@@ -296,7 +307,10 @@ tipo recursivo se valida a profundidad 1; y las comprobaciones de `Origin`/`Host
 son defensa en profundidad contra navegadores (`MAREA_ALLOWED_ORIGINS` y
 `MAREA_ALLOWED_HOSTS` las ajustan), no un sustituto de autenticar.
 
-El codegen deriva el esquema (tabla + columnas tipadas) del tipo del `store`: un
+Cada almacén va a su propia tabla (o a su propio archivo,
+`marea-store.<nombre>.log` bajo `MAREA_STORE_DIR`, que por defecto es el
+directorio actual). El codegen deriva el esquema (tabla + columnas tipadas) del
+tipo de cada almacén: un
 registro produce una columna por campo; un escalar/lista/unión se guarda como una
 sola columna JSON `__doc`. Los drivers externos (`pg`, `mysql2`, `mongodb`) se
 cargan con `import()` perezoso, así que un programa sin base de datos —o con
@@ -365,7 +379,7 @@ manejadores; `vista()` se monta en un `effect` que re-pinta `#app` al cambiar.
 - [x] **LSP** — Servidor de lenguaje: diagnósticos en vivo, symbols, completion, definition, hover
 - [x] **Recuperación de errores** — el parser reporta múltiples diagnósticos (no fail-fast)
 - [x] **glue DOM (web)** — `marea build-web` genera una app WASM para el navegador
-- [x] **Persistencia** — `store T;` con backends intercambiables: archivo JSON,
+- [x] **Persistencia** — `store nombre: T;` (varios por módulo) con backends intercambiables: archivo JSON,
       SQLite, PostgreSQL, MySQL y MongoDB (elegidos por `MAREA_DB`, sin cambiar el `.mar`)
 - [x] **App web (RPC + reactivo + DOM)** — `marea build-app` genera una página real
       donde las `@server` se llaman por RPC y el estado `reactive` de módulo re-pinta el DOM

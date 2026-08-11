@@ -11,23 +11,23 @@
 
 type Post = { autor: String, texto: String, likes: Int };
 
-store Post;
+store publicaciones: Post;
 
 // --- servidor: el estado vive y persiste aquí ---
 @server
 fn publicar(autor: String, texto: String) {
-    guardar(Post { autor: autor, texto: texto, likes: 0 });
+    guardar(publicaciones, Post { autor: autor, texto: texto, likes: 0 });
 }
 
 @server
 fn like(i: Int) {
-    let p = todos()[i];
-    actualizar(i, Post { autor: p.autor, texto: p.texto, likes: p.likes + 1 });
+    let p = todos(publicaciones)[i];
+    actualizar(publicaciones, i, Post { autor: p.autor, texto: p.texto, likes: p.likes + 1 });
 }
 
 @server
 fn feed() -> List<Post> {
-    return todos();
+    return todos(publicaciones);
 }
 
 // --- estado reactivo de la app (a nivel de módulo) ---

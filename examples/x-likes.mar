@@ -10,24 +10,24 @@ type Post = {
     likes: Int,
 };
 
-store Post;
+store posts: Post;
 
 @server
 fn publicar(autor: String, texto: String) {
-    guardar(Post { autor: autor, texto: texto, likes: 0 });
+    guardar(posts, Post { autor: autor, texto: texto, likes: 0 });
 }
 
 // Dar like: lee el post, lo reemplaza con uno de likes+1 (los registros son
 // inmutables, así que se construye uno nuevo).
 @server
 fn like(i: Int) {
-    let p = todos()[i];
-    actualizar(i, Post { autor: p.autor, texto: p.texto, likes: p.likes + 1 });
+    let p = todos(posts)[i];
+    actualizar(posts, i, Post { autor: p.autor, texto: p.texto, likes: p.likes + 1 });
 }
 
 @server
 fn feed() -> List<Post> {
-    return todos();
+    return todos(posts);
 }
 
 fn linea(p: Post) -> String {

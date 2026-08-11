@@ -221,7 +221,7 @@ pub fn find_node_at(module: &Module, offset: usize) -> Option<Node<'_>> {
                     return Some(Node::Item(item));
                 }
             }
-            Item::Store { ty, span } => {
+            Item::Store { ty, span, .. } => {
                 if contains(*span, offset) {
                     if let Some(n) = find_in_type(ty, offset) {
                         return Some(n);

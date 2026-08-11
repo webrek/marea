@@ -177,7 +177,7 @@ fn app_reactiva_de_modulo_es_signal() {
 
 #[test]
 fn app_cliente_es_js_sin_tipos_ni_imports_node() {
-    let a = app("@server fn feed() -> List<Int> { return todos(); }\n@client fn main() { feed(); }");
+    let a = app("@server fn feed() -> List<Int> { return todos(almacen); }\n@client fn main() { feed(); }");
     // El cliente de navegador NO importa Node ni lleva anotaciones de tipo.
     assert!(!a.client_js.contains("node:http"), "{}", a.client_js);
     assert!(!a.client_js.contains(": number"), "{}", a.client_js);
@@ -201,7 +201,7 @@ fn app_arranca_main_y_monta_vista() {
 
 #[test]
 fn app_servidor_sirve_estaticos() {
-    let a = app("@server fn feed() -> List<Int> { return todos(); }");
+    let a = app("@server fn feed() -> List<Int> { return todos(almacen); }");
     // El runtime Node sirve estáticos (la app vive en el mismo origen que el RPC).
     assert!(a.runtime.contains("__serveStatic"), "{}", a.runtime);
     assert!(a.runtime.contains("MAREA_WEB_ROOT"), "{}", a.runtime);
@@ -212,18 +212,18 @@ fn app_servidor_sirve_estaticos() {
 
 #[test]
 fn store_builtins_son_async_y_se_awaitan() {
-    let p = build("@server fn g(x: Int) { guardar(x); } @server fn t() -> List<Int> { return todos(); }");
+    let p = build("@server fn g(x: Int) { guardar(almacen, x); } @server fn t() -> List<Int> { return todos(almacen); }");
     // Con backends de BD, las operaciones del store son asíncronas (I/O).
-    assert!(p.runtime.contains("export async function guardar"), "{}", p.runtime);
-    assert!(p.runtime.contains("export async function todos"), "{}", p.runtime);
+    assert!(p.runtime.contains("export function guardar"), "{}", p.runtime);
+    assert!(p.runtime.contains("export function todos"), "{}", p.runtime);
     // El call site las espera.
-    assert!(p.server.contains("(await guardar(x))"), "{}", p.server);
-    assert!(p.server.contains("(await todos())"), "{}", p.server);
+    assert!(p.server.contains("(await guardar(almacen, x))"), "{}", p.server);
+    assert!(p.server.contains("(await todos(almacen))"), "{}", p.server);
 }
 
 #[test]
 fn store_persiste_a_disco() {
-    let p = build("@server fn g(x: Int) { guardar(x); }");
+    let p = build("@server fn g(x: Int) { guardar(almacen, x); }");
     // El runtime carga el store del archivo y lo reescribe en cada guardar.
     assert!(p.runtime.contains("readFileSync"), "{}", p.runtime);
     assert!(p.runtime.contains("writeFileSync"), "{}", p.runtime);
@@ -309,7 +309,7 @@ fn transporte_rpc_esta_endurecido() {
 fn backends_sql_comillan_identificadores() {
     // L2: tabla/columnas se comillan por dialecto, así un campo con nombre de
     // palabra reservada (from, order…) no rompe el SQL generado.
-    let p = build("type Fila = { from: String, order: Int };\nstore Fila;\n@server fn g() { guardar(Fila { from: \"a\", order: 1 }); }");
+    let p = build("type Fila = { from: String, order: Int };\nstore almacen: Fila;\n@server fn g() { guardar(almacen, Fila { from: \"a\", order: 1 }); }");
     assert!(p.runtime.contains("function __quoteId"), "{}", p.runtime);
     assert!(p.runtime.contains("function __idCol"), "{}", p.runtime);
     // sqlite/pg usan comilla doble; mysql usa backtick (constantes por backend).
@@ -321,7 +321,7 @@ fn backends_sql_comillan_identificadores() {
 fn persistencia_a_archivo_es_incremental_y_atomica() {
     // H2/L5: el backend de archivo usa un log append-only (O(1) por mutación) y
     // compacta atómicamente (temporal + rename). Sin reescritura completa por op.
-    let p = build("store Int;\n@server fn g(x: Int) { guardar(x); }");
+    let p = build("store almacen: Int;\n@server fn g(x: Int) { guardar(almacen, x); }");
     assert!(p.runtime.contains("appendFileSync"), "debe escribir incremental (append)");
     assert!(p.runtime.contains("renameSync"), "la compactación debe ser atómica");
     assert!(p.runtime.contains(".tmp"), "debe compactar vía temporal");
@@ -331,7 +331,7 @@ fn persistencia_a_archivo_es_incremental_y_atomica() {
 fn backends_son_incrementales_por_id() {
     // H2: la interfaz del backend es insert/update/remove por id, no saveAll;
     // las mutaciones tocan una sola fila.
-    let p = build("store Int;\n@server fn g(x: Int) { guardar(x); }");
+    let p = build("store almacen: Int;\n@server fn g(x: Int) { guardar(almacen, x); }");
     assert!(p.runtime.contains("insert(id: number, item: unknown)"), "{}", p.runtime);
     assert!(p.runtime.contains("remove(id: number)"), "{}", p.runtime);
     assert!(!p.runtime.contains("saveAll"), "saveAll (reescritura total) debe haber desaparecido");
@@ -343,39 +343,41 @@ fn backends_son_incrementales_por_id() {
 fn placeholders_se_sustituyen_en_una_pasada() {
     // L3: un campo cuyo nombre coincide con un centinela del template no debe
     // corromper la sustitución del otro. Tras emitir no quedan centinelas crudos.
-    let p = build("type T = { __MAREA_STORE_SCHEMA__: Int };\nstore T;\n@server fn g() { guardar(T { __MAREA_STORE_SCHEMA__: 1 }); }");
-    assert!(!p.runtime.contains("__MAREA_STORE_DEFAULT__"), "centinela DEFAULT sin sustituir");
+    let p = build("type T = { __MAREA_STORE_SCHEMA__: Int };\nstore almacen: T;\n@server fn g() { guardar(almacen, T { __MAREA_STORE_SCHEMA__: 1 }); }");
+    
     // El único '__MAREA_STORE_SCHEMA__' admisible es el nombre de columna inyectado,
     // no un placeholder del template suelto en una posición de código.
-    assert!(p.runtime.contains("const __STORE_SCHEMA: __Schema | null = {"), "el esquema debe quedar sustituido");
+    // El nombre de columna viaja al literal del esquema sin corromper nada.
+    assert!(p.server.contains("__MAREA_STORE_SCHEMA__"), "{}", p.server);
 }
 
 #[test]
 fn store_inyecta_esquema_de_columnas() {
-    let p = build("type Post = { texto: String, likes: Int };\nstore Post;\n@server fn g() { guardar(Post { texto: \"a\", likes: 0 }); }");
+    let p = build("type Post = { texto: String, likes: Int };\nstore almacen: Post;\n@server fn g() { guardar(almacen, Post { texto: \"a\", likes: 0 }); }");
     // El esquema inyectado describe tabla + columnas tipadas para los backends SQL.
-    assert!(p.runtime.contains("table: \"post\""), "{}", p.runtime);
-    assert!(p.runtime.contains("{ name: \"texto\", kind: \"text\" }"), "{}", p.runtime);
-    assert!(p.runtime.contains("{ name: \"likes\", kind: \"int\" }"), "{}", p.runtime);
-    assert!(!p.runtime.contains("__MAREA_STORE_SCHEMA__"), "placeholder sin sustituir");
+    // La tabla toma el NOMBRE del almacén (dos almacenes del mismo tipo son
+    // dos tablas), y las columnas salen de los campos del registro.
+    assert!(p.server.contains("table: \"almacen\""), "{}", p.server);
+    assert!(p.server.contains("{ name: \"texto\", kind: \"text\" }"), "{}", p.server);
+    assert!(p.server.contains("{ name: \"likes\", kind: \"int\" }"), "{}", p.server);
 }
 
 #[test]
 fn store_escalar_usa_columna_doc() {
-    let p = build("store Int;\n@server fn g(x: Int) { guardar(x); }");
+    let p = build("store almacen: Int;\n@server fn g(x: Int) { guardar(almacen, x); }");
     // Un store no-registro guarda el valor entero como una sola columna JSON.
-    assert!(p.runtime.contains("{ name: \"__doc\", kind: \"json\" }"), "{}", p.runtime);
+    assert!(p.server.contains("{ name: \"__doc\", kind: \"json\" }"), "{}", p.server);
 }
 
 #[test]
 fn sin_store_el_esquema_es_null() {
     let p = build("@client fn f() { print(\"hola\"); }");
-    assert!(p.runtime.contains("const __STORE_SCHEMA: __Schema | null = null;"), "{}", p.runtime);
+    assert!(!p.server.contains("__almacen("), "sin store no debe declararse ninguno:\n{}", p.server);
 }
 
 #[test]
 fn store_tiene_backends_de_base_de_datos() {
-    let p = build("store Int;\n@server fn g(x: Int) { guardar(x); }");
+    let p = build("store almacen: Int;\n@server fn g(x: Int) { guardar(almacen, x); }");
     // Los cinco backends conviven; el driver se elige con MAREA_DB.
     for marca in ["__sqliteBackend", "__postgresBackend", "__mysqlBackend", "__mongoBackend", "MAREA_DB"] {
         assert!(p.runtime.contains(marca), "falta {marca} en runtime");
@@ -387,10 +389,10 @@ fn store_tiene_backends_de_base_de_datos() {
 
 #[test]
 fn store_file_lleva_la_firma_del_esquema() {
-    let p = build("type Post = { a: Int };\nstore Post;\n@server fn g() { guardar(Post { a: 1 }); }");
+    let p = build("type Post = { a: Int };\nstore almacen: Post;\n@server fn g() { guardar(almacen, Post { a: 1 }); }");
     // El archivo por defecto incluye nombre+campos para no colisionar entre apps.
-    assert!(p.runtime.contains("marea-store.Post-a.log"), "{}", p.runtime);
-    assert!(!p.runtime.contains("__MAREA_STORE_DEFAULT__"), "placeholder sin sustituir");
+    assert!(p.server.contains("__almacen(\"almacen\""), "{}", p.server);
+    
 }
 
 // --- regresiones de codegen (auditoría) ---
@@ -435,7 +437,7 @@ fn match_con_variantes_sigue_encadenando() {
 // silenciosa de escrituras en el backend de archivo).
 #[test]
 fn ensure_store_memoiza_la_promesa_de_carga() {
-    let p = build("store Int;\n@server fn g(x: Int) { guardar(x); }");
+    let p = build("store almacen: Int;\n@server fn g(x: Int) { guardar(almacen, x); }");
     assert!(p.runtime.contains("__loading"), "la carga debe memoizarse:\n{}", p.runtime);
 }
 

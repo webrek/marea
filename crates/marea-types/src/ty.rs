@@ -20,6 +20,9 @@ pub enum Ty {
     /// `escapar(...)`, por `html("...")` (confianza explícita) o desde un
     /// literal del propio fuente, que es de confianza por construcción.
     Html,
+    /// Un almacén declarado con `store nombre: T;`. Lleva su nombre (para los
+    /// mensajes) y el tipo de sus elementos.
+    Store(String, Box<Ty>),
     /// Referencia a un alias de tipo declarado por el usuario (`User`).
     Named(String),
     /// Unión de variantes nominales (`User | NotFound`). Valor opaco: sólo se
@@ -54,6 +57,7 @@ impl Ty {
             Ty::String => "String".to_string(),
             Ty::Unit => "Unit".to_string(),
             Ty::Html => "Html".to_string(),
+            Ty::Store(n, e) => format!("store {n}: {}", e.display()),
             Ty::Named(n) => n.clone(),
             Ty::Union(vs) => vs.join(" | "),
             Ty::Fn { params, ret, .. } => {

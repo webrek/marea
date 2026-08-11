@@ -7,19 +7,19 @@ type Post = {
     texto: String,
 };
 
-// El store del servidor guarda Posts: tipa 'guardar(Post)' y 'todos() -> List<Post>'.
-store Post;
+// El store del servidor guarda Posts: tipa 'guardar(posts, Post)' y 'todos(posts) -> List<Post>'.
+store posts: Post;
 
 // Cada 'publicar' es un cruce de frontera; el servidor acumula el post.
 @server
 fn publicar(autor: String, texto: String) {
-    guardar(Post { autor: autor, texto: texto });
+    guardar(posts, Post { autor: autor, texto: texto });
 }
 
 // Devuelve todo lo que el servidor ha guardado.
 @server
 fn feed() -> List<Post> {
-    return todos();
+    return todos(posts);
 }
 
 fn linea(p: Post) -> String {
