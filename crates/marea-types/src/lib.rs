@@ -299,6 +299,43 @@ impl Checker {
                     span,
                 ));
             }
+            // Dos almacenes que solo difieren en mayúsculas acabarían en la
+            // MISMA tabla (el nombre se pasa a minúsculas) y en el mismo archivo
+            // (los sistemas de archivos de macOS y Windows no distinguen caja),
+            // mezclando datos de tipos distintos sin un solo aviso.
+            let bajo = nombre.to_lowercase();
+            if let Some(previo) = self
+                .stores
+                .keys()
+                .find(|k| k.to_lowercase() == bajo)
+                .cloned()
+            {
+                self.error(TypeError::new(
+                    "E_DUPLICATE_STORE",
+                    format!(
+                        "'{nombre}' y '{previo}' se guardarían en el mismo sitio: los nombres \
+                         de almacén no pueden diferir sólo en mayúsculas"
+                    ),
+                    span,
+                ));
+            }
+            // Los campos `__id` y `__doc` los usa la capa de persistencia: un
+            // registro que los declare produce una tabla con la columna repetida
+            // y todo `guardar` revienta en runtime.
+            if let Ty::Record(campos) = &elem {
+                for (campo, _) in campos {
+                    if campo == "__id" || campo == "__doc" {
+                        self.error(TypeError::new(
+                            "E_CAMPO_RESERVADO",
+                            format!(
+                                "'{campo}' es un nombre de columna reservado por la \
+                                 persistencia; renombra el campo del almacén '{nombre}'"
+                            ),
+                            span,
+                        ));
+                    }
+                }
+            }
             if self.fns.contains_key(&nombre) {
                 self.error(TypeError::new(
                     "E_DUPLICATE_ITEM",

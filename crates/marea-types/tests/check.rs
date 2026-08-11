@@ -1143,3 +1143,33 @@ fn usar_el_almacen_desde_server_es_valido() {
     );
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
+
+// --- almacenes: colisiones con la capa de persistencia ---
+
+// `__id` y `__doc` son columnas internas: un registro que las declare produce
+// una tabla con la columna repetida y todo `guardar` revienta en runtime
+// ("duplicate column name"). El verificador lo aceptaba.
+#[test]
+fn un_campo_id_reservado_es_error() {
+    let errs = check_src("type T = { __id: String };\nstore cosas: T;");
+    assert!(has_code(&errs, "E_CAMPO_RESERVADO"), "{:?}", codes(&errs));
+    let errs = check_src("type T = { __doc: Int };\nstore cosas: T;");
+    assert!(has_code(&errs, "E_CAMPO_RESERVADO"), "{:?}", codes(&errs));
+}
+
+// Dos almacenes que solo difieren en mayúsculas caían en la misma tabla (el
+// nombre se pasa a minúsculas) y en el mismo archivo (macOS y Windows no
+// distinguen caja), mezclando datos de tipos distintos sin avisar.
+#[test]
+fn dos_almacenes_que_difieren_solo_en_caja_es_error() {
+    let errs = check_src("type T = { a: Int };\nstore Datos: T;\nstore datos: T;");
+    assert!(has_code(&errs, "E_DUPLICATE_STORE"), "{:?}", codes(&errs));
+}
+
+// Un campo que coincide con una palabra reservada de SQL sí es válido: los
+// identificadores se entrecomillan por dialecto.
+#[test]
+fn los_campos_con_palabras_reservadas_de_sql_son_validos() {
+    let errs = check_src("type T = { order: Int, group: String, select: Bool };\nstore cosas: T;");
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
