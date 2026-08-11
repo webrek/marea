@@ -19,7 +19,7 @@ async function publicar(autor: string, texto: string) {
   (await guardar({ autor: autor, texto: texto, likes: 0 }));
 }
 
-__register("publicar", (args) => { if (args.length !== 2) __malFormado("aridad"); if (!(typeof args[0] === "string")) __malFormado("argumento 1"); if (!(typeof args[1] === "string")) __malFormado("argumento 2"); return publicar(args[0], args[1]); });
+__register("publicar", (__args) => { if (__args.length !== 2) __malFormado("aridad"); if (!(typeof __args[0] === "string")) __malFormado("argumento 1"); if (!(typeof __args[1] === "string")) __malFormado("argumento 2"); return publicar(__args[0], __args[1]); });
 
 // @server fn like(i: Int)
 async function like(i: number) {
@@ -27,12 +27,12 @@ async function like(i: number) {
   (await actualizar(i, { autor: p.autor, texto: p.texto, likes: (p.likes + 1) }));
 }
 
-__register("like", (args) => { if (args.length !== 1) __malFormado("aridad"); if (!(Number.isInteger(args[0]))) __malFormado("argumento 1"); return like(args[0]); });
+__register("like", (__args) => { if (__args.length !== 1) __malFormado("aridad"); if (!(Number.isSafeInteger(__args[0]))) __malFormado("argumento 1"); return like(__args[0]); });
 
 // @server fn feed() -> List<Post>
 async function feed() {
   return (await todos());
 }
 
-__register("feed", (args) => { if (args.length !== 0) __malFormado("aridad"); return feed(); });
+__register("feed", (__args) => { if (__args.length !== 0) __malFormado("aridad"); return feed(); });
 

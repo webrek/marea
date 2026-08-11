@@ -104,10 +104,19 @@ revés — ahí está la garantía. `aTexto` de un número o un booleano ya es `
 porque no pueden contener marcado; el de un `String`, no. En tiempo de ejecución
 `Html` es una cadena: la distinción es puramente estática y no cuesta nada.
 
-Queda un hueco honesto: la garantía se aplica en `render`. En `marea build-app`
-la vista se monta directamente en el DOM, así que declara `vista() -> Html`
-(como hacen `examples/web-likes.mar` y `site/marea-demo.mar`) para que el
-compilador la cubra igual.
+`Unknown` (el comodín que absorbe errores) es el único tipo que **no** satisface
+`Html`: si no, un `Record`, un campo de tipo abierto o un `match` con ramas de
+tipos distintos lavarían cualquier dato hasta el DOM. Y `Html` no vale como
+parámetro de una función `@server`: la confianza no cruza la red, porque al otro
+lado del cable la reconstruye quien mande el JSON.
+
+Los dos sumideros del DOM están cubiertos: `render`, y el retorno de `vista` —la
+función que `marea build-app` monta en la página—, que debe declararse `-> Html`.
+
+**Lo que `escapar` no cubre:** escapa `& < > " '`, que basta en contexto de
+texto y de atributo entrecomillado. **No** basta dentro de un atributo sin
+comillas ni en un `href="javascript:..."`. Si construyes esos contextos, el tipo
+`Html` no te salva: revísalos a mano.
 
 Lo que **todavía no** existe: en el **backend WASM**, flotantes, `match`, tipos
 unión y registros inline (cada caso falla con un error claro, nunca con WAT
@@ -252,6 +261,14 @@ MAREA_DB=postgres MAREA_DB_URL=postgres://user:pass@host/db node /tmp/x/demo.ts 
 MAREA_DB=mysql    MAREA_DB_URL=mysql://user:pass@host/db    node /tmp/x/demo.ts   # npm i mysql2
 MAREA_DB=mongodb  MAREA_DB_URL=mongodb://host/db            node /tmp/x/demo.ts   # npm i mongodb
 ```
+
+**Lo que la validación del límite NO cubre**, dicho sin rodeos: no hay
+autenticación de ninguna clase —todo `@server` es invocable por quien alcance el
+puerto, y `MAREA_HOST=0.0.0.0` lo expone a la red—; las uniones solo se
+comprueban como "no nulo", porque todavía no hay discriminante de runtime; un
+tipo recursivo se valida a profundidad 1; y las comprobaciones de `Origin`/`Host`
+son defensa en profundidad contra navegadores (`MAREA_ALLOWED_ORIGINS` y
+`MAREA_ALLOWED_HOSTS` las ajustan), no un sustituto de autenticar.
 
 El codegen deriva el esquema (tabla + columnas tipadas) del tipo del `store`: un
 registro produce una columna por campo; un escalar/lista/unión se guarda como una

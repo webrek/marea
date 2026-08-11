@@ -938,12 +938,19 @@ fn wasm_binop(op: BinOp) -> &'static str {
 /// Int/Bool/String o un nombre de registro declarado (su puntero es `i32`).
 fn check_value_type(t: &Type, layouts: &HashMap<String, StructLayout>) -> Result<(), String> {
     match t {
-        Type::Name { name, .. } if name == "Int" || name == "Bool" || name == "String" => Ok(()),
+        // `Html` es una cadena en runtime (un puntero i32 idéntico a String):
+        // el backend lo trata igual, si no una función pura que construya
+        // marcado dejaría de compilar a WASM solo por declarar su tipo.
+        Type::Name { name, .. }
+            if name == "Int" || name == "Bool" || name == "String" || name == "Html" =>
+        {
+            Ok(())
+        }
         // Una lista es un puntero i32 a [longitud][elementos...].
         Type::Name { name, .. } if name == "List" => Ok(()),
         Type::Name { name, .. } if layouts.contains_key(name) => Ok(()),
         Type::Name { name, .. } => Err(format!(
-            "el backend WASM soporta Int/Bool/String, List y registros declarados por ahora, no '{name}'"
+            "el backend WASM soporta Int/Bool/String/Html, List y registros declarados por ahora, no '{name}'"
         )),
         Type::Union { .. } => Err("el backend WASM aún no soporta tipos unión".to_string()),
         Type::Record { .. } => {

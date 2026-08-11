@@ -372,6 +372,16 @@ impl Checker {
                     let value_ty = self.check_expr(&l.value);
                     if let Some(decl) = &l.ty {
                         let declared = self.ty_from_syntax(decl);
+                        // Un literal del fuente es de confianza también aquí:
+                        // sin esto valía dentro de una función pero no a nivel
+                        // de módulo, para la misma línea escrita igual.
+                        let value_ty = if matches!(declared, Ty::Html)
+                            && matches!(l.value, Expr::Str { .. })
+                        {
+                            Ty::Html
+                        } else {
+                            value_ty.clone()
+                        };
                         if !self.is_subtype(&value_ty, &declared) {
                             self.error(TypeError::new(
                                 "E_LET_TYPE_MISMATCH",
@@ -422,6 +432,46 @@ impl Checker {
         // Valida el tipo de retorno declarado.
         if let Some(rt) = &f.return_type {
             self.validate_type_exists(rt);
+        }
+
+        // Un parámetro `Html` de una función remota lo rellena quien mande el
+        // JSON: la confianza no cruza la red. Se comprueba en la declaración y
+        // no solo en la llamada, porque el atacante no usa el cliente generado.
+        if matches!(f.location, Some(Location::Server) | Some(Location::Edge)) {
+            for p in &f.params {
+                if matches!(self.ty_from_syntax(&p.ty), Ty::Html) {
+                    self.error(TypeError::new(
+                        "E_BOUNDARY_NOT_SERIALIZABLE",
+                        format!(
+                            "el parámetro '{}' es 'Html', pero la confianza no cruza la red: \
+                             recíbelo como String y escápalo donde se use",
+                            p.name
+                        ),
+                        p.span,
+                    ));
+                }
+            }
+        }
+
+        // `marea build-app` monta en el DOM la función @client llamada `vista`
+        // (`__mount(vista)` en el codegen), así que su retorno es un sumidero de
+        // innerHTML igual que `render` y tiene que ser marcado seguro. Sin esta
+        // regla la garantía de `Html` no cubría la ruta por defecto de build-app,
+        // que es justo la que usa la demo desplegada.
+        if f.name == "vista"
+            && f.location == Some(Location::Client)
+            && f.params.is_empty()
+            && !matches!(self.current_return, Ty::Html | Ty::Unit | Ty::Unknown)
+        {
+            self.error(TypeError::new(
+                "E_VISTA_NO_HTML",
+                format!(
+                    "'vista' se monta en el DOM, así que debe devolver 'Html', no '{}'; \
+                     escapa los datos con escapar(...) y declara -> Html",
+                    self.current_return.display()
+                ),
+                f.span,
+            ));
         }
 
         // El cuerpo comparte el scope de los parámetros en vez de empujar uno
@@ -484,8 +534,11 @@ impl Checker {
                     } else {
                         value_ty.clone()
                     };
-                    // `reactive` es laxo: no exige el subtipado estricto.
-                    if !l.reactive && !self.is_subtype(&value_ty, &declared) {
+                    // `reactive` es laxo con la inferencia, pero no puede serlo
+                    // con `Html`: saltarse el subtipado ahí permitía
+                    // `reactive h: Html = s;` con un String cualquiera.
+                    let laxo = l.reactive && !matches!(declared, Ty::Html);
+                    if !laxo && !self.is_subtype(&value_ty, &declared) {
                         self.error(TypeError::new(
                             "E_LET_TYPE_MISMATCH",
                             format!(
@@ -1077,6 +1130,21 @@ impl Checker {
                 span,
             });
             for (i, pty) in params.iter().enumerate() {
+                // `Html` codifica confianza, y la confianza no se serializa: al
+                // otro lado del cable la reconstruye quien envíe el JSON. Un
+                // parámetro remoto debe recibir `String` y escaparlo.
+                if matches!(pty, Ty::Html) {
+                    self.error(TypeError::new(
+                        "E_BOUNDARY_NOT_SERIALIZABLE",
+                        format!(
+                            "el parámetro {} de '{callee_name}' es 'Html'; la confianza no \
+                             cruza la red: recíbelo como String y escápalo en el servidor",
+                            i + 1
+                        ),
+                        span,
+                    ));
+                    continue;
+                }
                 if !is_serializable(pty) {
                     self.error(TypeError::new(
                         "E_BOUNDARY_NOT_SERIALIZABLE",
@@ -1414,6 +1482,14 @@ impl Checker {
 
             match record_fields.iter().find(|(n, _)| n == &fi.name) {
                 Some((_, expected)) => {
+                    // Un literal del fuente vale como Html (confianza directa).
+                    let vty = if matches!(expected, Ty::Html)
+                        && matches!(fi.value, Expr::Str { .. })
+                    {
+                        Ty::Html
+                    } else {
+                        vty.clone()
+                    };
                     if !self.is_subtype(&vty, expected) {
                         self.error(TypeError::new(
                             "E_ARG_TYPE",
@@ -1667,6 +1743,14 @@ impl Checker {
         sup: &Ty,
         unfolding: &mut std::collections::HashSet<(String, String)>,
     ) -> bool {
+        // `Html` es la excepción al comodín: `Unknown` absorbe operaciones para
+        // no encadenar errores, pero si además se colara en `Html` entonces un
+        // `Record`, un campo de tipo abierto o un `match` con ramas de tipos
+        // distintos lavarían cualquier dato hasta el DOM. Un tipo que codifica
+        // confianza no puede aceptar "no sé".
+        if matches!(sup, Ty::Html) {
+            return matches!(sub, Ty::Html);
+        }
         if matches!(sub, Ty::Unknown) || matches!(sup, Ty::Unknown) {
             return true;
         }

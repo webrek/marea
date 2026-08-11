@@ -390,8 +390,8 @@ fn narrowing_ok_dentro_de_la_rama() {
         fn perfil() {
             let u = getUser();
             match u {
-                NotFound => render("no encontrado"),
-                _ => render(u.nombre),
+                NotFound => print("no encontrado"),
+                _ => print(u.nombre),
             }
         }
     "#;
@@ -965,4 +965,69 @@ fn html_es_subtipo_de_string_pero_no_al_reves() {
     assert!(errs.is_empty(), "Html debe valer como String: {:?}", codes(&errs));
     let errs = check_src("@client fn f(s: String) -> Html { return s; }");
     assert!(has_code(&errs, "E_RETURN_TYPE_MISMATCH"), "{:?}", codes(&errs));
+}
+
+// --- agujeros del tipo Html que encontró la revisión ---
+
+// `Unknown` es comodín para no encadenar errores, pero si además se colara en
+// `Html` entonces un Record, un campo abierto o un match heterogéneo lavarían
+// cualquier dato hasta el DOM. Es el único tipo que no acepta "no sé".
+#[test]
+fn unknown_no_se_cuela_en_html() {
+    let errs = check_src("@client fn vista(r: Record) { render(r); }");
+    assert!(has_code(&errs, "E_ARG_TYPE"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn un_campo_de_tipo_abierto_no_es_html() {
+    let errs = check_src(
+        "store Record;\n\
+         @server fn primero() -> Record { return todos()[0]; }\n\
+         @client fn f() { let p = primero(); let x: Html = p.t; render(x); }",
+    );
+    assert!(!errs.is_empty(), "un campo abierto no puede ser Html");
+}
+
+// Un match cuyas ramas no unifican degrada a Unknown; eso no puede ser Html.
+#[test]
+fn un_match_heterogeneo_no_produce_html() {
+    let errs = check_src(
+        "@client fn f(s: String, n: Int) { let x = match n { 1 => escapar(s), _ => s }; render(x); }",
+    );
+    assert!(!errs.is_empty(), "el match heterogéneo no puede lavar a Html");
+}
+
+// `reactive` es laxo con la inferencia, pero no puede serlo con Html.
+#[test]
+fn reactive_no_relaja_el_subtipado_de_html() {
+    let errs = check_src("@client fn f(s: String) { reactive h: Html = s; render(h); }");
+    assert!(!errs.is_empty(), "reactive no puede saltarse Html");
+}
+
+// `build-app` monta `vista` en el DOM: su retorno es un sumidero igual que
+// render, así que la garantía tiene que cubrir la ruta por defecto.
+#[test]
+fn la_vista_montada_debe_devolver_html() {
+    let errs = check_src(
+        "type P = { t: String };\n\
+         store P;\n\
+         @server fn feed() -> List<P> { return todos(); }\n\
+         reactive mut posts = [];\n\
+         @client fn vista() -> String { let ps = posts; return concat(\"<ul>\", ps[0].t); }",
+    );
+    assert!(has_code(&errs, "E_VISTA_NO_HTML"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn una_vista_que_devuelve_html_es_valida() {
+    let errs = check_src("@client fn vista() -> Html { return \"<p>hola</p>\"; }");
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// La confianza no se serializa: al otro lado del cable la reconstruye quien
+// mande el JSON, y el atacante no usa el cliente generado.
+#[test]
+fn html_no_vale_como_parametro_remoto() {
+    let errs = check_src("@server fn publicar(c: Html) { print(c); }");
+    assert!(has_code(&errs, "E_BOUNDARY_NOT_SERIALIZABLE"), "{:?}", codes(&errs));
 }

@@ -123,16 +123,18 @@ export function startServer(): Promise<void> {
       // se salta el preflight de CORS y ejecuta el handler. La respuesta le
       // queda opaca al atacante, pero el efecto lateral (guardar/borrar) ya
       // ocurrió. Ambos clientes generados mandan este content-type.
-      const __ct = (req.headers["content-type"] ?? "").split(";")[0].trim();
+      const __ct = (req.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
       if (__ct !== "application/json") {
         res.statusCode = 415;
         res.end(JSON.stringify({ error: "se requiere content-type: application/json" }));
         return;
       }
-      // Un navegador siempre manda Origin en una petición cross-origin. Si
-      // viene y no está permitido, se rechaza: cierra el CSRF que quedara y el
-      // DNS rebinding. MAREA_ALLOWED_ORIGINS lo amplía (lista separada por
-      // comas); sin él solo se acepta el mismo host que sirve la app.
+      // Defensa en profundidad CONTRA NAVEGADORES, no autenticación: cierra el
+      // CSRF clásico (evil.com no puede falsear Origin). NO cierra el DNS
+      // rebinding por sí sola —ahí el atacante controla Host y Origin y los hace
+      // coincidir—, por eso se valida además Host contra MAREA_ALLOWED_HOSTS
+      // cuando está puesto. Sin autenticación de verdad, esto es un cinturón,
+      // no un candado.
       const __origin = req.headers["origin"];
       if (typeof __origin === "string" && __origin !== "") {
         const permitidos = (process.env.MAREA_ALLOWED_ORIGINS ?? "")
@@ -140,6 +142,17 @@ export function startServer(): Promise<void> {
           .map((o) => o.trim())
           .filter((o) => o !== "");
         const host = req.headers["host"] ?? "";
+        // El Host lo elige el cliente, así que compararlo consigo mismo no
+        // impide el rebinding. Con MAREA_ALLOWED_HOSTS se fija cuál es válido.
+        const hostsOk = (process.env.MAREA_ALLOWED_HOSTS ?? "")
+          .split(",")
+          .map((h) => h.trim())
+          .filter((h) => h !== "");
+        if (hostsOk.length > 0 && !hostsOk.includes(host)) {
+          res.statusCode = 403;
+          res.end(JSON.stringify({ error: "host no permitido" }));
+          return;
+        }
         const mismoHost =
           __origin === `http://${host}` || __origin === `https://${host}`;
         if (!mismoHost && !permitidos.includes(__origin)) {
@@ -388,12 +401,6 @@ export function aTexto(x: unknown): string {
 // Escapa un texto para incrustarlo en HTML. El lenguaje construye marcado
 // concatenando cadenas y 'render' lo inyecta por innerHTML, así que sin esto un
 // dato persistido vía RPC se ejecuta como marcado en todos los clientes.
-// Marca una cadena como marcado ya seguro. En runtime es la identidad:
-// la garantía es estática (el tipo Html), esto solo la hace explícita
-// en el fuente para que se vea en una revisión.
-export function html(s: string): string {
-  return s;
-}
 export function escapar(x: unknown): string {
   return String(x)
     .replace(/&/g, "&amp;")
@@ -402,11 +409,19 @@ export function escapar(x: unknown): string {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
+// Marca una cadena como marcado ya seguro. En runtime es la identidad:
+// la garantía es estática (el tipo Html), esto solo la hace explícita
+// en el fuente para que se vea en una revisión.
+export function html(s: string): string {
+  return s;
+}
 // Indexado de lista con verificación de rango: un índice fuera de rango lanza
 // un error claro en vez de devolver 'undefined' (que reventaría más tarde).
 export function __index(xs: unknown[], i: number): unknown {
   if (i < 0 || i >= xs.length) {
-    throw new Error(`índice fuera de rango: ${i} (longitud ${xs.length})`);
+    // Si el índice vino de la red es una petición mal formada (400), no un
+    // fallo del servidor: si no, el cliente induce 500 y ruido de log a placer.
+    throw new __ErrorDeLimite(`índice fuera de rango: ${i} (longitud ${xs.length})`);
   }
   return xs[i];
 }

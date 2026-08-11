@@ -557,10 +557,15 @@ fn js_validator_guarded(
 ) -> String {
     match ty {
         Type::Name { name, args, .. } => match name.as_str() {
-            "Int" => format!("Number.isInteger({expr})"),
+            // Acotado a entero seguro: `Number.isInteger` solo deja pasar 1e21
+            // sin más, y el backend WASM del mismo lenguaje trata Int como i32.
+            "Int" => format!("Number.isSafeInteger({expr})"),
             "Float" => format!("(typeof {expr} === \"number\" && Number.isFinite({expr}))"),
             "Bool" => format!("typeof {expr} === \"boolean\""),
-            "String" => format!("typeof {expr} === \"string\""),
+            // `Html` es una cadena en runtime: se valida como tal. Sin esta
+            // entrada caía al brazo genérico y se emitía "true", es decir un
+            // parámetro sin ningún guarda.
+            "String" | "Html" => format!("typeof {expr} === \"string\""),
             "List" => {
                 let elem = match args.first() {
                     Some(a) => js_validator_guarded(a, aliases, "__e", expanding),
@@ -568,8 +573,13 @@ fn js_validator_guarded(
                 };
                 format!("(Array.isArray({expr}) && {expr}.every((__e) => {elem}))")
             }
-            // `Record` es el registro abierto: cualquier objeto vale.
-            "Record" => format!("({expr} !== null && typeof {expr} === \"object\")"),
+            // `Record` es el registro abierto: cualquier objeto vale, pero un
+            // arreglo NO es un registro (el `Type::Record` estructural ya lo
+            // excluía; sin esto los dos caminos discrepaban y `p.campo` salía
+            // undefined aguas abajo).
+            "Record" => format!(
+                "({expr} !== null && typeof {expr} === \"object\" && !Array.isArray({expr}))"
+            ),
             otro => match aliases.get(otro) {
                 Some(t) => {
                     // Ya en expansión → referencia recursiva: no profundizar.
@@ -595,8 +605,11 @@ fn js_validator_guarded(
             }
             format!("({})", partes.join(" && "))
         }
-        // Una unión no tiene discriminante de runtime todavía: se acepta.
-        Type::Union { .. } => "true".to_string(),
+        // Una unión no tiene discriminante de runtime todavía, así que no se
+        // puede saber QUÉ variante llegó; pero sí se puede exigir que sea algo
+        // representable (etiqueta, escalar u objeto) y descartar `null` y
+        // `undefined`, que era lo que pasaba entero antes.
+        Type::Union { .. } => format!("({expr} !== null && {expr} !== undefined)"),
     }
 }
 
@@ -629,12 +642,12 @@ fn emit_server(
         s.push('\n');
         // El transporte ya garantiza que 'args' es un arreglo; aquí exigimos la
         // aridad exacta para que un argumento faltante no se cuele como undefined.
-        let pass: Vec<String> = (0..f.params.len()).map(|i| format!("args[{i}]")).collect();
+        let pass: Vec<String> = (0..f.params.len()).map(|i| format!("__args[{i}]")).collect();
         let n = f.params.len();
         // Guarda por argumento derivado del tipo declarado.
         let mut checks = String::new();
         for (i, p) in f.params.iter().enumerate() {
-            let v = js_validator(&p.ty, aliases, &format!("args[{i}]"));
+            let v = js_validator(&p.ty, aliases, &format!("__args[{i}]"));
             if v == "true" {
                 continue;
             }
@@ -644,7 +657,7 @@ fn emit_server(
             ));
         }
         s.push_str(&format!(
-            "__register(\"{}\", (args) => {{ if (args.length !== {n}) __malFormado(\"aridad\");{checks} return {}({}); }});\n\n",
+            "__register(\"{}\", (__args) => {{ if (__args.length !== {n}) __malFormado(\"aridad\");{checks} return {}({}); }});\n\n",
             f.name,
             f.name,
             pass.join(", ")

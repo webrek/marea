@@ -127,12 +127,6 @@ export function aTexto(x) {
   return String(x);
 }
 // Gemelo de runtime.ts: escapa un texto para incrustarlo en HTML.
-// Marca una cadena como marcado ya seguro. En runtime es la identidad:
-// la garantía es estática (el tipo Html), esto solo la hace explícita
-// en el fuente para que se vea en una revisión.
-export function html(s) {
-  return s;
-}
 export function escapar(x) {
   return String(x)
     .replace(/&/g, "&amp;")
@@ -140,6 +134,12 @@ export function escapar(x) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+// Marca una cadena como marcado ya seguro. En runtime es la identidad:
+// la garantía es estática (el tipo Html), esto solo la hace explícita
+// en el fuente para que se vea en una revisión.
+export function html(s) {
+  return s;
 }
 export function __index(xs, i) {
   if (i < 0 || i >= xs.length) {

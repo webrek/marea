@@ -245,7 +245,7 @@ fn handler_valida_aridad_de_args() {
     // para que un argumento faltante no se cuele como undefined.
     let p = build("@server fn pub(a: String, b: Int) {}");
     assert!(
-        p.server.contains(r#"if (args.length !== 2) __malFormado("aridad")"#),
+        p.server.contains(r#"if (__args.length !== 2) __malFormado("aridad")"#),
         "{}",
         p.server
     );
@@ -257,8 +257,8 @@ fn handler_valida_aridad_de_args() {
 #[test]
 fn el_handler_valida_los_tipos_de_los_argumentos() {
     let p = build("@server fn pub(a: String, b: Int) {}");
-    assert!(p.server.contains(r#"typeof args[0] === "string""#), "{}", p.server);
-    assert!(p.server.contains("Number.isInteger(args[1])"), "{}", p.server);
+    assert!(p.server.contains(r#"typeof __args[0] === "string""#), "{}", p.server);
+    assert!(p.server.contains("Number.isSafeInteger(__args[1])"), "{}", p.server);
 }
 
 #[test]
@@ -266,7 +266,7 @@ fn el_validador_recorre_listas_y_registros() {
     let p = build(
         "type Post = { autor: String, likes: Int };\n@server fn g(ps: List<Post>) {}",
     );
-    assert!(p.server.contains("Array.isArray(args[0])"), "{}", p.server);
+    assert!(p.server.contains("Array.isArray(__args[0])"), "{}", p.server);
     assert!(p.server.contains(r#"__e["autor"]"#), "{}", p.server);
     assert!(p.server.contains(r#"__e["likes"]"#), "{}", p.server);
 }
