@@ -1117,3 +1117,29 @@ fn los_builtins_de_texto_tipan() {
     );
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
+
+// Un almacén es un asa del SERVIDOR: solo se declara en ese bundle. Nombrarla
+// desde @client tipaba limpio y reventaba con ReferenceError al cargar, porque
+// E_STATE_OFF_SERVER solo cubría las llamadas a los builtins y no la referencia
+// suelta. Mismo fallo que ya se había cerrado para las globales reactivas.
+#[test]
+fn referenciar_un_almacen_desde_client_es_error() {
+    let errs = check_src(
+        "type P = { a: Int };\nstore cosas: P;\n@client fn f() { let x = cosas; print(\"h\"); }",
+    );
+    assert!(has_code(&errs, "E_STATE_OFF_SERVER"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn referenciar_un_almacen_desde_una_fn_sin_anotacion_es_error() {
+    let errs = check_src("type P = { a: Int };\nstore cosas: P;\nfn f() { let x = cosas; }");
+    assert!(has_code(&errs, "E_STATE_OFF_SERVER"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn usar_el_almacen_desde_server_es_valido() {
+    let errs = check_src(
+        "type P = { a: Int };\nstore cosas: P;\n@server fn f() -> Int { return len(todos(cosas)); }",
+    );
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}

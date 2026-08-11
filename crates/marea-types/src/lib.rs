@@ -724,9 +724,30 @@ impl Checker {
                 return ty.clone();
             }
         }
-        // Nombre de un almacén declarado con `store nombre: T;`.
-        if let Some(elem) = self.stores.get(name) {
-            return Ty::Store(name.to_string(), Box::new(elem.clone()));
+        // Nombre de un almacén declarado con `store nombre: T;`. Es un asa del
+        // SERVIDOR: solo se declara en ese bundle, así que nombrarla desde otro
+        // sitio compilaba a un `ReferenceError`. E_STATE_OFF_SERVER solo cubría
+        // las LLAMADAS a los builtins (`todos(cosas)`), no la referencia suelta
+        // (`let x = cosas;`), que tipaba limpio y reventaba al cargar.
+        if let Some(elem) = self.stores.get(name).cloned() {
+            if !matches!(
+                self.current_location,
+                Some(Location::Server) | Some(Location::Edge)
+            ) {
+                let donde = match self.current_location {
+                    Some(Location::Client) => "una función @client",
+                    _ => "una función sin anotación (se emite también en el cliente)",
+                };
+                self.error(TypeError::new(
+                    "E_STATE_OFF_SERVER",
+                    format!(
+                        "'{name}' es un almacén del servidor y no existe en el cliente; \
+                         no puede usarse desde {donde}: envuélvelo en una @server"
+                    ),
+                    span,
+                ));
+            }
+            return Ty::Store(name.to_string(), Box::new(elem));
         }
         // Variable global (estado reactivo de módulo).
         if let Some(ty) = self.globals.get(name).map(|(t, _)| t.clone()) {
