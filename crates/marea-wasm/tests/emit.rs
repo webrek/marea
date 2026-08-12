@@ -229,13 +229,42 @@ fn lista_construye_con_longitud_y_elementos() {
 }
 
 #[test]
-fn indexado_es_load_calculado() {
+fn indexado_comprueba_el_rango() {
     let w = wat("fn f(xs: List) -> Int { return xs[2]; }").unwrap();
-    // dirección = ptr + (idx+1)*4
-    assert!(
-        w.contains("(i32.load (i32.add (local.get $xs) (i32.mul (i32.add (i32.const 2) (i32.const 1)) (i32.const 4))))"),
-        "wat: {w}"
-    );
+    // El indexado pasa por un helper que trapea fuera de rango. Antes sumaba el
+    // índice al puntero sin más: un índice negativo leía HACIA ATRÁS en el heap
+    // —xs[-1] devolvía la longitud, xs[-2] datos de la estructura anterior—, o
+    // sea divulgación de memoria, y además difería del backend de TypeScript,
+    // que lanza.
+    assert!(w.contains("(call $__index (local.get $xs) (i32.const 2))"), "wat: {w}");
+    assert!(w.contains("(func $__index"), "falta el helper: {w}");
+    assert!(w.contains("i32.lt_s (local.get $i) (i32.const 0)"), "sin cota inferior: {w}");
+    assert!(w.contains("unreachable"), "debe trapear fuera de rango: {w}");
+}
+
+// `&&` y `||` cortocircuitan como en TypeScript: emitirlos con i32.and/i32.or
+// evaluaba siempre los dos lados, así que `i < len(xs) && xs[i] > 0` indexaba
+// igualmente y un operando que trapea mataba el programa.
+#[test]
+fn los_operadores_logicos_cortocircuitan() {
+    let w = wat("fn f(a: Bool, b: Bool) -> Bool { return a && b; }").unwrap();
+    assert!(w.contains("(if (result i32)"), "sin cortocircuito: {w}");
+    assert!(!w.contains("i32.and"), "no debe usar i32.and: {w}");
+    let w = wat("fn f(a: Bool, b: Bool) -> Bool { return a || b; }").unwrap();
+    assert!(w.contains("(if (result i32)"), "sin cortocircuito: {w}");
+}
+
+// La igualdad de cadenas compara CONTENIDO. Con i32.eq comparaba punteros, así
+// que concat("a","") == "a" era falso en WASM y verdadero en TypeScript.
+#[test]
+fn la_igualdad_de_cadenas_compara_contenido() {
+    let w = wat("fn f(s: String) -> Bool { return s == \"hola\"; }").unwrap();
+    assert!(w.contains("call $__streq"), "wat: {w}");
+    assert!(w.contains("(func $__streq"), "falta el helper: {w}");
+    // Los enteros siguen comparándose con i32.eq.
+    let w = wat("fn f(a: Int) -> Bool { return a == 1; }").unwrap();
+    assert!(w.contains("i32.eq"), "wat: {w}");
+    assert!(!w.contains("call $__streq"), "wat: {w}");
 }
 
 #[test]

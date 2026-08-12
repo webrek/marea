@@ -174,6 +174,22 @@ texto y de atributo entrecomillado. **No** basta dentro de un atributo sin
 comillas ni en un `href="javascript:..."`. Si construyes esos contextos, el tipo
 `Html` no te salva: revísalos a mano.
 
+### Los dos backends significan lo mismo (con una excepción)
+
+Un lenguaje con dos blancos corre el riesgo de que el mismo programa signifique
+dos cosas. Hay una **prueba diferencial** (`crates/marea-wasm/tests/diferencial.rs`)
+que compila el mismo `.mar` a TypeScript y a WebAssembly, ejecuta ambos y compara
+resultados. Cuando se escribió encontró siete divergencias reales, todas ya
+cerradas: la igualdad de cadenas comparaba punteros en WASM, `&&`/`||` no
+cortocircuitaban, el indexado no comprobaba rango —y un índice negativo leía
+memoria ajena— y la división entre cero daba `Infinity` dentro de un `Int`.
+
+> **La excepción, que sigue abierta:** `Int` es **i32** en WASM y un entero de 53
+> bits en TypeScript, así que al desbordar los dos blancos discrepan
+> (`2000000000 + 2000000000` da `4000000000` en TS y `-294967296` en WASM).
+> Mientras el backend WASM sea para núcleos numéricos, mantén los enteros dentro
+> del rango de 32 bits.
+
 Lo que **todavía no** existe: en el **backend WASM**, flotantes, `match`, tipos
 unión y registros inline (cada caso falla con un error claro, nunca con WAT
 roto). En el **lenguaje**, cierres/lambdas, genéricos en funciones, `import` y el

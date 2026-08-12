@@ -10,5 +10,9 @@ authors.workspace = true
 name = "marea_wasm"
 path = "src/lib.rs"
 
+[dev-dependencies]
+marea-codegen = { path = "../marea-codegen" }
+marea-types = { path = "../marea-types" }
+
 [dependencies]
 marea-syntax = { path = "../marea-syntax" }

@@ -401,6 +401,23 @@ export function aTexto(x: unknown): string {
 // Escapa un texto para incrustarlo en HTML. El lenguaje construye marcado
 // concatenando cadenas y 'render' lo inyecta por innerHTML, así que sin esto un
 // dato persistido vía RPC se ejecuta como marcado en todos los clientes.
+// División entera. En JS `7/0` es Infinity y `0/0` es NaN: valores que no son
+// enteros y que se colarían dentro de un Int mintiendo sobre su tipo. El backend
+// WASM trapea, así que aquí también se corta —el mismo programa no puede dar
+// Infinity en un blanco y morir en el otro—.
+export function __div(a: number, b: number): number {
+  if (b === 0) {
+    throw new __ErrorDeLimite("división entre cero");
+  }
+  return Math.trunc(a / b);
+}
+export function __rem(a: number, b: number): number {
+  if (b === 0) {
+    throw new __ErrorDeLimite("módulo entre cero");
+  }
+  return a % b;
+}
+
 export function escapar(x: unknown): string {
   return String(x)
     .replace(/&/g, "&amp;")

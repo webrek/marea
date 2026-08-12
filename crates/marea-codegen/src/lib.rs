@@ -36,7 +36,7 @@ pub struct AppProject {
 }
 
 /// Builtins provistos por el runtime; no se transpilan ni se registran.
-const BUILTINS: &str = "{ __almacen, __register, __malFormado, __rpc, print, concat, render, len, aTexto, escapar, html, unir, agregar, largo, contiene, minusculas, pedir, pedirPost, jsonTexto, jsonNumero, jsonDecimal, jsonLargo, __index, \
+const BUILTINS: &str = "{ __almacen, __register, __malFormado, __rpc, print, concat, render, len, aTexto, escapar, html, __div, __rem, unir, agregar, largo, contiene, minusculas, pedir, pedirPost, jsonTexto, jsonNumero, jsonDecimal, jsonLargo, __index, \
      guardar, todos, actualizar, borrar, __marea_is, __signal, __memo, __effect }";
 
 /// Los alias de `type` del módulo, para resolver los tipos declarados al emitir
@@ -981,7 +981,11 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
             match op {
                 // División entera: trunca hacia cero, igual que i32.div_s de WASM.
                 // JS '/' daría flotante (7/2=3.5) y rompería el contrato Int.
-                BinOp::Div => format!("Math.trunc({l} / {r})"),
+                // División y módulo van por helpers que cortan el divisor cero:
+                // en JS darían Infinity/NaN dentro de un Int, y el backend WASM
+                // trapea. El mismo programa no puede tener dos finales.
+                BinOp::Div => format!("__div({l}, {r})"),
+                BinOp::Rem => format!("__rem({l}, {r})"),
                 _ => format!("({} {} {})", l, map_binop(*op), r),
             }
         }

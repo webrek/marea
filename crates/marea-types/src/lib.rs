@@ -898,8 +898,13 @@ impl Checker {
                 if matches!(lt, Ty::Unknown) || matches!(rt, Ty::Unknown) {
                     return Ty::Bool;
                 }
-                // Igualdad sólo entre el mismo escalar.
-                if !(lt.is_scalar() && lt == rt) {
+                // Igualdad entre escalares del mismo tipo, admitiendo que uno
+                // sea subtipo del otro: `Html` es texto, así que compararlo con
+                // un `String` es legítimo (y comparar dos literales del fuente,
+                // que tipan como Html, con una variable String, es lo normal).
+                let compatibles =
+                    lt.is_scalar() && rt.is_scalar() && (self.is_subtype(&lt, &rt) || self.is_subtype(&rt, &lt));
+                if !compatibles {
                     self.error(TypeError::new(
                         "E_ARITH_TYPE",
                         format!(

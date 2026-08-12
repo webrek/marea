@@ -126,6 +126,17 @@ export function aTexto(x) {
   return String(x);
 }
 // Gemelo de runtime.ts: escapa un texto para incrustarlo en HTML.
+// Gemelos de runtime.ts: cortar la división entre cero en vez de devolver
+// Infinity/NaN dentro de un Int.
+export function __div(a, b) {
+  if (b === 0) throw new Error("división entre cero");
+  return Math.trunc(a / b);
+}
+export function __rem(a, b) {
+  if (b === 0) throw new Error("módulo entre cero");
+  return a % b;
+}
+
 export function escapar(x) {
   return String(x)
     .replace(/&/g, "&amp;")

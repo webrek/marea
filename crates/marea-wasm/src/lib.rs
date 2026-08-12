@@ -276,6 +276,8 @@ fn emit_string_runtime(strings: &Strings) -> String {
            (global $__heap (mut i32) (i32.const {heap}))\n\
          {data}\
          {ALLOC}\n\
+         {INDEX}\n\
+         {STREQ}\n\
          {CONCAT}\n",
         heap = strings.heap_start,
     )
@@ -292,6 +294,44 @@ const ALLOC: &str = "  (func $__alloc (param $n i32) (result i32)
       (i32.add (global.get $__heap)
         (i32.and (i32.add (local.get $n) (i32.const 3)) (i32.const -4))))
     (local.get $p)
+  )";
+
+/// `xs[i]` con comprobación de rango. Sin ella, el índice se sumaba al puntero
+/// sin más: un índice negativo leía hacia atrás en el heap —`xs[-1]` devolvía la
+/// longitud, `xs[-2]` el último elemento de la estructura anterior— y uno
+/// grande, ceros o basura. Es divulgación de memoria, y además difería del
+/// backend de TypeScript, que lanza. Aquí se trapea, que es lo que WebAssembly
+/// puede hacer.
+const INDEX: &str = "  (func $__index (param $xs i32) (param $i i32) (result i32)
+    (if (i32.or
+          (i32.lt_s (local.get $i) (i32.const 0))
+          (i32.ge_s (local.get $i) (i32.load (local.get $xs))))
+      (then unreachable))
+    (i32.load (i32.add (local.get $xs)
+      (i32.mul (i32.add (local.get $i) (i32.const 1)) (i32.const 4))))
+  )";
+
+/// Igualdad de CADENAS por contenido. `i32.eq` comparaba los punteros, así que
+/// `concat("a","") == "a"` era falso en WASM y verdadero en TypeScript: el mismo
+/// programa daba dos respuestas. Sólo funcionaba por accidente entre literales,
+/// porque el recolector los deduplica —lo que hacía la divergencia más difícil
+/// de ver, no menos real—.
+const STREQ: &str = "  (func $__streq (param $a i32) (param $b i32) (result i32)
+    (local $n i32) (local $i i32)
+    (if (i32.eq (local.get $a) (local.get $b)) (then (return (i32.const 1))))
+    (local.set $n (i32.load (local.get $a)))
+    (if (i32.ne (local.get $n) (i32.load (local.get $b))) (then (return (i32.const 0))))
+    (local.set $i (i32.const 0))
+    (block $fin
+      (loop $sig
+        (br_if $fin (i32.ge_u (local.get $i) (local.get $n)))
+        (if (i32.ne
+              (i32.load8_u (i32.add (i32.add (local.get $a) (i32.const 4)) (local.get $i)))
+              (i32.load8_u (i32.add (i32.add (local.get $b) (i32.const 4)) (local.get $i))))
+          (then (return (i32.const 0))))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $sig)))
+    (i32.const 1)
   )";
 
 /// `concat(a, b)`: ubica un registro nuevo y copia ambos contenidos.
@@ -618,7 +658,26 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String, String> {
         } => {
             let l = emit_expr(left, ctx)?;
             let r = emit_expr(right, ctx)?;
-            Ok(format!("({} {l} {r})", wasm_binop(*op)))
+            // `&&` y `||` CORTOCIRCUITAN, como en el backend de TypeScript.
+            // Emitirlos como `i32.and`/`i32.or` evaluaba siempre los dos lados:
+            // el modismo defensivo `i < len(xs) && xs[i] > 0` ejecutaba el
+            // indexado igualmente, y con un operando que trapea (una división
+            // por cero, por ejemplo) el programa moría donde en TS no.
+            // La igualdad de CADENAS compara contenido, no punteros.
+            if matches!(op, BinOp::Eq | BinOp::Ne)
+                && (es_cadena(left, ctx) || es_cadena(right, ctx))
+            {
+                let cmp = format!("(call $__streq {l} {r})");
+                return Ok(match op {
+                    BinOp::Eq => cmp,
+                    _ => format!("(i32.eqz {cmp})"),
+                });
+            }
+            match op {
+                BinOp::And => Ok(format!("(if (result i32) {l} (then {r}) (else (i32.const 0)))")),
+                BinOp::Or => Ok(format!("(if (result i32) {l} (then (i32.const 1)) (else {r}))")),
+                _ => Ok(format!("({} {l} {r})", wasm_binop(*op))),
+            }
         }
         Expr::Call { callee, args, .. } => {
             let name = match callee.as_ref() {
@@ -686,7 +745,7 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String, String> {
             // dirección del elemento = ptr + (idx + 1) * 4  (la longitud ocupa
             // la palabra 0; los elementos empiezan en la palabra 1).
             Ok(format!(
-                "(i32.load (i32.add {obj} (i32.mul (i32.add {idx} (i32.const 1)) (i32.const 4))))"
+                "(call $__index {obj} {idx})"
             ))
         }
         Expr::Float { .. } => Err("WASM aún no soporta flotantes (sólo i32 por ahora)".to_string()),
@@ -926,6 +985,22 @@ fn collect_strings_expr(e: &Expr, out: &mut Vec<String>, seen: &mut HashSet<Stri
 
 // --- utilidades ---
 
+/// ¿Se puede demostrar que esta expresión es una cadena? Conservador a
+/// propósito: con que UN lado lo sea, la comparación pasa a ser por contenido,
+/// que es lo correcto; si no se puede probar, se compara como i32 (que es lo que
+/// hacía antes) y no se rompe nada.
+fn es_cadena(e: &Expr, ctx: &Ctx) -> bool {
+    match e {
+        Expr::Str { .. } => true,
+        Expr::Ident { name, .. } => ctx.vars.get(name).map(|t| t == "String" || t == "Html") == Some(true),
+        Expr::Call { callee, .. } => matches!(
+            callee.as_ref(),
+            Expr::Ident { name, .. } if name == "concat"
+        ),
+        _ => false,
+    }
+}
+
 fn wasm_binop(op: BinOp) -> &'static str {
     match op {
         BinOp::Add => "i32.add",
@@ -939,7 +1014,7 @@ fn wasm_binop(op: BinOp) -> &'static str {
         BinOp::Gt => "i32.gt_s",
         BinOp::Le => "i32.le_s",
         BinOp::Ge => "i32.ge_s",
-        // Sin cortocircuito; correcto sobre booleanos 0/1.
+        // `And`/`Or` no llegan aquí: se emiten con cortocircuito en emit_expr.
         BinOp::And => "i32.and",
         BinOp::Or => "i32.or",
     }

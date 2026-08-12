@@ -105,9 +105,21 @@ fn builtins_no_se_awaitan() {
 
 #[test]
 fn division_entera_trunca() {
-    // JS '/' daría flotante; debe truncar para no romper el contrato Int.
+    // JS '/' daría flotante; debe truncar para no romper el contrato Int. Va por
+    // un helper que además corta el divisor cero: `7/0` daría Infinity dentro de
+    // un Int, y el backend WASM trapea —el mismo programa no puede tener dos
+    // finales—.
     let p = build("fn d() -> Int { return 7 / 2; }");
-    assert!(p.client.contains("Math.trunc"), "{}", p.client);
+    assert!(p.client.contains("__div(7, 2)"), "{}", p.client);
+    assert!(p.runtime.contains("export function __div"), "{}", p.runtime);
+    assert!(p.runtime.contains("división entre cero"), "{}", p.runtime);
+}
+
+#[test]
+fn el_modulo_tambien_corta_el_divisor_cero() {
+    let p = build("fn m() -> Int { return 7 % 2; }");
+    assert!(p.client.contains("__rem(7, 2)"), "{}", p.client);
+    assert!(p.runtime.contains("export function __rem"), "{}", p.runtime);
 }
 
 #[test]
