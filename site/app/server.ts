@@ -1,5 +1,5 @@
 // Generado por Marea — lado servidor.
-import { __almacen, __register, __malFormado, __rpc, print, concat, render, len, aTexto, escapar, html, unir, agregar, largo, contiene, minusculas, __index, guardar, todos, actualizar, borrar, __marea_is, __signal, __memo, __effect } from "./runtime.ts";
+import { __almacen, __register, __malFormado, __rpc, print, concat, render, len, aTexto, escapar, html, unir, agregar, largo, contiene, minusculas, pedir, pedirPost, jsonTexto, jsonNumero, jsonDecimal, jsonLargo, __index, guardar, todos, actualizar, borrar, __marea_is, __signal, __memo, __effect } from "./runtime.ts";
 
 const publicaciones = __almacen("publicaciones", { table: "publicaciones", columns: [{ name: "autor", kind: "text" }, { name: "texto", kind: "text" }, { name: "likes", kind: "int" }] });
 

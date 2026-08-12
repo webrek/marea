@@ -476,6 +476,147 @@ interface __Backend {
 }
 
 // --------------------------------------------------------------------------
+// RED SALIENTE
+//
+// Dar acceso a la red desde el servidor abre SSRF: si una @server recibe la URL
+// del cliente, el atacante consigue que el servidor pida por él —y el servidor
+// suele estar dentro de la red, con acceso a metadatos del proveedor y a
+// servicios internos que él no alcanza—. Por eso:
+//   - solo http/https,
+//   - se bloquean loopback, enlace local, metadatos de nube y rangos privados,
+//   - MAREA_HTTP_HOSTS restringe a una lista blanca (recomendado en producción),
+//   - hay tope de tiempo y de tamaño de respuesta.
+// --------------------------------------------------------------------------
+
+const __RANGOS_PRIVADOS = [
+  /^127\./, /^10\./, /^192\.168\./, /^169\.254\./, /^0\./,
+  /^172\.(1[6-9]|2\d|3[01])\./,
+];
+
+function __hostBloqueado(host: string): boolean {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, "");
+  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".internal")) return true;
+  if (h === "::1" || h === "0.0.0.0") return true;
+  // IPv6 local (fc00::/7 y fe80::/10) y IPv4 mapeada.
+  if (/^f[cd]/.test(h) || /^fe[89ab]/.test(h)) return true;
+  return __RANGOS_PRIVADOS.some((r) => r.test(h));
+}
+
+function __urlPermitida(u: string): URL {
+  let url: URL;
+  try {
+    url = new URL(u);
+  } catch {
+    __malFormado("url inválida");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    __malFormado("esquema no permitido");
+  }
+  const lista = (process.env.MAREA_HTTP_HOSTS ?? "")
+    .split(",")
+    .map((h) => h.trim().toLowerCase())
+    .filter((h) => h !== "");
+  if (lista.length > 0) {
+    if (!lista.includes(url.hostname.toLowerCase())) {
+      __malFormado("host no permitido");
+    }
+    return url;
+  }
+  // Sin lista blanca se acepta cualquier host PÚBLICO. Los privados se bloquean
+  // siempre: son justo el objetivo del SSRF.
+  if (__hostBloqueado(url.hostname)) {
+    __malFormado("host no permitido");
+  }
+  return url;
+}
+
+async function __http(u: string, metodo: string, cuerpo: string | null): Promise<string> {
+  const url = __urlPermitida(u);
+  const tope = __envInt("MAREA_HTTP_MAX", 1_048_576);
+  const control = new AbortController();
+  const reloj = setTimeout(() => control.abort(), __envInt("MAREA_HTTP_TIMEOUT", 10_000));
+  try {
+    const res = await fetch(url, {
+      method: metodo,
+      headers: cuerpo === null ? {} : { "content-type": "application/json" },
+      body: cuerpo === null ? undefined : cuerpo,
+      redirect: "error", // un redirect puede saltarse la lista blanca
+      signal: control.signal,
+    });
+    const largoCabecera = Number(res.headers.get("content-length") ?? "0");
+    if (largoCabecera > tope) {
+      throw new Error("respuesta demasiado grande");
+    }
+    const texto = await res.text();
+    if (texto.length > tope) {
+      throw new Error("respuesta demasiado grande");
+    }
+    return texto;
+  } finally {
+    clearTimeout(reloj);
+  }
+}
+
+export function pedir(url: string): Promise<string> {
+  return __http(url, "GET", null);
+}
+export function pedirPost(url: string, cuerpo: string): Promise<string> {
+  return __http(url, "POST", cuerpo);
+}
+
+// --- lectura de JSON por ruta ---
+// El lenguaje no tiene valores dinámicos, así que una respuesta se lee por
+// ruta con puntos: "current.temperature_2m", "results.0.nombre".
+function __jsonEn(texto: string, ruta: string): unknown {
+  let v: unknown;
+  try {
+    v = JSON.parse(texto);
+  } catch {
+    return undefined;
+  }
+  if (ruta === "") return v;
+  for (const parte of ruta.split(".")) {
+    if (v === null || v === undefined) return undefined;
+    if (Array.isArray(v)) {
+      const i = Number(parte);
+      if (!Number.isInteger(i)) return undefined;
+      v = v[i];
+    } else if (typeof v === "object") {
+      // Sin prototipo por medio: __proto__ y constructor no son rutas válidas.
+      v = Object.prototype.hasOwnProperty.call(v, parte)
+        ? (v as Record<string, unknown>)[parte]
+        : undefined;
+    } else {
+      return undefined;
+    }
+  }
+  return v;
+}
+
+export function jsonTexto(texto: string, ruta: string): string {
+  const v = __jsonEn(texto, ruta);
+  if (v === undefined || v === null) return "";
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
+}
+export function jsonNumero(texto: string, ruta: string): number {
+  const v = __jsonEn(texto, ruta);
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.trunc(n) : 0;
+}
+export function jsonDecimal(texto: string, ruta: string): number {
+  const v = __jsonEn(texto, ruta);
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+export function jsonLargo(texto: string, ruta: string): number {
+  const v = __jsonEn(texto, ruta);
+  if (Array.isArray(v)) return v.length;
+  if (v !== null && typeof v === "object") return Object.keys(v).length;
+  return 0;
+}
+
+// --------------------------------------------------------------------------
 // ALMACENES CON NOMBRE
 //
 // `store productos: Producto;` declara un almacén; el nombre se pasa como primer
