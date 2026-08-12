@@ -321,3 +321,53 @@ fn parse_store() {
     let m = parse("store almacen: Post;").unwrap();
     assert!(matches!(&m.items[0], Item::Store { .. }));
 }
+
+// Los tipos anidan igual que las expresiones y también recursan, pero la guarda
+// de profundidad solo cubría `parse_unary`: `List<List<...>>` repetido miles de
+// veces desbordaba la pila del proceso. Importa porque el servidor de lenguaje
+// parsea texto sin terminar en cada pulsación, así que moría con él.
+#[test]
+fn un_tipo_demasiado_anidado_no_desborda_la_pila() {
+    let src = format!(
+        "fn f(x: {}Int{}) -> Int {{ return 1; }}",
+        "List<".repeat(20_000),
+        ">".repeat(20_000)
+    );
+    let e = marea_syntax::parse(&src).expect_err("debe rechazarse, no reventar");
+    assert!(e.message.contains("anidado"), "mensaje: {}", e.message);
+}
+
+#[test]
+fn un_registro_demasiado_anidado_no_desborda_la_pila() {
+    let src = format!(
+        "type T = {}Int{}; fn f(x: T) -> Int {{ return 1; }}",
+        "{ a: ".repeat(20_000),
+        " }".repeat(20_000)
+    );
+    let e = marea_syntax::parse(&src).expect_err("debe rechazarse, no reventar");
+    assert!(e.message.contains("anidado"), "mensaje: {}", e.message);
+}
+
+// La cadena de `else if` recursa por parse_if directamente, saltándose la
+// guarda de parse_unary.
+#[test]
+fn una_cadena_de_else_if_larguisima_no_desborda_la_pila() {
+    let mut src = String::from("fn f(n: Int) -> Int { ");
+    for _ in 0..20_000 {
+        src.push_str("if n > 0 { return 1; } else ");
+    }
+    src.push_str("{ return 0; } }");
+    let e = marea_syntax::parse(&src).expect_err("debe rechazarse, no reventar");
+    assert!(e.message.contains("anidad"), "mensaje: {}", e.message);
+}
+
+// El anidamiento razonable sigue siendo válido.
+#[test]
+fn el_anidamiento_normal_de_tipos_sigue_valiendo() {
+    let src = format!(
+        "fn f(x: {}Int{}) -> Int {{ return 1; }}",
+        "List<".repeat(100),
+        ">".repeat(100)
+    );
+    assert!(marea_syntax::parse(&src).is_ok());
+}

@@ -294,6 +294,22 @@ impl Parser {
     // --- tipos ---
 
     fn parse_type(&mut self) -> PResult<Type> {
+        // Los tipos también anidan (`List<List<...>>`, registros dentro de
+        // registros) y también recursan, así que llevan la misma guarda que las
+        // expresiones. Sin ella `List<` repetido desbordaba la pila del proceso
+        // —y el servidor de lenguaje, que parsea texto sin terminar en cada
+        // pulsación, moría con él.
+        self.depth += 1;
+        if self.depth > MAX_DEPTH {
+            self.depth -= 1;
+            return Err(SyntaxError::new("tipo demasiado anidado", self.peek().span));
+        }
+        let result = self.parse_type_inner();
+        self.depth -= 1;
+        result
+    }
+
+    fn parse_type_inner(&mut self) -> PResult<Type> {
         let first = self.parse_type_primary()?;
         if !self.check(&TokenKind::Pipe) {
             return Ok(first);
@@ -712,7 +728,19 @@ impl Parser {
 
         let else_branch = if self.eat(&TokenKind::Else) {
             if self.check(&TokenKind::If) {
-                let inner = self.parse_if()?;
+                // Una cadena larga de `else if` recursa aquí sin pasar por
+                // parse_unary, así que cuenta su propia profundidad.
+                self.depth += 1;
+                if self.depth > MAX_DEPTH {
+                    self.depth -= 1;
+                    return Err(SyntaxError::new(
+                        "cadena de 'else if' demasiado larga",
+                        self.peek().span,
+                    ));
+                }
+                let anidado = self.parse_if();
+                self.depth -= 1;
+                let inner = anidado?;
                 span = span.to(inner.span());
                 Some(Box::new(ElseBranch::If(inner)))
             } else {
