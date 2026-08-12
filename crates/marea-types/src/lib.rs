@@ -44,6 +44,12 @@ struct FnSig {
     params: Vec<Ty>,
     ret: Ty,
     location: Option<Location>,
+    /// Nombres del tipo de retorno tal como se escribieron (`User`,
+    /// `User | NotFound`). El `Ty` ya viene con los alias expandidos, y para
+    /// construir el tipo de un recurso —`Cargando | User | Fallo`— hace falta el
+    /// nombre, no la forma. Vacío si el retorno no es nombrable (un registro
+    /// escrito en línea, por ejemplo).
+    ret_nombres: Vec<String>,
 }
 
 /// Punto de entrada: chequea un módulo y acumula TODOS los errores.
@@ -162,7 +168,18 @@ impl Checker {
                 // referir funciones, builtins y literales, no variables locales).
                 self.scopes = vec![HashMap::new()];
                 self.current_location = None;
-                self.init_context = Some("el inicializador de una variable de módulo");
+                // Una `reactive` de módulo cuyo inicializador es una llamada es
+                // un RECURSO: ya no dispara el RPC de forma que reviente el
+                // arranque —empieza en `Cargando` y un fallo se vuelve `Fallo`—,
+                // así que es el sitio natural para los datos de la app.
+                let recurso_global = if l.reactive {
+                    self.tipo_de_recurso(&l.value)
+                } else {
+                    None
+                };
+                if recurso_global.is_none() {
+                    self.init_context = Some("el inicializador de una variable de módulo");
+                }
                 let ty = match &l.ty {
                     Some(t) => {
                         self.validate_type_exists(t);
@@ -170,7 +187,13 @@ impl Checker {
                         self.check_expr(&l.value);
                         self.ty_from_syntax(t)
                     }
-                    None => self.check_expr(&l.value),
+                    None => match &recurso_global {
+                        Some(t) => {
+                            self.check_expr(&l.value);
+                            t.clone()
+                        }
+                        None => self.check_expr(&l.value),
+                    },
                 };
                 self.init_context = None;
                 // Ni como un almacén: ambos son nombres de primer nivel del
@@ -361,12 +384,24 @@ impl Checker {
                     Some(t) => self.ty_from_syntax(t),
                     None => Ty::Unit,
                 };
+                let ret_nombres = match &f.return_type {
+                    Some(Type::Name { name, .. }) => vec![name.clone()],
+                    Some(Type::Union { variants, .. }) => variants
+                        .iter()
+                        .filter_map(|v| match v {
+                            Type::Name { name, .. } => Some(name.clone()),
+                            _ => None,
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                };
                 self.fns.insert(
                     f.name.clone(),
                     FnSig {
                         params,
                         ret,
                         location: f.location,
+                        ret_nombres,
                     },
                 );
             }
@@ -579,13 +614,29 @@ impl Checker {
     fn check_stmt(&mut self, stmt: &Stmt) {
         match stmt {
             Stmt::Let(l) => {
-                // Una `reactive` se compila a un memo con cuerpo SÍNCRONO, así
-                // que su inicializador no puede contener un cruce de red.
+                // `reactive x = f(...)` es un RECURSO: la llamada es asíncrona,
+                // así que el valor empieza en `Cargando`, pasa al resultado
+                // cuando llega y a `Fallo` si la llamada revienta. Es la
+                // composición de las dos fronteras —la de red y la del tiempo—
+                // y el tipo lo dice: `Cargando | T | Fallo`, que obliga a un
+                // match con los tres casos.
                 let prev_init = self.init_context;
-                if l.reactive {
+                let recurso = if l.reactive {
+                    self.tipo_de_recurso(&l.value)
+                } else {
+                    None
+                };
+                if l.reactive && recurso.is_none() {
                     self.init_context = Some("el inicializador de una variable 'reactive'");
                 }
-                let value_ty = self.check_expr(&l.value);
+                let value_ty = match &recurso {
+                    Some(t) => {
+                        // Se tipan los argumentos igual, para no perder errores.
+                        self.check_expr(&l.value);
+                        t.clone()
+                    }
+                    None => self.check_expr(&l.value),
+                };
                 self.init_context = prev_init;
                 // Tipo destino, si se anotó.
                 let bind_ty = if let Some(decl) = &l.ty {
@@ -752,6 +803,31 @@ impl Checker {
             return Ty::Html;
         }
         t
+    }
+
+    /// Si `e` es una llamada a una función declarada cuyo retorno es nombrable,
+    /// devuelve el tipo del recurso: `Cargando | <retorno> | Fallo`. Devuelve
+    /// `None` cuando no se puede construir —una llamada a un builtin, o un
+    /// retorno que es un registro escrito en línea y por tanto sin nombre—, y
+    /// entonces vuelve a aplicarse la prohibición de cruzar en un inicializador.
+    fn tipo_de_recurso(&self, e: &Expr) -> Option<Ty> {
+        let Expr::Call { callee, .. } = e else {
+            return None;
+        };
+        let Expr::Ident { name, .. } = callee.as_ref() else {
+            return None;
+        };
+        if es_builtin_sincrono(name) {
+            return None;
+        }
+        let sig = self.fns.get(name)?;
+        if sig.ret_nombres.is_empty() {
+            return None;
+        }
+        let mut vs = vec!["Cargando".to_string()];
+        vs.extend(sig.ret_nombres.iter().cloned());
+        vs.push("Fallo".to_string());
+        Some(Ty::Union(vs))
     }
 
     fn resolve_ident(&mut self, name: &str, span: Span) -> Ty {
@@ -1529,7 +1605,7 @@ impl Checker {
                             let narrowed = self.narrow_variant(name);
                             self.scopes.last_mut().unwrap().insert(sn.clone(), (narrowed, false));
                         }
-                        arm_types.push(self.check_expr(&arm.body));
+                        arm_types.push(self.check_expr_html(&arm.body));
                         self.scopes.pop();
                     } else {
                         // minúscula = binding catch-all. Captura el residual
@@ -1538,7 +1614,7 @@ impl Checker {
                         let residual = self.residual_narrow(&variants, &covered, &scrut_ty);
                         self.scopes.push(HashMap::new());
                         self.scopes.last_mut().unwrap().insert(name.clone(), (residual, false));
-                        arm_types.push(self.check_expr(&arm.body));
+                        arm_types.push(self.check_expr_html(&arm.body));
                         self.scopes.pop();
                     }
                 }
@@ -1550,12 +1626,12 @@ impl Checker {
                     if let Some(sn) = &scrut_name {
                         self.scopes.last_mut().unwrap().insert(sn.clone(), (residual, false));
                     }
-                    arm_types.push(self.check_expr(&arm.body));
+                    arm_types.push(self.check_expr_html(&arm.body));
                     self.scopes.pop();
                 }
                 Pattern::Int { .. } | Pattern::Bool { .. } | Pattern::Str { .. } => {
                     // Patrón literal: chequea la rama; no aporta a la exhaustividad nominal.
-                    arm_types.push(self.check_expr(&arm.body));
+                    arm_types.push(self.check_expr_html(&arm.body));
                 }
             }
         }
@@ -1582,6 +1658,10 @@ impl Checker {
         // Tipo del 'match': el común de las ramas (ignorando Unknown). Si todas
         // coinciden, ese tipo; si difieren, Unknown (no forzamos un error aquí);
         // sin ramas, Unit.
+        // Unificación: si los tipos difieren pero uno es supertipo del otro, ese
+        // es el del match. Antes cualquier diferencia daba Unknown, y entonces
+        // un match cuyas ramas mezclaran `Html` y `String` —lo normal al pintar—
+        // no se podía devolver desde una función tipada.
         arm_types
             .into_iter()
             .reduce(|acc, t| {
@@ -1589,6 +1669,10 @@ impl Checker {
                     t
                 } else if matches!(t, Ty::Unknown) || acc == t {
                     acc
+                } else if self.is_subtype(&t, &acc) {
+                    acc
+                } else if self.is_subtype(&acc, &t) {
+                    t
                 } else {
                     Ty::Unknown
                 }

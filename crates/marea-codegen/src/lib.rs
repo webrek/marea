@@ -37,7 +37,7 @@ pub struct AppProject {
 
 /// Builtins provistos por el runtime; no se transpilan ni se registran.
 const BUILTINS: &str = "{ __almacen, __register, __malFormado, __rpc, print, concat, render, len, aTexto, escapar, html, __div, __rem, unir, agregar, largo, contiene, minusculas, pedir, pedirPost, jsonTexto, jsonNumero, jsonDecimal, jsonLargo, __index, \
-     guardar, todos, actualizar, borrar, __marea_is, __signal, __memo, __effect }";
+     guardar, todos, actualizar, borrar, __marea_is, __signal, __memo, __recurso, __effect }";
 
 /// Los alias de `type` del módulo, para resolver los tipos declarados al emitir
 /// los validadores del límite de red.
@@ -232,7 +232,11 @@ fn emit_client_js(
         if l.mutable {
             s.push_str(&format!("const {} = __signal({init});\n", l.name));
         } else {
-            s.push_str(&format!("const {} = __memo(() => {init});\n", l.name));
+            if es_recurso(&l.value) {
+                s.push_str(&format!("const {} = __recurso(async () => {init});\n", l.name));
+            } else {
+                s.push_str(&format!("const {} = __memo(() => {init});\n", l.name));
+            }
         }
     }
     s.push('\n');
@@ -785,14 +789,43 @@ fn emit_block_inner(block: &Block, indent: usize, reactive: &HashSet<String>) ->
     lines.join("\n")
 }
 
+/// ¿El inicializador de una `reactive` es un recurso? Lo es cuando llama a una
+/// función del usuario: el codegen emite `await` para ésas, y un `await` no cabe
+/// en el cuerpo síncrono de un memo. Los builtins síncronos no cuentan.
+fn es_recurso(e: &Expr) -> bool {
+    match e {
+        Expr::Call { callee, .. } => matches!(
+            callee.as_ref(),
+            Expr::Ident { name, .. } if !is_sync_builtin_name(name)
+        ),
+        _ => false,
+    }
+}
+
+fn is_sync_builtin_name(name: &str) -> bool {
+    matches!(
+        name,
+        "print" | "concat" | "render" | "len" | "aTexto" | "escapar" | "html"
+            | "unir" | "agregar" | "largo" | "contiene" | "minusculas"
+            | "jsonTexto" | "jsonNumero" | "jsonDecimal" | "jsonLargo"
+    )
+}
+
 fn emit_stmt(stmt: &Stmt, indent: usize, reactive: &HashSet<String>) -> String {
     let p = pad(indent);
     match stmt {
         Stmt::Let(l) if l.reactive => {
             // Fuente reactiva (mutable) = signal; derivada (inmutable) = memo.
+            // Si el inicializador es una LLAMADA, es un recurso: la llamada es
+            // asíncrona, así que el valor arranca en `Cargando` y se resuelve
+            // solo. Un memo no serviría —su cuerpo es síncrono— y era justo lo
+            // que antes generaba `__memo(() => (await f()))`, un await dentro de
+            // una arrow no-async, o sea un SyntaxError.
             let init = emit_expr(&l.value, reactive);
             if l.mutable {
                 format!("{p}const {} = __signal({init});", l.name)
+            } else if es_recurso(&l.value) {
+                format!("{p}const {} = __recurso(async () => {init});", l.name)
             } else {
                 format!("{p}const {} = __memo(() => {init});", l.name)
             }

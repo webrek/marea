@@ -348,6 +348,24 @@ export function __effect(fn: () => void | Promise<void>): void {
   reaction.execute();
 }
 
+// Un RECURSO: la composición de las dos fronteras. Arranca en `Cargando`, lanza
+// la llamada asíncrona y se pone al resultado cuando llega, o a `Fallo` si
+// revienta. Como es un signal, cualquier vista que lo lea se re-pinta sola en
+// cada transición: no hay que orquestar nada a mano.
+export function __recurso(f: () => Promise<unknown>): Cell<unknown> {
+  const s = __signal<unknown>({ $tag: "Cargando" });
+  Promise.resolve()
+    .then(f)
+    .then(
+      (v) => s.set(v),
+      (e) => {
+        console.error("[marea] recurso falló:", e);
+        s.set({ $tag: "Fallo" });
+      },
+    );
+  return s;
+}
+
 export function __memo<T>(fn: () => T): Cell<T> {
   const subs = new Set<Reaction>();
   let value: T;

@@ -791,13 +791,43 @@ fn una_global_no_reactiva_si_es_visible_desde_server() {
 // compilaba a `__memo(() => (await f()))` —await en una arrow no-async, o sea
 // un SyntaxError que impedía cargar el módulo entero—. Ahora es un error claro
 // del verificador en vez de código generado inválido.
+// `reactive x = llamadaRemota()` es ahora un RECURSO: la composición de las dos
+// fronteras. Antes se compilaba a `__memo(() => (await f()))` —un await en una
+// arrow no-async— y se acabó prohibiendo; ahora arranca en `Cargando` y se
+// resuelve solo, y el tipo obliga a cubrir los tres estados.
 #[test]
-fn e_boundary_in_init_reactive() {
+fn un_reactive_con_llamada_es_un_recurso() {
     let errs = check_src(
-        "@server fn getUser(id: Int) -> Int | NotFound { return 1; }\n\
-         @client fn perfil(id: Int) { reactive u = getUser(id); print(u); }",
+        "type User = { nombre: String };\n\
+         @server fn getUser(id: Int) -> User | NotFound { return NotFound; }\n\
+         @client fn perfil(id: Int) -> Html {\n\
+           reactive u = getUser(id);\n\
+           return match u {\n\
+             Cargando => \"cargando\",\n\
+             Fallo => \"error\",\n\
+             NotFound => \"no existe\",\n\
+             otro => escapar(otro.nombre),\n\
+           };\n\
+         }",
     );
-    assert!(has_code(&errs, "E_BOUNDARY_IN_INIT"), "{:?}", codes(&errs));
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// Y el tipo del recurso obliga de verdad: si no se cubren `Cargando` y `Fallo`,
+// lo que queda en el comodín sigue siendo una unión opaca —`Cargando | User |
+// Fallo`— y no se le puede leer un campo. La garantía no es un aviso: es que el
+// programa incompleto no compila.
+#[test]
+fn el_recurso_obliga_a_cubrir_cargando_y_fallo() {
+    let errs = check_src(
+        "type User = { nombre: String };\n\
+         @server fn getUser(id: Int) -> User | NotFound { return NotFound; }\n\
+         @client fn perfil(id: Int) -> Html {\n\
+           reactive u = getUser(id);\n\
+           return match u { NotFound => \"no\", otro => escapar(otro.nombre) };\n\
+         }",
+    );
+    assert!(has_code(&errs, "E_FIELD_ON_UNION"), "{:?}", codes(&errs));
 }
 
 // Una global de módulo se evalúa al importar, antes de que exista el servidor:
@@ -873,11 +903,27 @@ fn un_registro_es_subtipo_de_la_union_que_lo_contiene() {
 // E_BOUNDARY_IN_INIT solo miraba cruces de red, pero CUALQUIER función del
 // usuario se compila a async: `reactive t = doble(n)` daba el mismo await en
 // arrow no-async.
+// Una llamada local en un inicializador reactivo también es un recurso: el
+// codegen la emite con `await` igual, así que un memo síncrono no la aguanta.
 #[test]
-fn una_llamada_local_en_un_init_reactive_tambien_es_error() {
+fn una_llamada_local_en_un_init_reactive_tambien_es_recurso() {
     let errs = check_src(
         "fn doble(n: Int) -> Int { return n * 2; }\n\
-         @client fn main() { reactive mut n = 0; reactive t = doble(n); print(t); }",
+         @client fn main() -> Int {\n\
+           reactive mut n = 0;\n\
+           reactive t = doble(n);\n\
+           return match t { Cargando => 0, Fallo => 0, otro => otro };\n\
+         }",
+    );
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// El inicializador de una global NO reactiva sigue sin poder cruzar: se evalúa
+// al importar y no tiene dónde esperar.
+#[test]
+fn una_global_no_reactiva_sigue_sin_poder_llamar() {
+    let errs = check_src(
+        "@server fn suma(a: Int, b: Int) -> Int { return a + b; }\nlet x = suma(1, 2);",
     );
     assert!(has_code(&errs, "E_BOUNDARY_IN_INIT"), "{:?}", codes(&errs));
 }

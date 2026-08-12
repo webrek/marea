@@ -79,6 +79,21 @@ export function __effect(fn) {
   reaction.execute();
 }
 
+// Gemelo de runtime.ts: un recurso arranca en Cargando y se resuelve solo.
+export function __recurso(f) {
+  const s = __signal({ $tag: "Cargando" });
+  Promise.resolve()
+    .then(f)
+    .then(
+      (v) => s.set(v),
+      (e) => {
+        console.error("[marea] recurso falló:", e);
+        s.set({ $tag: "Fallo" });
+      },
+    );
+  return s;
+}
+
 export function __memo(fn) {
   const subs = new Set();
   let value;
