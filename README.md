@@ -86,6 +86,37 @@ Lo que ya funciona:
   emitir** (la garantía del verificador dejó de ser opt-in); `--no-check` la
   omite si quieres compilar de todos modos.
 
+### Hablar con servicios externos
+
+Una app real consume APIs de terceros. `pedir(url)` hace un GET y devuelve el
+cuerpo; `pedirPost(url, cuerpo)` manda JSON. Como el lenguaje no tiene valores
+dinámicos, la respuesta se lee **por ruta**: `jsonTexto`, `jsonNumero`,
+`jsonDecimal` y `jsonLargo`.
+
+```marea
+@server
+fn consultar(lat: String, lon: String) -> Int {
+    let cuerpo = pedir(concat("https://api.open-meteo.com/v1/forecast?latitude=", lat));
+    return jsonNumero(cuerpo, "current.temperature_2m");
+}
+```
+
+Salir a la red **solo se permite desde `@server`** (`E_RED_OFF_SERVER`): desde el
+navegador la petición la haría el cliente —otro origen, otras credenciales, CORS
+decidiendo por ti—, que no es lo que el programa dice. Leer JSON sí vale en
+cualquier lado: es cómputo puro sobre un texto que ya se tiene.
+
+**Defensas contra SSRF**, porque dar red al servidor es dársela a quien controle
+la URL: sólo `http`/`https`; se bloquean loopback, enlace local, `169.254.169.254`
+(metadatos de nube), rangos privados y hosts `.internal`; los redirects se
+rechazan (podrían saltarse la lista blanca); y hay tope de tiempo
+(`MAREA_HTTP_TIMEOUT`) y de tamaño (`MAREA_HTTP_MAX`).
+
+> **Limitación honesta:** el bloqueo mira el nombre del host, no la IP a la que
+> resuelve. Un dominio público cuyo registro A apunte a una dirección privada
+> pasaría el filtro. Para producción, fija la lista blanca `MAREA_HTTP_HOSTS`:
+> con ella sólo se contactan los destinos que enumeres.
+
 ### Listas y texto
 
 Sin construir listas en tiempo de ejecución no se puede escribir una búsqueda:

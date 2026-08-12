@@ -656,6 +656,12 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String, String> {
                     | "largo"
                     | "contiene"
                     | "minusculas"
+                    | "pedir"
+                    | "pedirPost"
+                    | "jsonTexto"
+                    | "jsonNumero"
+                    | "jsonDecimal"
+                    | "jsonLargo"
             ) {
                 return Err(format!(
                     "'{name}' es un builtin del runtime de TypeScript; no existe en el backend WASM"

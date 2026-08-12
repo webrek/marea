@@ -1057,6 +1057,25 @@ impl Checker {
             if matches!(name.as_str(), "guardar" | "todos" | "actualizar" | "borrar") {
                 return self.check_state_builtin(name, args, span);
             }
+            // La red saliente vive en el servidor, igual que el estado: desde el
+            // navegador la llamada la haría el cliente (otro origen, otras
+            // credenciales, y CORS decidiendo por ti), que no es lo que el
+            // programa dice. Además la lista blanca de destinos es del servidor.
+            if matches!(name.as_str(), "pedir" | "pedirPost") {
+                if !matches!(
+                    self.current_location,
+                    Some(Location::Server) | Some(Location::Edge)
+                ) {
+                    self.error(TypeError::new(
+                        "E_RED_OFF_SERVER",
+                        format!(
+                            "'{name}' sale a la red y sólo puede usarse en una función \
+                             @server; envuélvelo en una y llámala por RPC"
+                        ),
+                        span,
+                    ));
+                }
+            }
             if name == "aTexto" {
                 // aTexto sólo tiene sentido sobre escalares; un Record/List daría
                 // '[object Object]'/'1,2,3' (basura mostrada al usuario).
@@ -2025,6 +2044,7 @@ fn es_builtin_sincrono(name: &str) -> bool {
         name,
         "print" | "concat" | "render" | "len" | "aTexto" | "escapar" | "html"
             | "unir" | "agregar" | "largo" | "contiene" | "minusculas"
+            | "jsonTexto" | "jsonNumero" | "jsonDecimal" | "jsonLargo"
     )
 }
 

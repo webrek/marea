@@ -1173,3 +1173,35 @@ fn los_campos_con_palabras_reservadas_de_sql_son_validos() {
     let errs = check_src("type T = { order: Int, group: String, select: Bool };\nstore cosas: T;");
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
+
+// --- red saliente ---
+
+// Salir a la red es del servidor: desde el navegador la petición la haría el
+// cliente (otro origen, otras credenciales, CORS decidiendo), que no es lo que
+// el programa dice; y la lista blanca de destinos vive en el servidor.
+#[test]
+fn pedir_fuera_de_server_es_error() {
+    let errs = check_src("@client fn f() -> String { return pedir(\"https://ejemplo.com\"); }");
+    assert!(has_code(&errs, "E_RED_OFF_SERVER"), "{:?}", codes(&errs));
+    let errs = check_src("fn f() -> String { return pedirPost(\"https://x.com\", \"{}\"); }");
+    assert!(has_code(&errs, "E_RED_OFF_SERVER"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn pedir_desde_server_es_valido() {
+    let errs = check_src("@server fn f() -> String { return pedir(\"https://ejemplo.com\"); }");
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// Leer JSON sí puede hacerse en cualquier lado: es cómputo puro sobre un texto
+// que ya se tiene.
+#[test]
+fn leer_json_vale_en_el_cliente() {
+    let errs = check_src(
+        "@client fn f(c: String) -> Int { \
+           if jsonTexto(c, \"a.b\") != \"\" { return jsonNumero(c, \"n\"); } \
+           return jsonLargo(c, \"lista\"); \
+         }",
+    );
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}

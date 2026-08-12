@@ -112,6 +112,43 @@ pub fn lookup(name: &str) -> Option<Ty> {
             ret: Box::new(Ty::String),
             location: None,
         }),
+        // --- red saliente (solo @server) ---
+        // `pedir(url)` hace un GET y devuelve el cuerpo; `pedirPost(url, cuerpo)`
+        // manda JSON. Son el puente a servicios externos: sin ellos el lenguaje
+        // solo sabe hablar con su propio store y su propio cliente.
+        "pedir" => Some(Ty::Fn {
+            params: vec![Ty::String],
+            ret: Box::new(Ty::String),
+            location: None,
+        }),
+        "pedirPost" => Some(Ty::Fn {
+            params: vec![Ty::String, Ty::String],
+            ret: Box::new(Ty::String),
+            location: None,
+        }),
+        // --- lectura de JSON ---
+        // El lenguaje no tiene tipos dinámicos, así que una respuesta se lee por
+        // ruta: `jsonTexto(cuerpo, "current.time")`, `jsonNumero(c, "a.0.b")`.
+        "jsonTexto" => Some(Ty::Fn {
+            params: vec![Ty::String, Ty::String],
+            ret: Box::new(Ty::String),
+            location: None,
+        }),
+        "jsonNumero" => Some(Ty::Fn {
+            params: vec![Ty::String, Ty::String],
+            ret: Box::new(Ty::Int),
+            location: None,
+        }),
+        "jsonDecimal" => Some(Ty::Fn {
+            params: vec![Ty::String, Ty::String],
+            ret: Box::new(Ty::Float),
+            location: None,
+        }),
+        "jsonLargo" => Some(Ty::Fn {
+            params: vec![Ty::String, Ty::String],
+            ret: Box::new(Ty::Int),
+            location: None,
+        }),
         // Variante nominal usable como etiqueta en uniones / patrones.
         "NotFound" => Some(Ty::Union(vec!["NotFound".to_string()])),
         _ => None,
@@ -154,6 +191,12 @@ pub const VALUE_NAMES: &[&str] = &[
     "largo",
     "contiene",
     "minusculas",
+    "pedir",
+    "pedirPost",
+    "jsonTexto",
+    "jsonNumero",
+    "jsonDecimal",
+    "jsonLargo",
     "NotFound",
 ];
 

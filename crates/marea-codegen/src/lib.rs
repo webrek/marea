@@ -36,7 +36,7 @@ pub struct AppProject {
 }
 
 /// Builtins provistos por el runtime; no se transpilan ni se registran.
-const BUILTINS: &str = "{ __almacen, __register, __malFormado, __rpc, print, concat, render, len, aTexto, escapar, html, unir, agregar, largo, contiene, minusculas, __index, \
+const BUILTINS: &str = "{ __almacen, __register, __malFormado, __rpc, print, concat, render, len, aTexto, escapar, html, unir, agregar, largo, contiene, minusculas, pedir, pedirPost, jsonTexto, jsonNumero, jsonDecimal, jsonLargo, __index, \
      guardar, todos, actualizar, borrar, __marea_is, __signal, __memo, __effect }";
 
 /// Los alias de `type` del módulo, para resolver los tipos declarados al emitir
@@ -999,7 +999,8 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
                 callee.as_ref(),
                 Expr::Ident { name, .. }
                     if matches!(name.as_str(), "print" | "concat" | "render" | "len" | "aTexto" | "escapar" | "html"
-                    | "unir" | "agregar" | "largo" | "contiene" | "minusculas")
+                    | "unir" | "agregar" | "largo" | "contiene" | "minusculas"
+                    | "jsonTexto" | "jsonNumero" | "jsonDecimal" | "jsonLargo")
             );
             if is_sync_builtin {
                 format!("{}({})", callee_ts, a.join(", "))
