@@ -30,12 +30,14 @@ fn getUser(id: UserId) -> User | NotFound {
 }
 
 @client
-fn perfil(id: UserId) {
-    let usuario = getUser(id);   // se llama como si fuera local
-    match usuario {             // la unión es opaca: obliga a un match
-        NotFound => render("no existe"),
-        _        => render(escapar(usuario.nombre)),
-    }
+fn perfil(id: UserId) -> Html {
+    reactive usuario = getUser(id);   // se llama como si fuera local
+    return match usuario {            // el tipo obliga a cubrir los cuatro casos
+        Cargando => "<p>Cargando…</p>",
+        Fallo    => "<p>Error de red</p>",
+        NotFound => "<p>No existe</p>",
+        otro     => concat("<h1>", concat(escapar(otro.nombre), "</h1>")),
+    };
 }
 ```
 
@@ -45,18 +47,6 @@ pasa al resultado cuando llega y a `Fallo` si la llamada revienta. Y el tipo lo
 dice —`Cargando | User | NotFound | Fallo`—, de modo que el compilador **no te
 deja leer el dato sin haber cubierto los cuatro casos**: mientras no cubras
 `Cargando` y `Fallo`, lo que queda es una unión opaca.
-
-```marea
-@client fn perfil(id: Int) -> Html {
-    reactive usuario = getUser(id);   // se llama como si fuera local
-    return match usuario {
-        Cargando => "<p>Cargando…</p>",
-        Fallo    => "<p>Error de red</p>",
-        NotFound => "<p>No existe</p>",
-        otro     => concat("<h1>", concat(escapar(otro.nombre), "</h1>")),
-    };
-}
-```
 
 Como el recurso es un signal, la vista se re-pinta sola en cada transición: no
 hay estado de carga que orquestar a mano. Un recurso también puede vivir a nivel
