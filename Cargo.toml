@@ -13,7 +13,7 @@ members = [
 version = "0.0.1"
 edition = "2021"
 license = "MIT"
-authors = ["Antonio Hernández <ahernandez@faypublicidad.com>"]
+authors = ["Arturo Hernández <webrek@me.com>"]
 
 # Dependencias externas del servidor de lenguaje (`marea-lsp`). Quedan
 # centralizadas aquí para fijar versiones, pero SOLO las consume `marea-lsp`:
