@@ -123,6 +123,7 @@ export function len(xs) {
   return xs.length;
 }
 export function aTexto(x) {
+  if (x !== null && typeof x === "object" && typeof x.$tag === "string") return x.$tag;
   return String(x);
 }
 // Gemelo de runtime.ts: escapa un texto para incrustarlo en HTML.
@@ -176,11 +177,7 @@ export function __index(xs, i) {
   return xs[i];
 }
 export function __marea_is(value, tag) {
-  if (value === tag) return true;
-  if (value && typeof value === "object") {
-    return value.tag === tag || value.kind === tag || value.type === tag;
-  }
-  return false;
+  return value !== null && typeof value === "object" && value.$tag === tag;
 }
 // 'render' en el navegador pinta HTML en #app (en Node solo registraba en consola).
 export function render(x) {

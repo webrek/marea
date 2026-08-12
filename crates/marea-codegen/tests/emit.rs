@@ -123,9 +123,23 @@ fn el_modulo_tambien_corta_el_divisor_cero() {
 }
 
 #[test]
-fn variante_como_valor_es_etiqueta() {
+fn variante_como_valor_lleva_etiqueta_reservada() {
     let p = build("@client fn f(n: Int) -> A | B { if n > 0 { return A; } return B; }");
-    assert!(p.client.contains("return \"A\""), "{}", p.client);
+    // Con etiqueta en el campo reservado `$tag`, no como cadena desnuda: el
+    // lexer no admite `$` en un identificador, así que ningún registro del
+    // usuario puede tener ese campo y hacerse pasar por una variante. Antes, un
+    // campo llamado `tag`, `kind` o `type` decidía qué rama del match corría.
+    assert!(p.client.contains(r#"return { $tag: "A" }"#), "{}", p.client);
+    assert!(p.client.contains(r#"return { $tag: "B" }"#), "{}", p.client);
+}
+
+#[test]
+fn el_discriminante_solo_mira_el_campo_reservado() {
+    let p = build("@client fn f(n: Int) -> A | B { if n > 0 { return A; } return B; }");
+    assert!(p.runtime.contains(".$tag === tag"), "{}", p.runtime);
+    // Ya no se consultan campos de datos del usuario.
+    assert!(!p.runtime.contains("v.kind === tag"), "{}", p.runtime);
+    assert!(!p.runtime.contains("v.type === tag"), "{}", p.runtime);
 }
 
 #[test]

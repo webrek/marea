@@ -174,6 +174,20 @@ texto y de atributo entrecomillado. **No** basta dentro de un atributo sin
 comillas ni en un `href="javascript:..."`. Si construyes esos contextos, el tipo
 `Html` no te salva: revísalos a mano.
 
+### Las uniones llevan etiqueta
+
+Una variante nominal se representa con un campo reservado: `NotFound` viaja como
+`{ $tag: "NotFound" }`. El lexer no admite `$` en un identificador, así que
+**ningún registro del programa puede tener ese campo** y hacerse pasar por una
+variante. Antes una variante era una cadena desnuda y el discriminante miraba
+campos de datos corrientes (`tag`, `kind`, `type`): un registro con un campo
+`tag` decidía qué rama del `match` corría —el dato controlaba el flujo—, y el
+`String` `"NotFound"` era indistinguible de la variante.
+
+Queda un límite explícito: una variante que resuelve a un **registro** no lleva
+etiqueta, así que no puede nombrarse en una rama (`E_VARIANTE_SIN_ETIQUETA`); se
+cubre con un comodín, que es como ya lo hacían los ejemplos.
+
 ### Los dos backends significan lo mismo (con una excepción)
 
 Un lenguaje con dos blancos corre el riesgo de que el mismo programa signifique

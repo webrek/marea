@@ -959,9 +959,13 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
                 // Leer una reactiva = su getter (rastrea dependencias).
                 format!("{name}.get()")
             } else if name.chars().next().is_some_and(|c| c.is_uppercase()) {
-                // Variante nominal usada como valor (errores como valores): se
-                // representa por su etiqueta, que '__marea_is' reconoce en match.
-                js_string(name)
+                // Variante nominal usada como valor (errores como valores). Se
+                // representa con una etiqueta en el campo reservado `$tag`: el
+                // lexer no admite `$` en un identificador, así que ningún
+                // registro del usuario puede tener ese campo y confundirse con
+                // una variante. Antes era una cadena desnuda, y entonces el
+                // String "NotFound" era indistinguible de la variante.
+                format!("{{ $tag: {} }}", js_string(name))
             } else {
                 name.clone()
             }

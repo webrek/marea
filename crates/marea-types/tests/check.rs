@@ -1205,3 +1205,29 @@ fn leer_json_vale_en_el_cliente() {
     );
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
+
+// --- uniones con representación de runtime ---
+
+// Una variante que resuelve a un REGISTRO no lleva etiqueta en runtime, así que
+// nombrarla en una rama dejaba esa rama muerta en silencio: el match no
+// ejecutaba ninguna. Ahora se dice al compilar.
+#[test]
+fn una_variante_que_es_registro_no_puede_nombrarse_en_un_match() {
+    let errs = check_src(
+        "type User = { nombre: String };\n\
+         @client fn f(u: User | NotFound) -> String { \
+           return match u { User => u.nombre, NotFound => \"no\", _ => \"\" }; }",
+    );
+    assert!(has_code(&errs, "E_VARIANTE_SIN_ETIQUETA"), "{:?}", codes(&errs));
+}
+
+// El patrón correcto —comodín para el caso del registro— sigue siendo válido.
+#[test]
+fn el_comodin_cubre_el_caso_del_registro() {
+    let errs = check_src(
+        "type User = { nombre: String };\n\
+         @client fn f(u: User | NotFound) -> String { \
+           return match u { NotFound => \"no\", otro => otro.nombre }; }",
+    );
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}

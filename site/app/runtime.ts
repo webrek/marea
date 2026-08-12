@@ -255,12 +255,11 @@ export async function __rpc(fn: string, args: unknown[]): Promise<unknown> {
 
 // Comparación de variantes para 'match' (best-effort hasta tener uniones reales).
 export function __marea_is(value: unknown, tag: string): boolean {
-  if (value === tag) return true;
-  if (value && typeof value === "object") {
-    const v = value as Record<string, unknown>;
-    return v.tag === tag || v.kind === tag || v.type === tag;
-  }
-  return false;
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    (value as Record<string, unknown>).$tag === tag
+  );
 }
 
 // --- núcleo reactivo (signals de grano fino, sin glitches) ---
@@ -396,6 +395,11 @@ export function len(xs: unknown[]): number {
   return xs.length;
 }
 export function aTexto(x: unknown): string {
+  // Una variante se imprime por su nombre; si no, saldría "[object Object]".
+  if (x !== null && typeof x === "object") {
+    const t = (x as Record<string, unknown>).$tag;
+    if (typeof t === "string") return t;
+  }
   return String(x);
 }
 // Escapa un texto para incrustarlo en HTML. El lenguaje construye marcado

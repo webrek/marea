@@ -1506,7 +1506,22 @@ impl Checker {
                                 *pspan,
                             ));
                         }
-                        covered.insert(name.clone());
+                        // Una variante que resuelve a un REGISTRO no se puede
+                    // discriminar en runtime: los registros no llevan etiqueta,
+                    // así que la rama quedaría muerta en silencio (el `match`
+                    // no ejecutaría ninguna). Mejor decirlo al compilar.
+                    if let Some(Some(_)) = self.resolve_named_to_record(name) {
+                        self.error(TypeError::new(
+                            "E_VARIANTE_SIN_ETIQUETA",
+                            format!(
+                                "'{name}' es un registro y no lleva etiqueta en runtime, así que \
+                                 esta rama nunca se ejecutaría; usa un comodín (`_` o un nombre) \
+                                 para el caso del registro"
+                            ),
+                            *pspan,
+                        ));
+                    }
+                    covered.insert(name.clone());
                         // Narrowing: dentro de la rama, la variable escrutada es
                         // esta variante (estrechada a Named).
                         self.scopes.push(HashMap::new());
