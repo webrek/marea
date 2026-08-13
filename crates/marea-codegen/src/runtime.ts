@@ -417,7 +417,7 @@ export function __signal<T>(initial: T): Cell<T> {
   const subs = new Set<Reaction>();
   return {
     get(): T {
-      if (__currentSub) subs.append(__currentSub);
+      if (__currentSub) subs.add(__currentSub);
       return value;
     },
     set(v: T): void {
@@ -443,7 +443,7 @@ export function __effect(fn: () => void | Promise<void>): void {
       }
     },
     invalidate() {
-      __pending.append(reaction);
+      __pending.add(reaction);
     },
   };
   reaction.execute();
@@ -492,7 +492,7 @@ export function __memo<T>(fn: () => T): Cell<T> {
   return {
     get(): T {
       if (dirty) recompute();
-      if (__currentSub) subs.append(__currentSub);
+      if (__currentSub) subs.add(__currentSub);
       return value;
     },
     // Un memo es derivado: no se asigna directamente.

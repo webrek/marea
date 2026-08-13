@@ -122,6 +122,9 @@ fn un_rpc_cruza_de_verdad() {
     let salida = Command::new("node")
         .arg("demo.ts")
         .current_dir(&dir)
+        // Puerto propio: los tests de un mismo binario corren en paralelo y los
+        // dos de aquí levantan servidor.
+        .env("MAREA_PORT", "8801")
         .output()
         .expect("no se pudo lanzar node");
     let texto = format!(
@@ -138,4 +141,60 @@ fn un_rpc_cruza_de_verdad() {
         !texto.contains("host no permitido"),
         "la defensa anti-SSRF está bloqueando el propio transporte:\n{texto}"
     );
+}
+
+/// La OTRA frontera, la del tiempo: `reactive` + `effect`, ejecutándose.
+///
+/// Estuvo rota igual que el RPC y por la misma causa: el renombrado de builtins
+/// al inglés convirtió `.add(` en `.append(` sobre tres `Set` del núcleo
+/// reactivo, y un `Set` de JavaScript no tiene `append`. Cualquier programa con
+/// `reactive`/`effect` moría con "subs.append is not a function".
+///
+/// Ningún test lo veía porque todos inspeccionaban el texto emitido en vez de
+/// ejecutarlo. Este corre la demo del README, que debe imprimir 0, 2 y 4.
+#[test]
+fn la_reactividad_corre_de_verdad() {
+    if !hay_node() {
+        eprintln!("sin node en el PATH: se omite");
+        return;
+    }
+    let dir = std::env::temp_dir().join("marea-reactivo-vivo");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let fuente = std::fs::read_to_string(format!(
+        "{}/../../examples/contador.mar",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("no se pudo leer examples/contador.mar");
+    let p = marea_codegen::emit(&marea_syntax::parse(&fuente).unwrap());
+    for (n, c) in [
+        ("runtime.ts", &p.runtime),
+        ("server.ts", &p.server),
+        ("client.ts", &p.client),
+        ("demo.ts", &p.demo),
+    ] {
+        std::fs::write(dir.join(n), c).unwrap();
+    }
+    let salida = Command::new("node")
+        .arg("demo.ts")
+        .current_dir(&dir)
+        .env("MAREA_PORT", "8802")
+        .output()
+        .expect("no se pudo lanzar node");
+    let texto = format!(
+        "{}{}",
+        String::from_utf8_lossy(&salida.stdout),
+        String::from_utf8_lossy(&salida.stderr)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        !texto.contains("is not a function"),
+        "el núcleo reactivo llama a un método que no existe:\n{texto}"
+    );
+    let nums: Vec<&str> = texto
+        .lines()
+        .filter(|l| l.trim().parse::<i64>().is_ok())
+        .map(|l| l.trim())
+        .collect();
+    assert_eq!(nums, vec!["0", "2", "4"], "salida completa:\n{texto}");
 }

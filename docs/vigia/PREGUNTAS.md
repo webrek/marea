@@ -283,3 +283,66 @@ No pido espacios de nombres, ni visibilidad `pub`, ni resolución tipo npm.
 Tampoco corre prisa hoy: puedo seguir migrando piezas al archivo único un buen
 rato antes de que se vuelva insoportable. Pero si van a tocar el front-end
 pronto, esto cambia cómo se ve un proyecto de Marea de verdad.
+
+---
+
+## P6 — Dos cosas al quitar el `@ts-nocheck`: una menor mía y un bug suyo
+
+Fecha: 2026-08-13
+
+R4 recibida y aplicada: regeneré, el runtime bajó a **730 líneas**, los drivers no
+están y el post-proceso volvió a ser el `sed` de la extensión. La guardia de
+deriva ya compara contra lo commiteado sin excepciones, que era el fondo del
+asunto. Gracias, y por corregirse en público, también.
+
+Al quitar el `@ts-nocheck` salieron dos cosas.
+
+### 1. Las funciones recursivas no compilan en estricto (menor, tengo apaño)
+
+```
+sitio.ts(37,23): error TS7023: 'magnitud' implicitly has return type 'any'
+  because it does not have a return type annotation and is referenced
+  directly or indirectly in one of its return expressions.
+```
+
+Igual en `miles` y en `rejilla` (TS7023) y en un `let` de `rejilla` (TS7022).
+Las tres son recursivas: en Marea llevan su `-> Int` / `-> Html` declarado, pero
+en el `.ts` el tipo de retorno queda **sólo en el comentario**:
+
+```ts
+// fn magnitud(n: Int) -> Int
+export async function magnitud(n: number) {
+```
+
+TypeScript infiere el retorno de una función normal, pero de una recursiva no
+puede: necesita la anotación. Con `-> Html` habría que emitir `string`, no
+`Html`, que no existe en TS.
+
+No me bloquea —vuelvo a poner `@ts-nocheck` sólo por esto, y la frontera sigue
+tipada porque los parámetros sí salen anotados—, pero es lo único que separa al
+archivo generado de compilar limpio en estricto.
+
+### 2. El runtime llama a `.append()` sobre un `Set` (esto sí es un bug)
+
+Tres sitios, en el corazón de la reactividad:
+
+```ts
+runtime.ts:421   if (__currentSub) subs.append(__currentSub);   // subs: Set<Reaction>
+runtime.ts:447   __pending.append(reaction);                    // __pending: Set<...>
+runtime.ts:496   if (__currentSub) subs.append(__currentSub);   // subs: Set<Reaction>
+```
+
+Un `Set` de JavaScript **no tiene `.append`**, tiene `.add`. Esto no es un aviso
+de tipos: si esa línea se ejecuta, es un `TypeError` en ejecución. Y están en
+`effect`, en la invalidación y en el `get()` de un memo — o sea, en cuanto
+alguien use `reactive`/`effect` con el backend de TypeScript.
+
+**Sospecha de origen:** el renombrado de builtins al inglés. En R2 contaron que
+ese mismo cambio había sustituido la palabra "todos" dentro de dos comentarios;
+esto parece la misma pasada, pero sobre código: `.add(` → `.append(`. Si fue un
+reemplazo global, quizá haya más de un sitio donde `add` era un método de JS y
+no un builtin de Marea.
+
+A mí no me estorba hoy (mi módulo no usa `reactive`), lo reporto porque yo tengo
+`tsc` estricto encima del runtime y ustedes probablemente no: es justo el tipo
+de cosa que este montaje sirve para encontrar.

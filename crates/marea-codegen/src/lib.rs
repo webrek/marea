@@ -828,6 +828,42 @@ fn emit_demo(local: &[&FnDecl]) -> String {
 
 // --- funciones ---
 
+/// El tipo de retorno para la firma TypeScript, **sólo si es seguro emitirlo**.
+///
+/// TypeScript infiere el retorno de una función normal, pero de una RECURSIVA no
+/// puede: sin anotación da TS7023 ("implicitly has return type 'any'"), y eso es
+/// un error en modo estricto. Con `-> Int` en Marea, el `.ts` se quedaba con el
+/// tipo sólo en el comentario.
+///
+/// Devuelve `None` cuando el tipo no tiene una traducción que exista en TS: un
+/// registro nombrado o una unión de variantes producirían nombres que el codegen
+/// NO declara, y anotar con ellos cambiaría un TS7023 por un "Cannot find name".
+/// Mejor no anotar que anotar mal. Cuando se emitan los `type`, esto se amplía.
+fn ts_return_type(f: &FnDecl) -> Option<String> {
+    fn traducir(t: &Type) -> Option<String> {
+        match t {
+            Type::Name { name, args, .. } if name == "List" => {
+                let e = traducir(args.first()?)?;
+                Some(format!("{e}[]"))
+            }
+            Type::Name { name, args, .. } if args.is_empty() => match name.as_str() {
+                "Int" | "Float" => Some("number".to_string()),
+                // `Html` es una cadena en runtime: la distinción es estática y
+                // no tiene contrapartida en TS.
+                "String" | "Html" => Some("string".to_string()),
+                "Bool" => Some("boolean".to_string()),
+                "Unit" => Some("void".to_string()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+    match &f.return_type {
+        None => Some("void".to_string()),
+        Some(t) => traducir(t),
+    }
+}
+
 fn emit_fn_def(f: &FnDecl, export: bool) -> String {
     let params = ts_params_handler(f);
     let kw = if export {
@@ -838,12 +874,18 @@ fn emit_fn_def(f: &FnDecl, export: bool) -> String {
     // El conjunto de variables reactivas se construye incrementalmente por
     // bloque (respetando el alcance léxico), arrancando vacío.
     let body = emit_block_inner(&f.body, 1, &HashSet::new());
+    // La función se emite `async`, así que lo anotado es la promesa.
+    let ret = match ts_return_type(f) {
+        Some(t) => format!(": Promise<{t}>"),
+        None => String::new(),
+    };
     format!(
-        "{}\n{} {}({}) {{\n{}\n}}\n",
+        "{}\n{} {}({}){} {{\n{}\n}}\n",
         signature_comment(f),
         kw,
         f.name,
         params,
+        ret,
         body
     )
 }

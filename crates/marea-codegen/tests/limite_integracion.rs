@@ -80,6 +80,10 @@ await stopServer();
     );
     let hijo = Command::new("node")
         .args(["--input-type=module", "-e", &guion])
+        // Puerto propio: cargo corre los binarios de test EN PARALELO y todos
+        // estos levantan el servidor. Con el 8787 por defecto, el segundo que
+        // arranca muere con EADDRINUSE, y de forma no determinista.
+        .env("MAREA_PORT", "8803")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

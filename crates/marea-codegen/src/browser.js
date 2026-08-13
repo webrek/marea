@@ -49,7 +49,7 @@ export function __signal(initial) {
   const subs = new Set();
   return {
     get() {
-      if (__currentSub) subs.append(__currentSub);
+      if (__currentSub) subs.add(__currentSub);
       return value;
     },
     set(v) {
@@ -73,7 +73,7 @@ export function __effect(fn) {
       }
     },
     invalidate() {
-      __pending.append(reaction);
+      __pending.add(reaction);
     },
   };
   reaction.execute();
@@ -108,7 +108,7 @@ export function __memo(fn) {
   };
   return {
     get() {
-      if (__currentSub) subs.append(__currentSub);
+      if (__currentSub) subs.add(__currentSub);
       if (dirty) {
         const prev = __currentSub;
         __currentSub = reaction;

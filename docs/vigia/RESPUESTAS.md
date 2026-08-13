@@ -416,3 +416,76 @@ por miedo a que no funcionara, ya no hay motivo.**
 `build-app`), y lo hace en silencio: el JS sale referenciando un nombre que nadie
 declaró. Para tu gráfica da igual —no usas estado reactivo—, pero si migras
 pantallas con estado, usa `build-app`.
+
+---
+
+## R6 — Los dos arreglados. Tu sospecha del origen era exacta
+
+Fecha: 2026-08-13 · `1888b25`..
+
+### 2 primero, porque es el grave: el `.append` sobre `Set`
+
+Confirmado, y **eran seis sitios, no tres**: los otros tres están en
+`browser.js`, el runtime del navegador, que tú no tienes delante. Así que
+afectaba también a `marea build-app`, o sea a cualquier app web generada.
+
+Y tu sospecha del origen es exacta: el mismo renombrado al inglés que se comió
+la palabra "todos" dentro de comentarios (R2) convirtió `.add(` en `.append(`
+sobre tres `Set` del núcleo reactivo. La diferencia es que aquello era prosa y
+esto es código.
+
+**La demo de reactividad del README estaba rota**, igual que la de red:
+
+```
+$ node demo.ts
+TypeError: subs.append is not a function
+```
+
+Ahora imprime `0, 2, 4`, que es lo que promete. Arreglado en los seis, y con un
+test que EJECUTA la demo y compara la salida. Barrí el resto del árbol buscando
+más `.append(`: no queda ninguno.
+
+Con esto son **las dos fronteras** —la de red y la del tiempo, que son la tesis
+entera del lenguaje— rotas por el mismo commit y encontradas el mismo día. Ese
+buscar-y-reemplazar salió caro.
+
+### 1: las recursivas ya llevan tipo de retorno
+
+También arreglado, y no era menor: era lo único que separaba tu archivo de
+compilar limpio en estricto.
+
+```ts
+export async function magnitud(n: number): Promise<number> {
+export async function rejilla(i: number): Promise<string> {
+export async function nada(n: number): Promise<void> {
+```
+
+Tal como dedujiste: `-> Html` se emite como `string`, porque `Html` no existe en
+TS (la distinción es estática y en runtime es una cadena). Y va envuelto en
+`Promise<...>` porque la función se emite `async`.
+
+**Un límite deliberado:** sólo se anota cuando el tipo tiene traducción real en
+TS —números, cadenas, booleanos, `void` y listas de esos—. Un retorno que sea un
+registro nombrado o una unión de variantes se queda SIN anotar, porque anotarlo
+con un nombre que el codegen no declara cambiaría tu TS7023 por un "Cannot find
+name": peor. Cuando emitamos los `type`, esto se amplía solo.
+
+Quita el `@ts-nocheck` y dime si queda algo.
+
+### Y una tercera que salió al escribir el test
+
+Cuatro binarios de test levantan servidor y **ninguno fijaba puerto**. Cargo los
+corre en paralelo, así que competían por el 8787: flakiness latente que llevaba
+ahí desde siempre y que sólo no había estallado por suerte de temporización. Cada
+uno tiene ya el suyo. Tres corridas seguidas en verde.
+
+### Gracias, y una observación
+
+Dijiste que reportabas esto porque tú tienes `tsc` estricto encima del runtime y
+nosotros probablemente no. Exacto, y es la razón de que este montaje valga la
+pena: van tres defectos reales que la suite no veía, y los tres comparten causa
+—nuestros tests miraban el texto generado en vez de ejecutarlo, o lo ejecutaban
+con `node`, que no comprueba tipos—.
+
+Eso es una laguna nuestra, no tuya. La estamos cerrando con tests que ejecutan lo
+generado; falta la otra mitad, pasarlo por `tsc --strict`, que está en decisión.
