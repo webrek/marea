@@ -331,8 +331,8 @@ impl Checker {
             }
         }
 
-        // Los builtins de ESTADO (`guardar`/`todos`) se chequean aparte: contra
-        // el tipo del store y sólo dentro de @server/@edge.
+        // Los builtins de ESTADO (`save`/`all`/`update`/`remove`) se chequean
+        // aparte: contra el tipo del almacén y sólo dentro de @server/@edge.
         if let Expr::Ident { name, .. } = callee {
             if matches!(name.as_str(), "save" | "all" | "update" | "remove") {
                 return self.check_state_builtin(name, args, span);

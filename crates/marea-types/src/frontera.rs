@@ -5,9 +5,10 @@
 use super::*;
 
 impl Checker {
-    /// Chequea `guardar(x)` y `todos()` contra el store tipado (`store T;`):
-    /// sólo en @server/@edge, requieren la declaración, y `guardar` exige que su
-    /// argumento sea del tipo del store; `todos()` devuelve `List<T>`.
+    /// Chequea `save(a, x)` y `all(a)` contra el almacén tipado
+    /// (`store a: T;`): sólo en @server/@edge, exigen que el almacén esté
+    /// declarado, y `save` que su argumento sea del tipo de ESE almacén —guardar
+    /// un Producto en `ordenes` no compila—; `all(a)` devuelve `List<T>`.
     pub(crate) fn check_state_builtin(&mut self, name: &str, args: &[Expr], span: Span) -> Ty {
         if !matches!(
             self.current_location,

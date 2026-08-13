@@ -17,11 +17,9 @@ pub enum Item {
     Fn(FnDecl),
     Type(TypeDecl),
     Let(LetStmt),
-    /// Declara el tipo de elemento del store del servidor: `store Post;`.
-    /// Tipa los builtins de estado `guardar(T)` y `todos() -> List<T>`.
-    /// `store nombre: Tipo;` — declara un almacén con nombre. El nombre es un
-    /// valor de primera clase que se pasa a `guardar`/`todos`/`actualizar`/
-    /// `borrar`, de modo que un módulo puede tener varios almacenes.
+    /// `store nombre: Tipo;` — declara un almacén con nombre. El nombre se pasa
+    /// como primer argumento a `save`/`all`/`update`/`remove`, de modo que un
+    /// módulo puede tener todos los almacenes que necesite.
     Store {
         name: String,
         name_span: Span,

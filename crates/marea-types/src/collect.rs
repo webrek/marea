@@ -191,7 +191,7 @@ impl Checker {
             }
             // Los campos `__id` y `__doc` los usa la capa de persistencia: un
             // registro que los declare produce una tabla con la columna repetida
-            // y todo `guardar` revienta en runtime.
+            // y todo `save` revienta en runtime.
             if let Ty::Record(campos) = &elem {
                 for (campo, _) in campos {
                     if campo == "__id" || campo == "__doc" {

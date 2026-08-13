@@ -58,7 +58,7 @@ pub fn lookup(name: &str) -> Option<Ty> {
             ret: Box::new(Ty::Html),
             location: None,
         }),
-        // Estado del servidor: 'guardar(x)' añade al store; 'todos()' lo lee.
+        // Estado del servidor: 'save(a, x)' añade al almacén; 'all(a)' lo lee.
         "save" => Some(Ty::Fn {
             params: vec![Ty::Unknown],
             ret: Box::new(Ty::Unit),

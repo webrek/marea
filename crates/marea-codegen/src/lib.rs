@@ -1021,8 +1021,8 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
         Expr::Call { callee, args, .. } => {
             let a: Vec<String> = args.iter().map(|x| emit_expr(x, reactive)).collect();
             let callee_ts = emit_expr(callee, reactive);
-            // Builtins SÍNCRONOS (no se 'await'). Los de estado (guardar/todos/
-            // actualizar/borrar) son async (pegan a la BD) y SÍ se awaitan.
+            // Builtins SÍNCRONOS (no se 'await'). Los de estado (save/all/
+            // update/remove) son async (pegan a la BD) y SÍ se awaitan.
             let is_sync_builtin = matches!(
                 callee.as_ref(),
                 Expr::Ident { name, .. } if es_sincrono(name)

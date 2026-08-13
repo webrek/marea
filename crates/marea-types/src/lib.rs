@@ -89,11 +89,10 @@ struct Checker {
     /// Alias detectados como cíclicos (Fase A): cortan la resolución recursiva
     /// en Fase B para no desbordar la pila.
     cyclic: std::collections::HashSet<String>,
-    /// Tipo de elemento del store del servidor (Fase A), declarado con `store T;`.
-    /// Tipa `guardar(T)` y `todos() -> List<T>`. `None` si no se declaró.
-    /// Almacenes declarados con `store nombre: T;`, por nombre. Un módulo puede
-    /// tener varios: el nombre se pasa como primer argumento a los builtins de
-    /// estado, así que `todos(productos)` y `todos(ordenes)` son distintos.
+    /// Almacenes declarados con `store nombre: T;`, por nombre (Fase A). Un
+    /// módulo puede tener varios: el nombre se pasa como primer argumento a los
+    /// builtins de estado, así que `all(productos)` y `all(ordenes)` son
+    /// distintos, y `save(ordenes, p)` con un Producto es un error de tipos.
     stores: HashMap<String, Ty>,
     /// Variables de nivel superior (`let`/`reactive` de módulo) y su mutabilidad.
     /// Visibles desde cualquier función; son el estado reactivo de la app.
