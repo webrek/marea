@@ -537,7 +537,10 @@ fn parse_import_simple() {
     // El span de cada nombre lo señala a él, para poder subrayarlo si el módulo
     // destino resulta no exportarlo.
     assert_eq!(&src[i.names[0].span.start..i.names[0].span.end], "getUser");
-    assert_eq!(&src[i.path_span.start..i.path_span.end], "\"./usuarios.mar\"");
+    assert_eq!(
+        &src[i.path_span.start..i.path_span.end],
+        "\"./usuarios.mar\""
+    );
     // Los imports NO son items: quien recorre `items` ve lo mismo que antes.
     assert_eq!(m.items.len(), 1);
 }

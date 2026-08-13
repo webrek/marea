@@ -1730,9 +1730,8 @@ fn la_identidad_lleva_el_tipo_de_la_politica() {
 #[test]
 fn la_identidad_es_inmutable() {
     // Quién eres no se reasigna: lo decidió la @session con el token.
-    let errs = con_identidad(
-        "@server(u: Usuario) fn publicar() { u = Usuario { nombre: \"otro\" }; }",
-    );
+    let errs =
+        con_identidad("@server(u: Usuario) fn publicar() { u = Usuario { nombre: \"otro\" }; }");
     assert!(has_code(&errs, "E_ASSIGN_IMMUTABLE"), "{:?}", codes(&errs));
 }
 
