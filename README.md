@@ -531,6 +531,35 @@ render al DOM, **sin Node ni tipos**) y `runtime.ts`/`server.ts`/`serve.ts`
 `reactive mut` de nivel superior es el estado compartido entre la vista y los
 manejadores; `vista()` se monta en un `effect` que re-pinta `#app` al cambiar.
 
+## Qué NO es Marea
+
+Marea vuelve primitivas del lenguaje las dos fronteras de la web. **No es un
+framework**, y hay cosas que deliberadamente no va a hacer:
+
+- **Enrutado.** Nada de `/modelo/:id` ni 404. Un programa de Marea genera una
+  app, no un sitio.
+- **Metadatos y SEO.** Título, canónicas, Open Graph, sitemap, robots.
+- **Renderizado en servidor por página**, con su hidratación.
+
+No es que falten: es que meterlas sería rehacer Next, Astro o Phoenix, y hacerlo
+peor durante años. Y hay un motivo más concreto: en cuanto un lenguaje trae su
+propio enrutador, deja de poder usarse **desde** otro. Hoy la salida de Marea se
+importa desde un componente de Next, y eso es una propiedad que vale la pena
+conservar.
+
+Esto salió de un inventario real. El primer proyecto que usó Marea para algo
+serio —un sitio de comparación de precios— llegó a que Marea generase todo su
+marcado, y midió lo que le quedaba de React: cinco rutas dinámicas, cinco páginas
+con metadatos propios y seis componentes de cliente. Los seis componentes **sí**
+son nuestros (necesitan runtime puro de cliente, cierres y eventos). Las rutas y
+los metadatos no, y ese proyecto vive de aparecer en Google: cambiarle un
+enrutador maduro por uno nuestro recién nacido sería arriesgar su tráfico a cambio
+de nada que un usuario note.
+
+La conclusión, que sirve de guía: **Marea genera el marcado y la lógica; el
+andamio de sitio lo pone otro.** Si algún día existe ese framework sobre Marea,
+mejor que sea un proyecto aparte.
+
 ## Hoja de ruta
 
 - [x] **v0** — Lexer + AST + Parser + CLI

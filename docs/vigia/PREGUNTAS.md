@@ -346,3 +346,80 @@ no un builtin de Marea.
 A mí no me estorba hoy (mi módulo no usa `reactive`), lo reporto porque yo tengo
 `tsc` estricto encima del runtime y ustedes probablemente no: es justo el tipo
 de cosa que este montaje sirve para encontrar.
+
+---
+
+## P7 — Inventario de lo que falta para quitar React del todo
+
+Fecha: 2026-08-13
+
+Victor quiere saber qué hace falta para que Vigía no tenga nada de React. No es
+una petición de que lo implementen: es el inventario medido, para que ustedes
+decidan qué de esto es Marea y qué no. Y para que se vea cuál es el orden
+obligado, que no es el intuitivo.
+
+### Estado, para situar
+
+El marcado de las cinco páginas ya lo dibuja Marea **por defecto** (`?marea=0`
+devuelve el de TypeScript). 56 funciones en `sitio.mar`. Verificado pieza por
+pieza contra la versión anterior: insignias, tarjetas, tablas, cabeceras, dos
+gráficas y el pie, todo idéntico salvo `&#x27;`/`&#39;`.
+
+Lo que React sigue haciendo, contado sobre el código:
+
+| Qué | Cuánto |
+|---|---|
+| Páginas con ruta dinámica | 5 |
+| Endpoints de API | 1 (`/api/alerts`, POST) |
+| `sitemap` y `robots` | 2 |
+| Consultas a Postgres | 12 |
+| Páginas con metadatos propios | 5 |
+| Componentes de cliente | 6 |
+| Tipos de evento distintos | 10 |
+
+### Nivel 1 — lenguaje (ya pedido, lo recojo aquí para que se vea junto)
+
+1. **Runtime puro de cliente** (P4). Sin esto no hay un solo evento.
+2. **`import`** (P5). 56 funciones en un archivo y subiendo.
+3. **Cierres.** Ya salió en R3 por el orden sin `sort`. Pero es más grande de lo
+   que parecía: un manejador de evento **es** una función que se pasa. Sin
+   cierres no hay `onclick` que valga, aunque el runtime ya sea puro.
+
+### Nivel 2 — esto ya no es lenguaje, es framework
+
+4. **Enrutado.** Hoy no hay nada: `build-app` sirve UNA app. Hacen falta rutas
+   con parámetros (`/modelo/:id`) y un 404.
+5. **Metadatos por página**: título, descripción, canónica, Open Graph, JSON-LD,
+   sitemap y robots. **Esto es el negocio de Vigía**, que vive de Google. Si el
+   sitio se migra sin esto, deja de existir para el buscador. Es la razón por la
+   que Next tiene que ser lo ÚLTIMO que se quite, no lo primero.
+6. **Modelo de eventos en el navegador**: enlazar `onclick`/`oninput`/teclado
+   desde Marea al DOM.
+7. **Acceso a datos ajenos.** El más difícil, y el que creo que no ven venir:
+   el `store` de Marea **crea sus propias tablas** (`CREATE TABLE IF NOT
+   EXISTS`). Las de Vigía las escribe **el motor en Go**, no la web:
+   `products`, `listings`, `price_observations`, `discount_assessments`. Sin SQL
+   arbitrario —o sin una forma de declarar un esquema existente— Marea no puede
+   leer sus propios datos. Es un cambio en su modelo de datos, no una función
+   más.
+
+### Nivel 3 — operativo
+
+8. Servir en producción (Cloud Run: puerto, salud, arranque en frío).
+9. Compilar Tailwind. Hoy funciona **por accidente**: Tailwind escanea el `.ts`
+   generado porque vive en `src/`. Si el generado saliera de ahí, las clases
+   desaparecerían del CSS sin que nadie avise.
+10. Páginas de error y redirecciones.
+11. Navegación suave. Sin React, cada clic recarga la página entera. Puede que
+    sea un precio aceptable; conviene decidirlo a propósito y no descubrirlo.
+
+### Lo que les pido concretamente
+
+No que lo hagan. Que me digan **cuáles de estos once son Marea y cuáles no**.
+Porque si el enrutado y los metadatos no van a ser parte del lenguaje, entonces
+"quitar React del todo" no es una meta de esta migración, y conviene saberlo
+ahora y no dentro de mil líneas.
+
+Mi lectura, por si sirve: el 1, 2, 3 y 6 son claramente lenguaje. El 7 es una
+decisión de diseño suya. El 4 y el 5 son un framework encima del lenguaje, y
+puede que ese framework deba ser otro proyecto y no Marea.

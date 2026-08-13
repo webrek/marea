@@ -489,3 +489,93 @@ con `node`, que no comprueba tipos—.
 
 Eso es una laguna nuestra, no tuya. La estamos cerrando con tests que ejecutan lo
 generado; falta la otra mitad, pasarlo por `tsc --strict`, que está en decisión.
+
+---
+
+## R7 — Cuáles son Marea, cuáles no, y por qué "quitar React del todo" no debería ser la meta
+
+Fecha: 2026-08-13
+
+Gracias por medirlo en vez de estimarlo. La respuesta corta al final, pero el
+veredicto de cada uno primero.
+
+### Son Marea
+
+**1. Runtime puro de cliente.** Sí, y es del codegen. Ya estaba en la cola; tu
+inventario lo confirma como la raíz de la que cuelga todo lo demás del navegador.
+
+**2. `import`.** **Ya está hecho.** Desde `56c1c5b` (verificador) y `1888b25`
+(`build`). Te lo conté en R5, pero por tu "56 funciones en un archivo y subiendo"
+deduzco que aún no lo has adoptado. Puedes partir `sitio.mar` hoy mismo, y
+`build`/`build-app` lo aplanan en un solo bundle. No esperes a nada.
+
+**3. Cierres.** Sí, y tu observación es la que reordena el inventario: un
+manejador de evento **es** una función que se pasa. Lo teníamos anotado como "el
+rodeo del `sort`", que lo hacía parecer una comodidad. Es la precondición del 6.
+
+**6. Modelo de eventos.** Sí, y por una razón que no está en tu lista: hoy
+`reactive` está **a medias**. El estado cambia y la vista se re-pinta, pero desde
+la interfaz no hay forma de cambiar el estado. La frontera del tiempo —uno de los
+dos pilares— está construida en un solo sentido. Los eventos no son una función
+más: son la mitad que falta de un pilar.
+
+**7. Acceso a datos ajenos.** Es nuestro, y tienes razón en que no lo veíamos.
+Es una decisión de diseño de verdad, y la formulo así: hoy el `store` **posee**
+sus datos —los crea, manda en el esquema y por eso puede garantizarlo— y tú
+necesitas que los **tome prestados**. Son dos contratos distintos y deben verse
+distintos en el fuente. Algo como:
+
+```marea
+store productos: Producto from "products";   // existe; no la crees, mapéala
+```
+
+Con eso el codegen deja de emitir `CREATE TABLE` y sólo mapea. El precio hay que
+decirlo: la deriva de esquema pasa de imposible a error en ejecución. Es
+aceptable, pero es un cambio en lo que el `store` promete, no una función nueva.
+Anotado como decisión, todavía sin tomar.
+
+### NO son Marea
+
+**4. Enrutado** y **5. Metadatos/SEO.** De acuerdo contigo, y con más convicción
+de la que tú expresas: no es sólo que sean "un framework encima"; es que
+construirlos sería **rehacer Next**, y hacerlo peor durante bastante tiempo.
+
+Los niveles 3 (servir, Tailwind, errores, navegación) tampoco. Son de tu
+proyecto, no del lenguaje.
+
+### Y por eso: "quitar React del todo" no debería ser la meta
+
+Lo dices tú sin decirlo: el 5 **es el negocio de Vigía**. Vives de Google. Un
+sitio migrado sin metadatos, sitemap ni canónicas deja de existir para el
+buscador. Y para cubrir el 5 hay que cubrir el 4, y para eso hay que construir un
+framework de enrutado y renderizado en servidor.
+
+Cambiar Next —que eso lo hace bien y lleva años puliéndolo— por una versión joven
+nuestra pondría en riesgo tu tráfico a cambio de nada que un usuario note.
+
+**La meta honesta de esta migración es la que ya casi tienes:** Marea genera todo
+el marcado y toda la lógica; Next se queda como **cáscara** —enrutado, metadatos,
+servir—. Eso es valioso y está a tu alcance. La retirada total de React es otro
+proyecto, y no es este.
+
+Si algún día alguien construye ese framework sobre Marea, mejor que sea un
+proyecto aparte: el lenguaje tiene que poder usarse desde Next, desde Astro o
+desde un `<script>`, y eso se pierde en cuanto trae su propio enrutador.
+
+### El orden obligado, ya que lo mencionas
+
+`1 → 3 → 6`. El 2 ya está. El 1 y el 3 son ambos precondición del 6, y el 6 es el
+que te quita los **6 componentes de cliente**, que es todo lo que queda de React
+que sí es de Marea. Los 5 de enrutado y los 5 de metadatos se quedan donde están,
+a propósito.
+
+El 7 va por su cuenta y no bloquea nada de lo anterior: hoy lees por las 12
+consultas desde el lado de Next, y eso funciona.
+
+### Una cosa tuya que sí me preocupa
+
+Tu punto 9: Tailwind funciona **por accidente** porque escanea el `.ts` generado
+al vivir en `src/`. Eso no es deuda futura, es una mina hoy: el día que alguien
+mueva el generado, las clases desaparecen del CSS y **nada avisa** —no falla el
+build, se ve mal—. Añade la ruta del generado explícitamente al `content` de
+Tailwind aunque hoy no haga falta. Es una línea y quita un fallo silencioso.
