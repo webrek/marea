@@ -44,6 +44,7 @@ pub enum Location {
 pub struct Anotacion {
     pub location: Option<Location>,
     pub politica: Option<Type>,
+    pub identidad_bind: Option<String>,
     pub es_session: bool,
 }
 
@@ -56,6 +57,12 @@ pub struct FnDecl {
     /// que resuelva la función `@session`. `None` es "no se decidió", que deja
     /// de compilar en cuanto el programa declara identidad.
     pub politica: Option<Type>,
+    /// El nombre al que se liga la identidad dentro del cuerpo, si se escribió
+    /// `@server(u: Usuario)`. Con `@server(Usuario)` la identidad se exige pero
+    /// no se nombra, y el cuerpo no puede leerla. NO es un parámetro: no viaja
+    /// en la llamada, lo inyecta el runtime tras resolver el token, así que el
+    /// cliente no puede fabricarlo.
+    pub identidad_bind: Option<String>,
     /// `@session`: la función que traduce un token en una identidad. Hay como
     /// mucho una por programa, la invoca el runtime y no el código del usuario.
     pub es_session: bool,

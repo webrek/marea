@@ -234,6 +234,7 @@ impl Parser {
             return Ok(Anotacion {
                 location: None,
                 politica: None,
+                identidad_bind: None,
                 es_session: true,
             });
         }
@@ -254,16 +255,29 @@ impl Parser {
         // Política: `@server(Usuario)`. Opcional en la gramática; que falte o no
         // sea aceptable lo decide el verificador, que es quien sabe si el
         // programa declaró identidad.
-        let politica = if self.eat(&TokenKind::LParen) {
-            let t = self.parse_type()?;
+        let mut politica = None;
+        let mut identidad_bind = None;
+        if self.eat(&TokenKind::LParen) {
+            // `@server(u: Usuario)` liga la identidad a un nombre utilizable en
+            // el cuerpo; `@server(Usuario)` la exige sin nombrarla. Se distingue
+            // con un token de adelanto: un IDENT seguido de ':' es el nombre.
+            if matches!(self.peek_kind(), TokenKind::Ident(_))
+                && matches!(
+                    self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                    Some(TokenKind::Colon)
+                )
+            {
+                let (nombre, _) = self.expect_ident("nombre de la identidad")?;
+                self.advance(); // ':'
+                identidad_bind = Some(nombre);
+            }
+            politica = Some(self.parse_type()?);
             self.expect(&TokenKind::RParen, "')' para cerrar la política")?;
-            Some(t)
-        } else {
-            None
-        };
+        }
         Ok(Anotacion {
             location: Some(location),
             politica,
+            identidad_bind,
             es_session: false,
         })
     }
@@ -298,6 +312,7 @@ impl Parser {
         Ok(FnDecl {
             location: anotacion.location,
             politica: anotacion.politica,
+            identidad_bind: anotacion.identidad_bind,
             es_session: anotacion.es_session,
             name,
             params,

@@ -497,3 +497,25 @@ fn el_hueco_respeta_llaves_y_cadenas_anidadas() {
     )
     .is_ok());
 }
+
+#[test]
+fn parse_politica_con_nombre() {
+    // `@server(u: Usuario)` liga la identidad a un nombre usable en el cuerpo.
+    let m = parse("@server(u: Usuario) fn publicar(t: String) {}").unwrap();
+    let Item::Fn(f) = &m.items[0] else { panic!() };
+    assert_eq!(f.identidad_bind.as_deref(), Some("u"));
+    let Some(Type::Name { name, .. }) = &f.politica else {
+        panic!()
+    };
+    assert_eq!(name, "Usuario");
+    // El binding NO es un parámetro: no viaja en la llamada.
+    assert_eq!(f.params.len(), 1);
+    assert_eq!(f.params[0].name, "t");
+}
+
+#[test]
+fn politica_sin_nombre_no_liga_nada() {
+    let m = parse("@server(Usuario) fn publicar(t: String) {}").unwrap();
+    let Item::Fn(f) = &m.items[0] else { panic!() };
+    assert!(f.identidad_bind.is_none());
+}
