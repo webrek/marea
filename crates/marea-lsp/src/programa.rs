@@ -484,7 +484,12 @@ fn visitar(ruta: PathBuf, profundidad: usize, st: &mut Paseo<'_, '_, '_>) -> Res
         // exporta. Todo elemento de nivel superior exporta: en Marea no hay
         // `pub` porque la unidad de privacidad es el archivo.
         for n in &imp.names {
-            if st.archivos[dep].modulo.items.iter().any(|i| i.name() == n.name) {
+            if st.archivos[dep]
+                .modulo
+                .items
+                .iter()
+                .any(|i| i.name() == n.name)
+            {
                 continue;
             }
             let donde = mostrar(&st.raiz, &st.archivos[dep].ruta);
@@ -518,7 +523,9 @@ fn terminar(raiz: PathBuf, archivos: Vec<EnCurso>) -> Salida {
     // un archivo que no parsea o un import que no resuelve, el verificador vería
     // medio programa y llenaría el editor de nombres sin resolver: exactamente
     // el ruido que se viene a quitar.
-    let bloqueado = archivos.iter().any(|a| !a.sintaxis.is_empty() || !a.resolucion.is_empty());
+    let bloqueado = archivos
+        .iter()
+        .any(|a| !a.sintaxis.is_empty() || !a.resolucion.is_empty());
 
     let mut diags: Vec<Vec<NeutralDiag>> = archivos
         .iter()

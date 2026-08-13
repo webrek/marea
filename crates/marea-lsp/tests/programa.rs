@@ -600,7 +600,10 @@ fn el_completado_ofrece_lo_que_traen_los_imports() {
     }
     // Y las palabras clave de módulos y de bucle.
     for kw in ["import", "from", "for", "in", "store"] {
-        assert!(labels.contains(&kw), "falta la palabra clave {kw}: {labels:?}");
+        assert!(
+            labels.contains(&kw),
+            "falta la palabra clave {kw}: {labels:?}"
+        );
     }
 
     let importado = items

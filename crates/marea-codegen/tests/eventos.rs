@@ -183,7 +183,12 @@ console.log("RESULTADO:" + JSON.stringify({
     // con un SyntaxError en vez de pasar de largo.
     for (quien, runtime, modulo, entrada) in [
         ("node", marea_codegen::runtime_ts(), "runtime.ts", "t.ts"),
-        ("navegador", marea_codegen::browser_rt(), "browser.mjs", "t.mjs"),
+        (
+            "navegador",
+            marea_codegen::browser_rt(),
+            "browser.mjs",
+            "t.mjs",
+        ),
     ] {
         let texto = guion.replace("{RUNTIME}", &format!("./{modulo}"));
         let json = correr(

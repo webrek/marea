@@ -65,7 +65,7 @@ pub fn run(connection: Connection) -> Result<(), BoxError> {
 fn main_loop(connection: &Connection) -> Result<(), BoxError> {
     let mut store = DocumentStore::new();
     let mut cache = Cache::new();
-    let mut publicados: HashSet<Uri> = HashSet::new();
+    let mut publicados: HashSet<String> = HashSet::new();
 
     for msg in &connection.receiver {
         match msg {
@@ -94,7 +94,7 @@ fn handle_notification(
     connection: &Connection,
     store: &mut DocumentStore,
     cache: &mut Cache,
-    publicados: &mut HashSet<Uri>,
+    publicados: &mut HashSet<String>,
     note: lsp_server::Notification,
 ) -> Result<(), BoxError> {
     match note.method.as_str() {
@@ -299,7 +299,7 @@ fn publicar(
     connection: &Connection,
     store: &DocumentStore,
     cache: &mut Cache,
-    publicados: &mut HashSet<Uri>,
+    publicados: &mut HashSet<String>,
     disparador: Option<&Uri>,
 ) -> Result<(), BoxError> {
     let abiertos = buffers(store);
@@ -313,8 +313,11 @@ fn publicar(
         None => true,
     });
 
-    let mut orden: Vec<Uri> = Vec::new();
-    let mut acumulado: HashMap<Uri, (String, Vec<NeutralDiag>)> = HashMap::new();
+    // Se indexa por el TEXTO del uri, no por el `Uri`: lleva un `Cell` dentro
+    // (mutabilidad interior), y una clave que puede mutar es una clave que
+    // puede perderse. `orden` conserva el par para poder emitirlo después.
+    let mut orden: Vec<(String, Uri)> = Vec::new();
+    let mut acumulado: HashMap<String, (String, Vec<NeutralDiag>)> = HashMap::new();
 
     for (uri, doc) in docs {
         let ruta = ruta_de_uri(uri).and_then(|p| p.canonicalize().ok());
@@ -333,7 +336,8 @@ fn publicar(
                 },
                 None => uri.clone(),
             };
-            if let Some((_, diags)) = acumulado.get_mut(&destino) {
+            let clave = destino.as_str().to_string();
+            if let Some((_, diags)) = acumulado.get_mut(&clave) {
                 for d in &archivo.diags {
                     if !diags.contains(d) {
                         diags.push(d.clone());
@@ -341,15 +345,15 @@ fn publicar(
                 }
                 continue;
             }
-            orden.push(destino.clone());
+            orden.push((clave.clone(), destino));
             let propios = (archivo.fuente.clone(), archivo.diags.clone());
-            acumulado.insert(destino, propios);
+            acumulado.insert(clave, propios);
         }
     }
 
-    let mut nuevos: HashSet<Uri> = HashSet::new();
-    for uri in orden {
-        let Some((fuente, diags)) = acumulado.remove(&uri) else {
+    let mut nuevos: HashSet<String> = HashSet::new();
+    for (clave, uri) in orden {
+        let Some((fuente, diags)) = acumulado.remove(&clave) else {
             continue;
         };
         let index = LineIndex::new(&fuente);
@@ -360,16 +364,23 @@ fn publicar(
         // La versión sólo se declara para los archivos que el editor tiene
         // abiertos; de los demás no tenemos ninguna que citar.
         let version = store.get(&uri).map(|d| d.version);
-        nuevos.insert(uri.clone());
+        nuevos.insert(clave);
         send_diagnostics(connection, uri, version, lsp)?;
     }
 
     // Archivos que ya no forman parte de ningún programa abierto: se limpian,
     // o se quedarían subrayados para siempre.
     for viejo in publicados.iter() {
-        if !nuevos.contains(viejo) {
-            send_diagnostics(connection, viejo.clone(), None, Vec::new())?;
+        if nuevos.contains(viejo) {
+            continue;
         }
+        // Se guarda el texto y no el `Uri` porque `Uri` lleva un `Cell` dentro
+        // (mutabilidad interior) y usarlo de clave es un riesgo real: si mutara,
+        // el hash dejaría de encontrarlo. Al limpiar se reconstruye.
+        let Ok(u) = viejo.parse::<Uri>() else {
+            continue;
+        };
+        send_diagnostics(connection, u, None, Vec::new())?;
     }
     *publicados = nuevos;
     Ok(())

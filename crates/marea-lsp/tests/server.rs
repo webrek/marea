@@ -164,13 +164,18 @@ fn ciclo_de_vida_completo_con_diagnosticos() {
         )))
         .unwrap();
 
-    match client.receiver.recv().unwrap() {
-        Message::Response(resp) => {
-            assert_eq!(resp.id, shutdown_id);
-            assert!(resp.error.is_none(), "shutdown no debe fallar: {resp:?}");
+    // El servidor publica diagnósticos POR ARCHIVO, así que entre la petición y
+    // su respuesta pueden llegar varias notificaciones —una por cada módulo del
+    // programa—. Se descartan hasta dar con la respuesta, que es lo que se mide.
+    let resp = loop {
+        match client.receiver.recv().unwrap() {
+            Message::Response(resp) => break resp,
+            Message::Notification(_) => continue,
+            otro => panic!("se esperaba la respuesta de shutdown, fue {otro:?}"),
         }
-        otro => panic!("se esperaba la respuesta de shutdown, fue {otro:?}"),
-    }
+    };
+    assert_eq!(resp.id, shutdown_id);
+    assert!(resp.error.is_none(), "shutdown no debe fallar: {resp:?}");
 
     client
         .sender

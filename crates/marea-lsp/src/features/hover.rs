@@ -58,9 +58,11 @@ fn hover_markdown(salida: &Salida, entrada: &Archivo, offset: usize) -> Option<S
         // Sobre el nombre de un parámetro (de función o de cierre) → `n: T`.
         Node::Param(p) => Some(code_block(&format!("{}: {}", p.name, render_type(&p.ty)))),
         // Un cierre: su firma, que es lo único que tiene.
-        Node::Expr(Expr::Fn { params, return_type, .. }) => {
-            Some(code_block(&closure_signature(params, return_type.as_ref())))
-        }
+        Node::Expr(Expr::Fn {
+            params,
+            return_type,
+            ..
+        }) => Some(code_block(&closure_signature(params, return_type.as_ref()))),
         Node::Item(item) => Some(code_block(&item_signature(item))),
         _ => None,
     }
