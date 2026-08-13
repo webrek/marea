@@ -138,6 +138,7 @@ impl Checker {
                     name_span,
                     ty,
                     span,
+                    ..
                 } => {
                     if store_decls.iter().any(|(n, _, _)| n == name) {
                         self.error(TypeError::new(

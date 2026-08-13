@@ -303,11 +303,34 @@ impl Parser {
             "':' entre el nombre y el tipo del almacén",
         )?;
         let ty = self.parse_type()?;
+        // `from "tabla"`: el almacén mapea una tabla que ya existe en vez de
+        // crear la suya. `from` es un identificador contextual, igual que en
+        // `import`: no hace falta gastar una palabra clave en él.
+        let (tabla_externa, tabla_span) = if matches!(self.peek_kind(), TokenKind::Ident(id) if id == "from")
+        {
+            self.advance();
+            match self.peek_kind().clone() {
+                TokenKind::Str(s) => {
+                    let sp = self.advance().span;
+                    (Some(s), Some(sp))
+                }
+                _ => {
+                    return Err(SyntaxError::new(
+                        "se esperaba el nombre de la tabla entre comillas tras 'from'",
+                        self.peek().span,
+                    ))
+                }
+            }
+        } else {
+            (None, None)
+        };
         let semi = self.expect(&TokenKind::Semicolon, "';' al final de 'store'")?;
         Ok(Item::Store {
             name,
             name_span,
             ty,
+            tabla_externa,
+            tabla_span,
             span: kw.span.to(semi.span),
         })
     }

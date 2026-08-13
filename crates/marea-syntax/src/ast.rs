@@ -51,6 +51,14 @@ pub enum Item {
         name: String,
         name_span: Span,
         ty: Type,
+        /// `store productos: Producto from "products";` — el almacén NO es
+        /// suyo: la tabla ya existe y la escribe otro. Cambia lo que el `store`
+        /// promete: sin esto lo POSEE —la crea y manda en el esquema, y por eso
+        /// puede garantizarlo—; con esto lo TOMA PRESTADO, y la deriva de
+        /// esquema pasa de imposible a error en ejecución. Por eso se ve en el
+        /// fuente y no se deduce.
+        tabla_externa: Option<String>,
+        tabla_span: Option<Span>,
         span: Span,
     },
 }
