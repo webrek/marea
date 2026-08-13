@@ -3,3 +3,7 @@
 .DS_Store
 # Datos de los almacenes: los genera el runtime, no son fuente.
 marea-store.*.log
+
+# El comprobador de TypeScript se instala solo (tools/typecheck/comprobar.sh).
+tools/typecheck/node_modules/
+tools/typecheck/package-lock.json

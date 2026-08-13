@@ -1,0 +1,9 @@
+{
+  "name": "marea-typecheck",
+  "private": true,
+  "description": "Pasa por tsc el TypeScript que Marea escribe y el que genera.",
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5"
+  }
+}

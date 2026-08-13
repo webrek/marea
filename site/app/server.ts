@@ -1,6 +1,8 @@
 // Generado por Marea — lado servidor.
 import { __register, __badRequest, __rpc, print, concat, render, len, text, escape, html, __div, __rem, append, contains, lower, fetch, post, jsonText, jsonInt, jsonFloat, jsonLen, __index, __marea_is, __signal, __memo, __resource, __effect, __store, save, all, update, remove } from "./runtime.ts";
 
+export type Post = { autor: string; texto: string; likes: number };
+
 const publicaciones = __store("publicaciones", { table: "publicaciones", columns: [{ name: "autor", kind: "text" }, { name: "texto", kind: "text" }, { name: "likes", kind: "int" }] });
 
 // fn fila(p: Post, i: Int) -> Html

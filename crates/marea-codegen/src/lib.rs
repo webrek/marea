@@ -124,6 +124,72 @@ fn type_aliases(module: &Module) -> std::collections::HashMap<String, Type> {
         .collect()
 }
 
+/// Las declaraciones `export type` del módulo.
+///
+/// Sin esto, el `.ts` generado referencia nombres que nunca declara: `map_type`
+/// traduce `List<Post>` a `Post[]`, pero `Post` no existía en ninguna parte y
+/// `tsc --strict` cortaba con "Cannot find name 'Post'". Se notó al meter la
+/// salida en un proyecto con TypeScript estricto de verdad.
+///
+/// Una variante nominal se emite con la forma que YA tiene en runtime —el
+/// `{ $tag: "NotFound" }` que el codegen construye—, así que el tipo describe el
+/// valor real y no una aproximación.
+fn emit_type_decls(module: &Module) -> String {
+    fn ts_de(t: &Type, declarados: &HashSet<String>) -> String {
+        match t {
+            Type::Union { variants, .. } => variants
+                .iter()
+                .map(|v| match v {
+                    // Un nombre que el módulo no declara es una variante
+                    // nominal: en runtime es su etiqueta.
+                    Type::Name { name, args, .. }
+                        if args.is_empty()
+                            && !declarados.contains(name)
+                            && !matches!(
+                                name.as_str(),
+                                "Int" | "Float" | "Bool" | "String" | "Html" | "Unit" | "Record"
+                            ) =>
+                    {
+                        format!("{{ $tag: \"{name}\" }}")
+                    }
+                    otro => ts_de(otro, declarados),
+                })
+                .collect::<Vec<_>>()
+                .join(" | "),
+            Type::Record { fields, .. } => {
+                let ps: Vec<String> = fields
+                    .iter()
+                    .map(|f| format!("{}: {}", f.name, ts_de(&f.ty, declarados)))
+                    .collect();
+                format!("{{ {} }}", ps.join("; "))
+            }
+            otro => map_type(otro),
+        }
+    }
+    let declarados: HashSet<String> = module
+        .items
+        .iter()
+        .filter_map(|it| match it {
+            Item::Type(t) => Some(t.name.clone()),
+            _ => None,
+        })
+        .collect();
+    let mut s = String::new();
+    for it in &module.items {
+        if let Item::Type(t) = it {
+            s.push_str(&format!(
+                "export type {} = {};\n",
+                t.name,
+                ts_de(&t.aliased, &declarados)
+            ));
+        }
+    }
+    if !s.is_empty() {
+        s.push('\n');
+    }
+    s
+}
+
 /// Una función con `@server` o `@edge` corre "remota": handler + stub RPC.
 fn is_remote(f: &FnDecl) -> bool {
     // Una `@session` NO se registra como handler: la invoca el runtime con el
@@ -216,20 +282,22 @@ pub fn emit(module: &Module) -> Project {
     // placeholder) no puede corromper la sustitución siguiente.
     let runtime = runtime_de(module);
     let builtins = builtins_de(module);
+    let tipos = emit_type_decls(module);
     let sesion = session_fn(module);
 
     Project {
         runtime,
-        server: emit_server(
-            &remote,
-            &shared,
-            &plain_globals,
-            &type_aliases(module),
-            &store_decls(module),
-            sesion.as_deref(),
-            &builtins,
-        ),
-        client: emit_client(&remote, &local, &plain_globals, &builtins),
+        server: emit_server(&Servidor {
+            remote: &remote,
+            shared: &shared,
+            globals: &plain_globals,
+            aliases: &type_aliases(module),
+            stores: &store_decls(module),
+            sesion: sesion.as_deref(),
+            builtins: &builtins,
+            tipos: &tipos,
+        }),
+        client: emit_client(&remote, &local, &plain_globals, &builtins, &tipos),
         demo: emit_demo(&local),
     }
 }
@@ -270,18 +338,20 @@ pub fn emit_app(module: &Module) -> AppProject {
         .to_string();
     let sesion = session_fn(module);
     let builtins = builtins_de(module);
+    let tipos = emit_type_decls(module);
 
     AppProject {
         runtime: runtime_de(module),
-        server: emit_server(
-            &remote,
-            &shared,
-            &plain_globals,
-            &type_aliases(module),
-            &store_decls(module),
-            sesion.as_deref(),
-            &builtins,
-        ),
+        server: emit_server(&Servidor {
+            remote: &remote,
+            shared: &shared,
+            globals: &plain_globals,
+            aliases: &type_aliases(module),
+            stores: &store_decls(module),
+            sesion: sesion.as_deref(),
+            builtins: &builtins,
+            tipos: &tipos,
+        }),
         serve,
         client_js: emit_client_js(
             &remote,
@@ -683,18 +753,39 @@ fn js_validator_guarded(
     }
 }
 
-fn emit_server(
-    remote: &[&FnDecl],
-    shared: &[&FnDecl],
-    globals: &[&LetStmt],
-    aliases: &std::collections::HashMap<String, Type>,
-    stores: &[(String, String)],
-    sesion: Option<&str>,
-    builtins: &str,
-) -> String {
+/// Lo que necesita el emisor del bundle de servidor. Es un struct y no ocho
+/// parámetros sueltos porque ya iba por ocho: cada frontera nueva del lenguaje
+/// —el store con nombre, la política, los tipos emitidos— le añadió el suyo, y
+/// en una llamada posicional de ocho el siguiente error es mudo.
+struct Servidor<'a> {
+    remote: &'a [&'a FnDecl],
+    shared: &'a [&'a FnDecl],
+    globals: &'a [&'a LetStmt],
+    aliases: &'a std::collections::HashMap<String, Type>,
+    stores: &'a [(String, String)],
+    /// Nombre de la `@session` del programa, si la hay.
+    sesion: Option<&'a str>,
+    /// La lista de importación del runtime, ya ajustada a este módulo.
+    builtins: &'a str,
+    /// Las declaraciones `export type` del módulo.
+    tipos: &'a str,
+}
+
+fn emit_server(s_: &Servidor) -> String {
+    let Servidor {
+        remote,
+        shared,
+        globals,
+        aliases,
+        stores,
+        sesion,
+        builtins,
+        tipos,
+    } = *s_;
     let mut s = String::new();
     s.push_str("// Generado por Marea — lado servidor.\n");
     s.push_str(&format!("import {} from \"./runtime.ts\";\n\n", builtins));
+    s.push_str(tipos);
     // Un almacén por `store nombre: T;`. Vive solo aquí: el verificador ya
     // impide usar el estado del servidor fuera de @server.
     for (nombre, esquema) in stores {
@@ -764,7 +855,15 @@ fn emit_server(
             None => ("__args", false, String::new()),
         };
         if delante {
-            pass.insert(0, "__identidad".to_string());
+            // El transporte la tipa `unknown` —viene de un resolutor que el
+            // runtime no conoce—, pero AQUÍ sí se sabe qué es: la política lo
+            // dice, y el runtime ya comprobó que resolvió antes de llamar. Sin
+            // la afirmación, `tsc --strict` corta con "Argument of type
+            // 'unknown' is not assignable".
+            let como = exige_identidad(f)
+                .map(|t| format!(" as {}", map_type(t)))
+                .unwrap_or_default();
+            pass.insert(0, format!("__identidad{como}"));
         }
         s.push_str(&format!(
             "__register(\"{}\", ({recibe}) => {{ if (__args.length !== {n}) __badRequest(\"aridad\");{checks} return {}({}); }}{resolutor});\n\n",
@@ -781,10 +880,12 @@ fn emit_client(
     local: &[&FnDecl],
     globals: &[&LetStmt],
     builtins: &str,
+    tipos: &str,
 ) -> String {
     let mut s = String::new();
     s.push_str("// Generado por Marea — lado cliente.\n");
     s.push_str(&format!("import {} from \"./runtime.ts\";\n\n", builtins));
+    s.push_str(tipos);
     let no_reactive: HashSet<String> = HashSet::new();
     for l in globals {
         s.push_str(&format!(
@@ -897,7 +998,8 @@ fn emit_stub(f: &FnDecl) -> String {
         .return_type
         .as_ref()
         .map(map_type)
-        .unwrap_or_else(|| "unknown".to_string());
+        // Sin retorno declarado: `void` es lo que la función devuelve de verdad.
+        .unwrap_or_else(|| "void".to_string());
     format!(
         "// stub generado para la función @server '{name}' (cruza la frontera por RPC)\n\
          async function {name}({params}): Promise<{ret}> {{\n  \
@@ -1327,10 +1429,16 @@ fn map_binop(op: BinOp) -> &'static str {
 
 fn map_type(t: &Type) -> String {
     match t {
-        // `List<T>` -> `T[]` (arreglo TS). Sin args, una lista genérica.
+        // `List<T>` -> `T[]` (arreglo TS). Sin args, el elemento es el `Unknown`
+        // de Marea, que se traduce `any` y NO `unknown`: son opuestos. El
+        // `Unknown` de Marea es el comodín que absorbe operaciones —subtipo de
+        // todo, para no encadenar errores—, mientras que el `unknown` de TS es
+        // el tipo cima, al que no se le puede asignar nada. Con `unknown[]`, un
+        // `fn cabeza(xs: List) -> Int` emitía un retorno que no encajaba con su
+        // propia firma.
         Type::Name { name, args, .. } if name == "List" => match args.first() {
             Some(elem) => format!("{}[]", map_type(elem)),
-            None => "unknown[]".to_string(),
+            None => "any[]".to_string(),
         },
         // Otros genéricos: traducir los argumentos en vez de descartarlos.
         Type::Name { name, args, .. } if !args.is_empty() => {

@@ -64,7 +64,9 @@ fn el_handler_con_politica_se_registra_con_su_resolutor() {
     // La identidad llega por el segundo parámetro del envoltorio (la pone el
     // runtime) y se reenvía como PRIMER argumento de la función del usuario.
     contiene(&r, "(__args, __identidad) =>");
-    contiene(&r, "return publicar(__identidad, __args[0]);");
+    // La identidad va DELANTE de lo que manda el cliente, y con su tipo
+    // afirmado: el transporte la tipa `unknown` y aquí sí se sabe qué es.
+    contiene(&r, "return publicar(__identidad as Usuario, __args[0]);");
 }
 
 #[test]
@@ -100,7 +102,7 @@ fn la_politica_sin_nombre_recibe_igual_la_identidad() {
     let s = &p.server;
     contiene(s, "async function borrar(__identidad: Usuario, i: number)");
     let r = registro(s, "borrar");
-    contiene(&r, "return borrar(__identidad, __args[0]);");
+    contiene(&r, "return borrar(__identidad as Usuario, __args[0]);");
 }
 
 #[test]

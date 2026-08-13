@@ -40,6 +40,18 @@ jobs:
       - name: Tests
         run: cargo test --workspace
 
+      # `runtime.ts` son ~1200 líneas de TypeScript que se copian tal cual a cada
+      # proyecto generado, y hasta hoy nunca habían pasado por el compilador de
+      # TypeScript: las escribíamos como TS y las tratábamos como texto. Los
+      # tests las ejecutan con node, que no mira tipos, así que dos fallos de
+      # portada vivieron ahí sin que nada los viera —el builtin `fetch` tapando
+      # al del entorno, y `.append()` sobre un `Set`—. Los encontró un consumidor
+      # externo que sí tenía tsc encima; esto los habría cazado al escribirlos.
+      - name: TypeScript (el que escribimos y el que generamos)
+        run: |
+          cargo build --release
+          ./tools/typecheck/comprobar.sh
+
       # El compilador es 100% std salvo el LSP; esto falla si a un crate del
       # compilador se le cuela una dependencia externa.
       - name: El compilador sigue sin dependencias externas
