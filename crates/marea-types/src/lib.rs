@@ -21,6 +21,7 @@ pub use ty::Ty;
 use marea_syntax::ast::{
     BinOp, Block, ElseBranch, Expr, FnDecl, Item, Location, Module, Pattern, Stmt, Type, UnaryOp,
 };
+use marea_syntax::builtins::es_sincrono;
 use marea_syntax::span::Span;
 use std::collections::HashMap;
 
@@ -879,7 +880,7 @@ impl Checker {
         let Expr::Ident { name, .. } = callee.as_ref() else {
             return None;
         };
-        if es_builtin_sincrono(name) {
+        if es_sincrono(name) {
             return None;
         }
         let sig = self.fns.get(name)?;
@@ -1182,7 +1183,7 @@ impl Checker {
         // del usuario se compila a `async`.
         if let Some(ctx) = self.init_context {
             let nombre = callee_name(callee);
-            if !es_builtin_sincrono(&nombre) {
+            if !es_sincrono(&nombre) {
                 self.error(TypeError::new(
                     "E_BOUNDARY_IN_INIT",
                     format!(
@@ -1204,20 +1205,20 @@ impl Checker {
             // navegador la llamada la haría el cliente (otro origen, otras
             // credenciales, y CORS decidiendo por ti), que no es lo que el
             // programa dice. Además la lista blanca de destinos es del servidor.
-            if matches!(name.as_str(), "fetch" | "post") {
-                if !matches!(
+            if matches!(name.as_str(), "fetch" | "post")
+                && !matches!(
                     self.current_location,
                     Some(Location::Server) | Some(Location::Edge)
-                ) {
-                    self.error(TypeError::new(
-                        "E_RED_OFF_SERVER",
-                        format!(
-                            "'{name}' sale a la red y sólo puede usarse en una función \
-                             @server; envuélvelo en una y llámala por RPC"
-                        ),
-                        span,
-                    ));
-                }
+                )
+            {
+                self.error(TypeError::new(
+                    "E_RED_OFF_SERVER",
+                    format!(
+                        "'{name}' sale a la red y sólo puede usarse en una función \
+                         @server; envuélvelo en una y llámala por RPC"
+                    ),
+                    span,
+                ));
             }
             if name == "text" {
                 // aTexto sólo tiene sentido sobre escalares; un Record/List daría
@@ -1729,9 +1730,8 @@ impl Checker {
             .reduce(|acc, t| {
                 if matches!(acc, Ty::Unknown) {
                     t
-                } else if matches!(t, Ty::Unknown) || acc == t {
-                    acc
-                } else if self.is_subtype(&t, &acc) {
+                // `is_subtype` es reflexiva, así que esto ya cubre `acc == t`.
+                } else if matches!(t, Ty::Unknown) || self.is_subtype(&t, &acc) {
                     acc
                 } else if self.is_subtype(&acc, &t) {
                     t
@@ -2201,19 +2201,6 @@ impl Checker {
 /// lenguaje (no se pueden llamar desde un `.mar`), pero sí ocupan el espacio de
 /// nombres del archivo generado: declarar uno produce un `const`/`function` que
 /// redeclara el import y el archivo entero deja de cargar.
-/// Builtins que el codegen emite SIN `await` (ver `is_sync_builtin` en
-/// `marea-codegen`). Las dos listas deben coincidir: si aquí sobra un nombre se
-/// generará un `await` en un contexto síncrono, y si falta se rechazará código
-/// válido.
-fn es_builtin_sincrono(name: &str) -> bool {
-    matches!(
-        name,
-        "print" | "concat" | "render" | "len" | "text" | "escape" | "html"
-            | "concat" | "append" | "len" | "contains" | "lower"
-            | "jsonText" | "jsonInt" | "jsonFloat" | "jsonLen"
-    )
-}
-
 fn es_interno_del_runtime(name: &str) -> bool {
     matches!(
         name,

@@ -26,9 +26,16 @@ fn hay(cmd: &str, arg: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Una llamada a comparar entre los dos backends: nombre de la función y sus
+/// argumentos.
+type Llamada<'a> = (&'a str, &'a [i32]);
+
+/// Un caso del diferencial: etiqueta, fuente `.mar` y las llamadas a comparar.
+type Caso<'a> = (&'a str, &'a str, &'a [Llamada<'a>]);
+
 /// Programas en el subconjunto que ambos backends aceptan, con funciones puras
 /// que devuelven Int (los Bool como 0/1) para poder comparar de forma uniforme.
-const CASOS: &[(&str, &str, &[(&str, &[i32])])] = &[
+const CASOS: &[Caso] = &[
     (
         "control",
         "fn fib(n: Int) -> Int { if n < 2 { return n; } return fib(n - 1) + fib(n - 2); }\n\

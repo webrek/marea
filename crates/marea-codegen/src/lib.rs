@@ -9,6 +9,7 @@
 //! end-to-end y validar el diseño.
 
 use marea_syntax::ast::*;
+use marea_syntax::builtins::es_sincrono;
 use std::collections::HashSet;
 
 /// El runtime TypeScript embebido (transporte RPC + builtins).
@@ -107,41 +108,6 @@ pub fn emit(module: &Module) -> Project {
     }
 }
 
-/// Sustituye varios centinelas en `tpl` en una sola pasada de izquierda a
-/// derecha. A diferencia de encadenar `str::replace`, el texto inyectado se
-/// copia a la salida y no se vuelve a inspeccionar, así que un reemplazo no
-/// puede introducir (ni chocar con) el centinela de otro.
-fn fill_template(tpl: &str, subs: &[(&str, &str)]) -> String {
-    let mut out = String::with_capacity(tpl.len());
-    let mut rest = tpl;
-    while !rest.is_empty() {
-        // El centinela que aparezca más a la izquierda en lo que queda.
-        let next = subs
-            .iter()
-            .filter_map(|(pat, val)| rest.find(pat).map(|idx| (idx, pat.len(), *val)))
-            .min_by_key(|(idx, _, _)| *idx);
-        match next {
-            Some((idx, pat_len, val)) => {
-                out.push_str(&rest[..idx]);
-                out.push_str(val);
-                rest = &rest[idx + pat_len..];
-            }
-            None => {
-                out.push_str(rest);
-                break;
-            }
-        }
-    }
-    out
-}
-
-/// El runtime Node con los centinelas del store sustituidos (compartido por
-/// `emit` y `emit_app`).
-fn build_node_runtime(module: &Module) -> String {
-
-    RUNTIME_TS.to_string()
-}
-
 /// Genera una app web COMPLETA a partir de un módulo: servidor Node (runtime +
 /// handlers `@server` + entry) y cliente de navegador (HTML + JS con cliente RPC,
 /// núcleo reactivo y render al DOM). Las `reactive` de nivel superior se vuelven
@@ -193,7 +159,7 @@ pub fn emit_app(module: &Module) -> AppProject {
         .to_string();
 
     AppProject {
-        runtime: build_node_runtime(module),
+        runtime: RUNTIME_TS.to_string(),
         server: emit_server(&remote, &shared, &plain_globals, &type_aliases(module), &store_decls(module)),
         serve,
         client_js: emit_client_js(&remote, &local, &top_reactives, &reactive_names, &plain_globals),
@@ -315,37 +281,6 @@ const APP_HTML: &str = "<!doctype html>\n\
 
 /// Firma del esquema del `store T;` del módulo (nombre + campos), para nombrar
 /// el archivo de persistencia. `None` si no hay store.
-fn store_signature(module: &Module) -> Option<String> {
-    let store_ty = module.items.iter().find_map(|it| match it {
-        Item::Store { ty, .. } => Some(ty),
-        _ => None,
-    })?;
-    Some(type_signature(store_ty, module))
-}
-
-fn type_signature(ty: &Type, module: &Module) -> String {
-    match ty {
-        Type::Record { fields, .. } => {
-            let names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
-            format!("rec-{}", names.join("-"))
-        }
-        Type::Name { name, .. } => {
-            // Resuelve un alias a registro para incluir sus campos en la firma.
-            let aliased = module.items.iter().find_map(|it| match it {
-                Item::Type(t) if &t.name == name => Some(&t.aliased),
-                _ => None,
-            });
-            if let Some(Type::Record { fields, .. }) = aliased {
-                let names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
-                format!("{name}-{}", names.join("-"))
-            } else {
-                name.clone()
-            }
-        }
-        Type::Union { .. } => "union".to_string(),
-    }
-}
-
 /// Los almacenes del módulo: (nombre, literal JS de su esquema).
 fn store_decls(module: &Module) -> Vec<(String, String)> {
     module
@@ -807,19 +742,10 @@ fn es_recurso(e: &Expr) -> bool {
     match e {
         Expr::Call { callee, .. } => matches!(
             callee.as_ref(),
-            Expr::Ident { name, .. } if !is_sync_builtin_name(name)
+            Expr::Ident { name, .. } if !es_sincrono(name)
         ),
         _ => false,
     }
-}
-
-fn is_sync_builtin_name(name: &str) -> bool {
-    matches!(
-        name,
-        "print" | "concat" | "render" | "len" | "text" | "escape" | "html"
-            | "concat" | "append" | "len" | "contains" | "lower"
-            | "jsonText" | "jsonInt" | "jsonFloat" | "jsonLen"
-    )
 }
 
 fn emit_stmt(stmt: &Stmt, indent: usize, reactive: &HashSet<String>) -> String {
@@ -1059,10 +985,7 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
             // actualizar/borrar) son async (pegan a la BD) y SÍ se awaitan.
             let is_sync_builtin = matches!(
                 callee.as_ref(),
-                Expr::Ident { name, .. }
-                    if matches!(name.as_str(), "print" | "concat" | "render" | "len" | "text" | "escape" | "html"
-                    | "concat" | "append" | "len" | "contains" | "lower"
-                    | "jsonText" | "jsonInt" | "jsonFloat" | "jsonLen")
+                Expr::Ident { name, .. } if es_sincrono(name)
             );
             if is_sync_builtin {
                 format!("{}({})", callee_ts, a.join(", "))
@@ -1259,20 +1182,23 @@ fn js_string(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::fill_template;
+    use super::*;
 
+    /// El emisor y el verificador tienen que estar de acuerdo en qué builtin es
+    /// síncrono: si discrepan, o se emite `await` donde no toca o se rechaza
+    /// código válido. Ahora leen la misma lista, y esto lo fija.
     #[test]
-    fn fill_template_no_reescanea_lo_inyectado() {
-        // El valor inyectado por A contiene el centinela de B: en una sola pasada
-        // NO debe volver a sustituirse (a diferencia de encadenar str::replace).
-        let tpl = "x=A; y=B;";
-        let out = fill_template(tpl, &[("A", "B"), ("B", "Z")]);
-        assert_eq!(out, "x=B; y=Z;");
-    }
+    fn el_await_lo_decide_la_lista_compartida() {
+        let no_reactive = HashSet::new();
+        let m = marea_syntax::parse("fn f() -> Int { return len(concat(\"a\", \"b\")); }").unwrap();
+        let Item::Fn(f) = &m.items[0] else { panic!() };
+        let Stmt::Return { value: Some(e), .. } = &f.body.stmts[0] else { panic!() };
+        assert_eq!(emit_expr(e, &no_reactive), "len(concat(\"a\", \"b\"))");
 
-    #[test]
-    fn fill_template_respeta_el_orden_izquierda_a_derecha() {
-        let out = fill_template("__P1__ medio __P2__", &[("__P1__", "uno"), ("__P2__", "dos")]);
-        assert_eq!(out, "uno medio dos");
+        let m = marea_syntax::parse("@server fn g() { print(1); }\n@client fn h() { g(); }")
+            .unwrap();
+        let Item::Fn(h) = &m.items[1] else { panic!() };
+        let Stmt::Expr(e) = &h.body.stmts[0] else { panic!() };
+        assert!(emit_expr(e, &no_reactive).starts_with("(await "));
     }
 }

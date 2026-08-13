@@ -5,6 +5,7 @@
 //! tiempo (reactividad). Este crate cubre el primer hito: de texto a AST.
 
 pub mod ast;
+pub mod builtins;
 pub mod error;
 pub mod lexer;
 pub mod parser;
