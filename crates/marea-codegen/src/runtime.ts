@@ -43,13 +43,83 @@ export function puerto(): number {
 // Tope del cuerpo RPC (configurable) para no acumular memoria sin límite.
 const MAREA_MAX_BODY = __envInt("MAREA_MAX_BODY", 1_048_576); // 1 MiB
 
-type Handler = (args: unknown[]) => unknown | Promise<unknown>;
+// El segundo parámetro es la identidad ya resuelta: la pasa el runtime, nunca
+// el cliente. Los handlers sin política la ignoran.
+type Handler = (args: unknown[], identidad?: unknown) => unknown | Promise<unknown>;
 // Tabla sin prototipo: así `fn` no puede resolver a méall heredados de
 // Object.prototype (constructor/toString/…) y solo alcanza handlers reales.
 const __handlers: Record<string, Handler> = Object.create(null);
 
-export function __register(name: string, fn: Handler): void {
+// --------------------------------------------------------------------------
+// POLÍTICA: quién puede cruzar la frontera
+//
+// El compilador ya obliga a que cada handler diga a quién deja llegar
+// (`@server(Usuario)` o `@server(Public)`). Eso, por sí solo, es una garantía de
+// COMPILACIÓN: el endpoint seguiría atendiendo a cualquiera. Aplicarla es cosa
+// de aquí — sacar el token de la petición, resolverlo con la `@session` del
+// programa y no ejecutar el cuerpo si no hay identidad.
+//
+// QUÉ CUENTA COMO IDENTIDAD. La `@session` devuelve una unión (`Usuario |
+// NoAutorizado`) y el codegen representa una variante nominal como
+// `{ $tag: "NoAutorizado" }`; el lexer no admite '$' en un identificador, así
+// que ningún registro del usuario puede fabricar ese campo. La identidad, en
+// cambio, es siempre un tipo DECLARADO —el verificador exige que la política
+// nombre un alias del programa—, es decir un registro o un escalar. De ahí la
+// regla, que es la que se documenta y la única que aplica el runtime:
+//
+//     autorizado  <=>  el valor existe y NO es una variante etiquetada
+//
+// Se elige así, y no por lista de fallos conocidos, porque falla CERRADO: una
+// variante nueva (`Caducado`, `Bloqueado`) deniega sin tocar el runtime, y un
+// resolutor que se sale por un camino sin `return` devuelve `undefined`, que
+// tampoco autoriza.
+type Resolutor = (token: string) => unknown | Promise<unknown>;
+const __politicas: Record<string, Resolutor> = Object.create(null);
+
+export function __register(name: string, fn: Handler, resolutor?: Resolutor): void {
   __handlers[name] = fn;
+  if (resolutor !== undefined) __politicas[name] = resolutor;
+}
+
+export function __esIdentidad(v: unknown): boolean {
+  if (v === null || v === undefined) return false;
+  if (typeof v === "object" && typeof (v as Record<string, unknown>).$tag === "string") {
+    return false;
+  }
+  return true;
+}
+
+// El token viaja en `authorization: Bearer <t>` y, si no está ahí, en la cookie
+// `marea_session` —que es la vía del navegador: la adjunta sola en una petición
+// al mismo origen, sin que el stub generado tenga que cambiar—. Que la cookie
+// sea automática es justo lo que abre el CSRF, así que esta ruta se apoya en las
+// defensas que ya tiene el endpoint (content-type JSON obligatorio y Origin
+// comprobado); marca la cookie SameSite cuando la emitas.
+function __tokenDe(req: http.IncomingMessage): string {
+  const auth = req.headers["authorization"];
+  if (typeof auth === "string") {
+    const m = /^bearer[ \t]+(.+)$/i.exec(auth.trim());
+    if (m) return m[1].trim();
+  }
+  const cookie = req.headers["cookie"];
+  if (typeof cookie === "string") {
+    for (const trozo of cookie.split(";")) {
+      const i = trozo.indexOf("=");
+      if (i === -1) continue;
+      if (trozo.slice(0, i).trim() !== "marea_session") continue;
+      let v = trozo.slice(i + 1).trim();
+      // RFC 6265 permite el valor entre comillas.
+      if (v.length >= 2 && v.startsWith('"') && v.endsWith('"')) v = v.slice(1, -1);
+      try {
+        return decodeURIComponent(v);
+      } catch {
+        return v;
+      }
+    }
+  }
+  // Sin token la `@session` recibe "" y decide ella: el runtime no adivina qué
+  // es una credencial válida, que es precisamente lo que el programa declara.
+  return "";
 }
 
 /// Error de validación del límite: lo provoca una petición mal formada, no un
@@ -200,8 +270,32 @@ export function startServer(): Promise<void> {
           res.end(JSON.stringify({ error: "petición mal formada" }));
           return;
         }
+        // La política se aplica ANTES del cuerpo: si el token no resuelve a una
+        // identidad, el handler no llega a ejecutarse (ni sus efectos).
+        let __identidad: unknown = undefined;
+        const resolutor = __politicas[fn];
+        if (resolutor !== undefined) {
+          let quien: unknown;
+          try {
+            quien = await resolutor(__tokenDe(req));
+          } catch (e) {
+            // Que el resolutor reviente no autoriza a nadie; el detalle se queda
+            // en el log del servidor.
+            console.error("[marea] la @session falló:", e);
+            quien = undefined;
+          }
+          if (!__esIdentidad(quien)) {
+            // Misma respuesta para "sin token", "token inválido" y "la @session
+            // falló": distinguirlas sería un oráculo con el que ir probando.
+            res.statusCode = 401;
+            res.setHeader("www-authenticate", "Bearer");
+            res.end(JSON.stringify({ error: "no autorizado" }));
+            return;
+          }
+          __identidad = quien;
+        }
         try {
-          const result = await handler(args as unknown[]);
+          const result = await handler(args as unknown[], __identidad);
           res.setHeader("content-type", "application/json");
           res.end(JSON.stringify({ ok: result }));
         } catch (e) {

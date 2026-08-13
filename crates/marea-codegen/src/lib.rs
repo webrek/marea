@@ -63,14 +63,24 @@ fn is_remote(f: &FnDecl) -> bool {
     !f.es_session && matches!(f.location, Some(Location::Server) | Some(Location::Edge))
 }
 
-pub fn emit(module: &Module) -> Project {
+/// Reparte las funciones del módulo en los tres cubos que consumen los emisores:
+/// `(remotas, locales, compartidas)`.
+///
+/// La `@session` va SÓLO al bundle del servidor aunque no lleve anotación de
+/// ubicación: su cuerpo es quien decide qué token vale, y eso no tiene por qué
+/// viajar al navegador. Va en `shared` porque el servidor sí la necesita —el
+/// runtime la invoca en cada petición con política—, y fuera de `local`, que es
+/// lo que se emite para el cliente.
+fn repartir(module: &Module) -> (Vec<&FnDecl>, Vec<&FnDecl>, Vec<&FnDecl>) {
     let mut remote = Vec::new();
     let mut local = Vec::new();
     // Sin anotación = local desde cualquier lado: va a AMBOS bundles.
     let mut shared = Vec::new();
     for item in &module.items {
         if let Item::Fn(f) = item {
-            if is_remote(f) {
+            if f.es_session {
+                shared.push(f);
+            } else if is_remote(f) {
                 remote.push(f);
             } else {
                 if f.location.is_none() {
@@ -80,6 +90,40 @@ pub fn emit(module: &Module) -> Project {
             }
         }
     }
+    (remote, local, shared)
+}
+
+/// El nombre de la función `@session` del módulo, que es la que el runtime
+/// invoca para traducir un token en una identidad. Hay como mucho una (el
+/// verificador rechaza la segunda).
+fn session_fn(module: &Module) -> Option<String> {
+    module.items.iter().find_map(|it| match it {
+        Item::Fn(f) if f.es_session => Some(f.name.clone()),
+        _ => None,
+    })
+}
+
+/// La política del handler CUANDO exige identidad. `@server(Public)` —y la
+/// ausencia de política— no exigen nada, así que no producen nada emitido: el
+/// handler se registra igual que siempre.
+fn exige_identidad(f: &FnDecl) -> Option<&Type> {
+    match &f.politica {
+        Some(Type::Name { name, .. }) if name == "Public" => None,
+        otra => otra.as_ref(),
+    }
+}
+
+/// Nombre con el que la identidad entra en la función emitida. `@server(u: T)`
+/// lo dice; `@server(T)` exige identidad sin usarla, y entonces se usa un nombre
+/// reservado: el runtime la pasa igual, sólo que el cuerpo no la mira.
+fn nombre_identidad(f: &FnDecl) -> String {
+    f.identidad_bind
+        .clone()
+        .unwrap_or_else(|| "__identidad".to_string())
+}
+
+pub fn emit(module: &Module) -> Project {
+    let (remote, local, shared) = repartir(module);
     // Las globales no reactivas son constantes de módulo: el verificador las
     // declara visibles desde cualquier función, así que deben existir en los dos
     // bundles (antes se descartaban y daban ReferenceError).
@@ -102,6 +146,7 @@ pub fn emit(module: &Module) -> Project {
     // tipo/campo que coincida con otro centinela (p.ej. un campo llamado como el
     // placeholder) no puede corromper la sustitución siguiente.
     let runtime = RUNTIME_TS.to_string();
+    let sesion = session_fn(module);
 
     Project {
         runtime,
@@ -111,6 +156,7 @@ pub fn emit(module: &Module) -> Project {
             &plain_globals,
             &type_aliases(module),
             &store_decls(module),
+            sesion.as_deref(),
         ),
         client: emit_client(&remote, &local, &plain_globals),
         demo: emit_demo(&local),
@@ -122,21 +168,7 @@ pub fn emit(module: &Module) -> Project {
 /// núcleo reactivo y render al DOM). Las `reactive` de nivel superior se vuelven
 /// signals de módulo: el estado de la app vive ahí y la vista se re-pinta sola.
 pub fn emit_app(module: &Module) -> AppProject {
-    let mut remote = Vec::new();
-    let mut local = Vec::new();
-    let mut shared = Vec::new();
-    for item in &module.items {
-        if let Item::Fn(f) = item {
-            if is_remote(f) {
-                remote.push(f);
-            } else {
-                if f.location.is_none() {
-                    shared.push(f);
-                }
-                local.push(f);
-            }
-        }
-    }
+    let (remote, local, shared) = repartir(module);
     let plain_globals: Vec<&LetStmt> = module
         .items
         .iter()
@@ -165,6 +197,7 @@ pub fn emit_app(module: &Module) -> AppProject {
         // recalcularlo aquí haría que el mensaje mintiera si el valor es basura.\n\
         console.log(`[marea] app web en http://127.0.0.1:${puerto()}`);\n"
         .to_string();
+    let sesion = session_fn(module);
 
     AppProject {
         runtime: RUNTIME_TS.to_string(),
@@ -174,6 +207,7 @@ pub fn emit_app(module: &Module) -> AppProject {
             &plain_globals,
             &type_aliases(module),
             &store_decls(module),
+            sesion.as_deref(),
         ),
         serve,
         client_js: emit_client_js(
@@ -582,6 +616,7 @@ fn emit_server(
     globals: &[&LetStmt],
     aliases: &std::collections::HashMap<String, Type>,
     stores: &[(String, String)],
+    sesion: Option<&str>,
 ) -> String {
     let mut s = String::new();
     s.push_str("// Generado por Marea — lado servidor.\n");
@@ -617,7 +652,10 @@ fn emit_server(
         s.push('\n');
         // El transporte ya garantiza que 'args' es un arreglo; aquí exigimos la
         // aridad exacta para que un argumento faltante no se cuele como undefined.
-        let pass: Vec<String> = (0..f.params.len())
+        // La aridad y los guardas cuentan sólo lo que manda el CLIENTE: la
+        // identidad no viaja en la llamada, así que exigirla aquí haría fallar a
+        // todo cliente honesto y la haría, encima, falsificable.
+        let mut pass: Vec<String> = (0..f.params.len())
             .map(|i| format!("__args[{i}]"))
             .collect();
         let n = f.params.len();
@@ -633,8 +671,29 @@ fn emit_server(
                 i + 1
             ));
         }
+        // Un handler con política se registra con el resolutor de identidad. El
+        // runtime lo llama con el token de la petición ANTES que al handler, y si
+        // no resuelve responde 401 sin ejecutar el cuerpo; cuando resuelve, pasa
+        // la identidad como segundo parámetro del envoltorio, que la reenvía como
+        // PRIMER argumento de la función del usuario. Así el `u` de
+        // `@server(u: Usuario)` no puede venir del cliente.
+        let (recibe, delante, resolutor) = match exige_identidad(f) {
+            Some(_) => {
+                let arg = match sesion {
+                    Some(nombre) => nombre.to_string(),
+                    // Sin @session el verificador ya rechaza la política; si aun
+                    // así se llegara aquí, se falla CERRADO en vez de abrir.
+                    None => "() => ({ $tag: \"NoAutorizado\" })".to_string(),
+                };
+                ("__args, __identidad", true, format!(", {arg}"))
+            }
+            None => ("__args", false, String::new()),
+        };
+        if delante {
+            pass.insert(0, "__identidad".to_string());
+        }
         s.push_str(&format!(
-            "__register(\"{}\", (__args) => {{ if (__args.length !== {n}) __badRequest(\"aridad\");{checks} return {}({}); }});\n\n",
+            "__register(\"{}\", ({recibe}) => {{ if (__args.length !== {n}) __badRequest(\"aridad\");{checks} return {}({}); }}{resolutor});\n\n",
             f.name,
             f.name,
             pass.join(", ")
@@ -691,7 +750,7 @@ fn emit_demo(local: &[&FnDecl]) -> String {
 // --- funciones ---
 
 fn emit_fn_def(f: &FnDecl, export: bool) -> String {
-    let params = ts_params(f);
+    let params = ts_params_handler(f);
     let kw = if export {
         "export async function"
     } else {
@@ -729,12 +788,33 @@ fn emit_stub(f: &FnDecl) -> String {
     )
 }
 
+/// Los parámetros que el CLIENTE manda: la firma que ve quien llama. La
+/// identidad no está aquí a propósito —no viaja en la llamada—, así que el stub
+/// RPC no cambia porque un handler pase a exigirla.
 fn ts_params(f: &FnDecl) -> String {
     f.params
         .iter()
         .map(|p| format!("{}: {}", p.name, map_type(&p.ty)))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// Los parámetros de la función tal como se DEFINE en el servidor: la identidad
+/// primero, si la política la exige, y luego los del cliente. Es el mismo orden
+/// que usa el envoltorio de `__register`.
+fn ts_params_handler(f: &FnDecl) -> String {
+    match exige_identidad(f) {
+        Some(politica) => {
+            let mut ps = vec![format!("{}: {}", nombre_identidad(f), map_type(politica))];
+            ps.extend(
+                f.params
+                    .iter()
+                    .map(|p| format!("{}: {}", p.name, map_type(&p.ty))),
+            );
+            ps.join(", ")
+        }
+        None => ts_params(f),
+    }
 }
 
 // --- sentencias ---
@@ -1160,12 +1240,25 @@ fn map_type(t: &Type) -> String {
 }
 
 fn signature_comment(f: &FnDecl) -> String {
-    let loc = match f.location {
-        Some(Location::Server) => "@server ",
-        Some(Location::Client) => "@client ",
-        Some(Location::Edge) => "@edge ",
-        None => "",
+    // La política forma parte de la firma tanto como la ubicación: quien lea el
+    // archivo generado tiene que ver a quién deja entrar cada handler.
+    let mut loc = match f.location {
+        Some(Location::Server) => "@server".to_string(),
+        Some(Location::Client) => "@client".to_string(),
+        Some(Location::Edge) => "@edge".to_string(),
+        None if f.es_session => "@session".to_string(),
+        None => String::new(),
     };
+    if let Some(politica) = &f.politica {
+        let nombrada = match &f.identidad_bind {
+            Some(n) => format!("{n}: "),
+            None => String::new(),
+        };
+        loc.push_str(&format!("({nombrada}{})", type_to_src(politica)));
+    }
+    if !loc.is_empty() {
+        loc.push(' ');
+    }
     let params = f
         .params
         .iter()
