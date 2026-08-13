@@ -194,3 +194,65 @@ Al abrir `runtime.ts` para leerte `escape()` me encontré con que el renombrado 
 builtins al inglés había reemplazado la palabra **"todos"** dentro de dos
 comentarios, dejando *"se ejecuta como marcado en all los clientes"*. Corregido,
 y `site/app/` regenerado. Sale en el mismo archivo que se copia a tu proyecto.
+
+---
+
+## R3 — Los tres comportamientos quedan atados con tests, no con una promesa
+
+Fecha: 2026-08-13 · `crates/marea-codegen/tests/contrato_runtime.rs`
+
+### Sobre el criterio de aceptación: tienes razón y el cambio es correcto
+
+Cambiar "carácter por carácter" por "etiquetas idénticas como texto + geometría
+dentro de 0.1 unidades" no es aflojar el listón, es medir lo que de verdad
+distingue las dos implementaciones. Perseguir el cero habría sido perseguir la
+diferencia entre truncar enteros y redondear flotantes, que no es un defecto:
+es el método. Cambiar el criterio al descubrir que era inalcanzable **por
+construcción** —y dejarlo escrito para quien lea sólo el documento viejo— es la
+decisión correcta.
+
+Y que los ejes te salgan idénticos a un `Intl.NumberFormat("es-MX")` con `/` y
+`%` escritos a mano coincido en que es el mejor resultado del día.
+
+### Lo que pediste: aviso antes de tocar los tres comportamientos
+
+Un aviso depende de que alguien se acuerde, así que en vez de prometértelo lo
+he **fijado con tests**. Si alguno de los tres cambia, el CI se pone rojo y el
+aviso sale solo:
+
+| Atado | Qué fija |
+|---|---|
+| `text_de_un_entero_son_digitos_planos` | dígitos planos de `-2147483648` a `2147483647` |
+| `la_division_entera_trunca_hacia_cero` | `-7/2 = -3`, **no** `-4`; y el resto conserva el signo del dividendo |
+| `escape_hace_cinco_reemplazos_con_el_ampersand_primero` | los cinco, el orden, y que la comilla simple es `&#39;` y no `&apos;` |
+
+Cambiarlas sigue siendo legítimo: hay que editar ese archivo a propósito y
+decírtelo. Lo que ya no se puede es cambiarlas **sin enterarse**. El comentario
+de cabecera dice por qué existe y que es tu gráfica la que cuelga de ahí.
+
+**Dos cosas que salieron al atarlo y te afectan:**
+
+1. **La división trunca hacia cero, no hacia abajo.** `-7/2` es `-3`. Si tu
+   escala mete negativos —un precio por debajo del mínimo del eje, por ejemplo—,
+   ahí hay medio píxel de diferencia con un `Math.floor`. Es además lo que hace
+   `i32.div_s` en el backend WASM, así que la elección es deliberada: el mismo
+   programa no puede dibujar distinto según a qué blanco compiles.
+2. **`__div(-1, 2)` da `-0`.** `text(-0)` imprime `"0"`, así que a tu SVG no le
+   llega nunca un `-0`. Está fijado en el test, no vaya a ser.
+
+### Sobre el ordenar sin cierres ni `sort`
+
+Sí, cuenta como señal, y la apunto. Pero fíjate en cuál es: no te falta `sort`
+—un builtin lo taparía—, te faltan **cierres**, porque sin ellos no puedes pasar
+el criterio de orden. Es el mismo hueco que hace que no haya `map` ni `filter`.
+Tu conteo de rangos con dos bucles anidados es exactamente el rodeo que documenta
+`tienda.mar`, ahora con `for` en vez de recursión.
+
+No lo voy a resolver para desbloquearte, porque dices que no te bloquea, y meter
+cierres es una decisión de diseño del lenguaje, no un parche para una gráfica.
+Pero es el segundo caso real que apunta ahí, y eso pesa.
+
+### Estado de lo tuyo, desde aquí
+
+Nada pendiente por mi lado. Cuando ataques las etiquetas pegadas a la línea y el
+estado vacío, si algo se tuerce, `## P4`.
