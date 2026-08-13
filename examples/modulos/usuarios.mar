@@ -1,0 +1,27 @@
+// Quién entra: el tipo de identidad y cómo se traduce un token en ella.
+//
+// Este módulo no importa nada: es una hoja del grafo, y por eso `marea deps` lo
+// lista el primero. Todo lo que se declara aquí arriba se exporta —en Marea no
+// hay `pub`, porque la unidad de privacidad ya es el archivo—, así que `Usuario`,
+// `quien` y `esAdmin` son visibles para quien los importe.
+
+type Usuario = { nombre: String, admin: Bool };
+
+// La @session traduce un token en una identidad. Hay como mucho una por
+// PROGRAMA, no por archivo: cuando el verificador entienda el grafo, tener dos
+// en dos módulos distintos tendrá que ser un error, igual que hoy lo es tener
+// dos en el mismo archivo.
+@session
+fn quien(token: String) -> Usuario | NoAutorizado {
+    if contains(token, "admin") {
+        return Usuario { nombre: "ada", admin: true };
+    }
+    if len(token) > 0 {
+        return Usuario { nombre: "invitado", admin: false };
+    }
+    return NoAutorizado;
+}
+
+fn esAdmin(u: Usuario) -> Bool {
+    return u.admin;
+}

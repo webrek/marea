@@ -1,0 +1,30 @@
+// El catálogo: qué se vende y quién puede tocarlo.
+//
+// Importa la identidad de `usuarios.mar` para poder escribir la política de sus
+// handlers. Fíjate en que la ruta es relativa a ESTE archivo, no al de entrada:
+// un módulo se lee igual esté donde esté el programa que lo usa.
+import { Usuario, esAdmin } from "./usuarios.mar";
+
+type Producto = { titulo: String, precio: Int, stock: Int };
+
+store productos: Producto;
+
+// Publicar exige identidad, y además que sea de administración. La política
+// (`@server(u: Usuario)`) dice quién cruza la frontera; el `if` de dentro dice
+// qué puede hacer una vez cruzada. Lo primero lo comprueba el compilador, lo
+// segundo el programa.
+@server(u: Usuario)
+fn publicar(titulo: String, precio: Int, stock: Int) -> Bool {
+    if !esAdmin(u) {
+        return false;
+    }
+    save(productos, Producto { titulo: titulo, precio: precio, stock: stock });
+    return true;
+}
+
+// Mirar el catálogo es público, dicho a propósito: que algo sea abierto es una
+// decisión que se escribe, no un descuido que se hereda.
+@server(Public)
+fn catalogo() -> List<Producto> {
+    return all(productos);
+}

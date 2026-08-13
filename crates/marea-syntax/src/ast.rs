@@ -9,7 +9,34 @@ use crate::span::Span;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Module {
+    /// Los `import` del archivo, que van todos antes de los demás elementos.
+    /// Viven aparte de `items` a propósito: quien recorre un módulo suelto
+    /// (verificador, codegen) sigue viendo exactamente lo que veía, y sólo el
+    /// resolvedor del grafo mira aquí.
+    pub imports: Vec<Import>,
     pub items: Vec<Item>,
+}
+
+/// `import { getUser, User } from "./usuarios.mar";`
+///
+/// La ruta es siempre relativa al archivo que importa. No hay registro de
+/// paquetes: en v0 un programa es un árbol de archivos, no un ecosistema.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Import {
+    /// La ruta tal cual se escribió, sin normalizar (`"./usuarios.mar"`).
+    /// Resolverla contra el disco es trabajo de `resolve_program`, no del parser.
+    pub path: String,
+    pub path_span: Span,
+    pub names: Vec<ImportName>,
+    pub span: Span,
+}
+
+/// Un nombre dentro de las llaves de un `import`, con su span para poder
+/// señalarlo si el módulo destino no lo exporta.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportName {
+    pub name: String,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -26,6 +53,20 @@ pub enum Item {
         ty: Type,
         span: Span,
     },
+}
+
+impl Item {
+    /// El nombre con el que este elemento se declara —y, por tanto, con el que
+    /// otro módulo puede importarlo. Todo elemento de nivel superior exporta:
+    /// no hay `pub` en Marea, porque un archivo ya es la unidad de privacidad.
+    pub fn name(&self) -> &str {
+        match self {
+            Item::Fn(f) => &f.name,
+            Item::Type(t) => &t.name,
+            Item::Let(l) => &l.name,
+            Item::Store { name, .. } => name,
+        }
+    }
 }
 
 /// Dónde se ejecuta una función. El compilador genera el cruce de frontera

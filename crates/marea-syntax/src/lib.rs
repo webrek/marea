@@ -9,16 +9,22 @@ pub mod builtins;
 pub mod error;
 pub mod lexer;
 pub mod parser;
+pub mod program;
 pub mod span;
 pub mod token;
 
-pub use ast::Module;
+pub use ast::{Import, ImportName, Module};
 pub use error::SyntaxError;
 pub use lexer::Lexer;
 pub use parser::Parser;
+pub use program::{resolve_program, Clase, ModuloResuelto, Program, ProgramError};
 pub use token::{Token, TokenKind};
 
 /// Conveniencia: de fuente a módulo (lex + parse en un paso, fail-fast).
+///
+/// Sigue siendo la puerta de entrada para UN archivo suelto, y así se queda:
+/// medio compilador cuelga de esta firma. Para un programa repartido en varios
+/// archivos está [`resolve_program`], que no la sustituye sino que la usa.
 pub fn parse(src: &str) -> Result<Module, SyntaxError> {
     let tokens = Lexer::tokenize(src)?;
     Parser::parse_module(tokens)
@@ -31,6 +37,12 @@ pub fn parse(src: &str) -> Result<Module, SyntaxError> {
 pub fn parse_recovering(src: &str) -> (Module, Vec<SyntaxError>) {
     match Lexer::tokenize(src) {
         Ok(tokens) => Parser::parse_module_recovering(tokens),
-        Err(e) => (Module { items: Vec::new() }, vec![e]),
+        Err(e) => (
+            Module {
+                imports: Vec::new(),
+                items: Vec::new(),
+            },
+            vec![e],
+        ),
     }
 }

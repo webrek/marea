@@ -2,6 +2,7 @@
 //!
 //!   marea tokens     <archivo.mar>        muestra los tokens del lexer
 //!   marea parse      <archivo.mar>        muestra el AST del parser
+//!   marea deps       <archivo.mar>        resuelve el grafo de módulos
 //!   marea check      <archivo.mar>        verifica los tipos del módulo
 //!   marea build      <archivo.mar> [dir]  transpila a TypeScript
 //!   marea build-wasm <archivo.mar> [out]  compila a WebAssembly (WAT)
@@ -64,6 +65,7 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        "deps" => deps(path),
         "check" => match frontend(&src, false) {
             Ok(_) => {
                 println!("  {} tipa sin errores", path);
@@ -124,6 +126,39 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `marea deps` — resuelve el grafo de módulos y lo imprime en orden
+/// topológico. Es la única forma, de momento, de ver el sistema de módulos
+/// funcionando: el verificador y el codegen siguen trabajando sobre un solo
+/// archivo, así que el grafo no llega todavía más allá de aquí.
+fn deps(path: &str) -> ExitCode {
+    let program = match marea_syntax::resolve_program(std::path::Path::new(path)) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{}", e.render());
+            return ExitCode::FAILURE;
+        }
+    };
+    let n = program.modulos.len();
+    println!(
+        "{} módulo{} en orden topológico (dependencias antes que dependientes):\n",
+        n,
+        if n == 1 { "" } else { "s" }
+    );
+    for m in &program.modulos {
+        println!("  [{}] {}", m.id, m.nombre);
+        for import in &m.modulo.imports {
+            let nombres: Vec<&str> = import.names.iter().map(|n| n.name.as_str()).collect();
+            println!(
+                "        import {{ {} }} from \"{}\"",
+                nombres.join(", "),
+                import.path
+            );
+        }
+    }
+    println!("\nentrada: {}", program.entrada().nombre);
+    ExitCode::SUCCESS
 }
 
 /// Front-end común de los comandos de compilación: parsea con recuperación
@@ -277,6 +312,7 @@ fn print_usage() {
     eprintln!("uso:");
     eprintln!("  marea tokens     <archivo.mar>        muestra los tokens");
     eprintln!("  marea parse      <archivo.mar>        muestra el AST");
+    eprintln!("  marea deps       <archivo.mar>        resuelve el grafo de módulos");
     eprintln!("  marea check      <archivo.mar>        verifica los tipos");
     eprintln!("  marea build      <archivo.mar> [dir]  transpila a TypeScript");
     eprintln!("  marea build-wasm <archivo.mar> [out]  compila a WebAssembly (WAT)");

@@ -1,0 +1,41 @@
+// El archivo de entrada: la vista, que junta lo que traen los otros dos.
+//
+// Un programa de Marea repartido en tres archivos. Para ver el grafo resuelto:
+//
+//   marea deps examples/modulos/tienda.mar
+//
+// El orden que imprime es topológico —usuarios.mar, catalogo.mar, tienda.mar—,
+// que es el orden en el que cualquier fase posterior querrá recorrerlo: al
+// llegar a un módulo, todo lo que importa ya está visto.
+//
+// Ojo: `marea check` y `marea build` siguen siendo de UN archivo. El verificador
+// y el codegen todavía no conocen el grafo, así que estos tres ejemplos viven en
+// un subdirectorio, aparte de los de `examples/`, que sí tienen que tipar sueltos.
+import { Usuario } from "./usuarios.mar";
+import { Producto, catalogo } from "./catalogo.mar";
+
+// `usuarios.mar` lo importan este archivo Y `catalogo.mar`, y aun así se lee y
+// se parsea UNA sola vez: la identidad de un módulo es su ruta canónica, no el
+// texto que se escribió para llegar hasta él.
+
+// Estado reactivo de módulo: la vista lo lee y se re-pinta sola al cambiar.
+reactive mut productos = [];
+
+@client
+fn ficha(p: Producto) -> Html {
+    return `<li>{p.titulo} — {p.precio} ({p.stock} en stock)</li>`;
+}
+
+@client
+fn vista(u: Usuario) -> Html {
+    let mut filas = "";
+    for p in productos {
+        filas = concat(filas, ficha(p));
+    }
+    return `<h1>Hola, {u.nombre}</h1><ul>{!filas}</ul>`;
+}
+
+@client
+fn main() {
+    productos = catalogo();
+}
