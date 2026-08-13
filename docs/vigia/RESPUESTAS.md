@@ -332,3 +332,87 @@ Dos pruebas del store construían un módulo que usaba `save(almacen, x)` **sin
 declarar `store almacen`**. No tipaban; pasaban sólo porque el runtime traía la
 persistencia siempre, hubiera store o no. Arreglados: ahora declaran el almacén,
 que es lo que su propio nombre dice que están probando.
+
+---
+
+## R5 — `import` existe desde hace dos horas. Y ahora `build` también lo entiende
+
+Fecha: 2026-08-13 · `c22bbba`..
+
+Tenías razón en que era la pared que venía, y llegaste a ella el mismo día que se
+levantó: **`import` está implementado.** No te lo dije en R4 porque aterrizó
+después. Culpa mía.
+
+```marea
+import { Usuario, esAdmin } from "./usuarios.mar";
+```
+
+Rutas relativas. `marea deps` te dibuja el grafo; los ciclos, el archivo que no
+existe y el nombre que el otro módulo no exporta dan error con archivo, línea,
+columna y cursor.
+
+### Lo que faltaba de verdad, y era justo lo tuyo
+
+`marea check` ya entendía programas de varios archivos. **`marea build` no**: se
+quedaba en el archivo que nombrabas y fallaba con `E_UNKNOWN_TYPE` sobre los
+tipos importados. Lo he cerrado ahora. Comprobado con el ejemplo de tres módulos
+del repo:
+
+```
+$ marea build-app examples/modulos/tienda.mar /tmp/ma
+  3 módulos: usuarios.mar -> catalogo.mar -> tienda.mar
+```
+
+**Un solo `runtime.ts`**, un solo `client.js`, y las funciones de los tres
+archivos dentro. Que era exactamente tu queja: dos copias de 43 KB y ninguna
+forma de que una llame a la otra.
+
+El aplanado ocurre DESPUÉS de verificar, que es lo que permite las dos cosas a la
+vez: cada módulo ve sólo lo que importó (aislamiento real, no textual) y la
+salida sigue siendo un bundle plano.
+
+### Lo que sí te pido a cambio: nombres únicos en todo el programa
+
+Como el bundle es plano, dos módulos no pueden **declarar** el mismo nombre de
+nivel superior: dos `fn fmt` en archivos distintos acabarían siendo la misma
+declaración de JavaScript y una se comería a la otra en silencio. Ahora es un
+error con los dos archivos delante (`E_NOMBRE_DUPLICADO_EN_PROGRAMA`).
+
+Importar un nombre NO cuenta como declararlo, así que reutilizarlo va bien.
+
+Es más de lo que pediste (tú te conformabas con unir archivos) y menos que
+espacios de nombres. La alternativa —renombrar al emitir, `usuarios__fmt`— quita
+la restricción pero ensucia un archivo que tú commiteas y comparas carácter por
+carácter, así que la dejé fuera. Si al migrar el sitio te estorba, dilo y le doy
+la vuelta.
+
+### No hagas el `include` textual
+
+Lo ofreciste como plan B barato. No hace falta y habría sido peor: sin
+aislamiento, cualquier archivo vería los nombres de todos y `import` sería
+decorativo. Lo que hay es lo bueno, y ya está.
+
+### Y algo que salió de probar tu caso, que te afecta directamente
+
+Al ejecutar el bundle de varios módulos me encontré con que **la frontera de red
+estaba rota entera** — no por los módulos: desde ayer, en todo el lenguaje. La
+demo de portada del README (`node demo.ts` → "Hola desde el servidor") moría con
+"host no permitido".
+
+Cuando los builtins pasaron al inglés, la función de red saliente pasó a llamarse
+`fetch`, y `export function fetch` en el runtime tapó el `fetch` del entorno en
+todo el archivo. A partir de ahí, `__rpc` llamaba al builtin del lenguaje, que
+pasa por la lista blanca anti-SSRF y rechaza loopback: **el transporte se
+bloqueaba a sí mismo**. Y `__http` se llamaba a sí mismo en bucle, así que salir
+a un host permitido reventaba la pila.
+
+Arreglado, y con un test que recorre el cruce de punta a punta. Nadie lo tenía:
+los de SSRF sólo ejercitaban el camino de rechazo. **Si estabas evitando `@server`
+por miedo a que no funcionara, ya no hay motivo.**
+
+### Una limitación que no es tuya pero conviene que sepas
+
+`marea build` descarta las `reactive` de nivel de módulo (las emite sólo
+`build-app`), y lo hace en silencio: el JS sale referenciando un nombre que nadie
+declaró. Para tu gráfica da igual —no usas estado reactivo—, pero si migras
+pantallas con estado, usa `build-app`.

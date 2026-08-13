@@ -233,3 +233,46 @@ fn los_ejemplos_multimodulo_tipan() {
     );
     assert!(programa.modulos.len() >= 3);
 }
+
+/// El bundle es plano, así que dos módulos no pueden DECLARAR el mismo nombre:
+/// acabarían siendo la misma declaración de JavaScript y una se comería a la
+/// otra en silencio. Se dice aquí, con los dos archivos delante.
+#[test]
+fn dos_modulos_no_pueden_declarar_el_mismo_nombre() {
+    let errs = check_modulos(
+        "nombre-doble",
+        &[
+            (
+                "a.mar",
+                "import { x } from \"./b.mar\";\nfn fmt(n: Int) -> String { return text(n); }\n\
+                 fn usar() -> String { return fmt(x); }\n",
+            ),
+            (
+                "b.mar",
+                "let x = 1;\nfn fmt(n: Int) -> String { return \"otro\"; }\n",
+            ),
+        ],
+    );
+    assert!(
+        codigos(&errs).contains(&"E_NOMBRE_DUPLICADO_EN_PROGRAMA"),
+        "{:?}",
+        codigos(&errs)
+    );
+}
+
+/// Importar un nombre no es declararlo: reutilizarlo no puede contar como
+/// duplicado, o `import` sería inservible.
+#[test]
+fn importar_no_cuenta_como_declarar() {
+    let errs = check_modulos(
+        "import-no-declara",
+        &[
+            (
+                "a.mar",
+                "import { fmt } from \"./b.mar\";\nfn usar() -> String { return fmt(1); }\n",
+            ),
+            ("b.mar", "fn fmt(n: Int) -> String { return text(n); }\n"),
+        ],
+    );
+    assert!(errs.is_empty(), "{:?}", codigos(&errs));
+}
