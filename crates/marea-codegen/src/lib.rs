@@ -36,11 +36,11 @@ pub struct AppProject {
     pub index_html: String, // index.html — la página
 }
 
-/// Builtins provistos por el runtime; no se transpilan ni se registran.
-const BUILTINS_BASE: &[&str] = &[
-    "__register",
+/// Builtins que existen SIEMPRE: cómputo puro sobre valores que ya se tienen.
+/// Ninguno toca la red, el disco ni `process`, así que viven igual en Node, en
+/// el navegador y en el edge.
+const BUILTINS_PURO: &[&str] = &[
     "__badRequest",
-    "__rpc",
     "print",
     "concat",
     "render",
@@ -53,8 +53,6 @@ const BUILTINS_BASE: &[&str] = &[
     "append",
     "contains",
     "lower",
-    "fetch",
-    "post",
     "jsonText",
     "jsonInt",
     "jsonFloat",
@@ -67,13 +65,35 @@ const BUILTINS_BASE: &[&str] = &[
     "__effect",
 ];
 
+/// Los que sólo existen si el módulo CRUZA la frontera de red: el registro de
+/// handlers, el cliente RPC y la red saliente. Un módulo que sólo calcula y
+/// devuelve marcado no los usa, y pedirlos ataría su bundle a Node.
+const BUILTINS_SERVIDOR: &[&str] = &["__register", "__rpc", "fetch", "post"];
+
 /// Los que sólo existen si el módulo declara algún `store`. Importarlos cuando
 /// no los hay traería un import a nombres que el runtime recortado ya no exporta.
 const BUILTINS_STORE: &[&str] = &["__store", "save", "all", "update", "remove"];
 
+/// ¿Este módulo puede vivir sin Node?
+///
+/// Sí cuando no cruza la frontera de red ni guarda estado: entonces todo lo que
+/// hace es cómputo sobre sus argumentos, y el bundle resultante se puede
+/// importar desde un componente de cliente o desde el edge. Es la diferencia
+/// entre generar marcado y ser una aplicación.
+fn es_puro(module: &Module) -> bool {
+    store_decls(module).is_empty()
+        && !module
+            .items
+            .iter()
+            .any(|it| matches!(it, Item::Fn(f) if is_remote(f) || f.es_session))
+}
+
 /// La lista de importación del runtime para este módulo.
 fn builtins_de(module: &Module) -> String {
-    let mut ns: Vec<&str> = BUILTINS_BASE.to_vec();
+    let mut ns: Vec<&str> = BUILTINS_PURO.to_vec();
+    if !es_puro(module) {
+        ns.extend_from_slice(BUILTINS_SERVIDOR);
+    }
     if !store_decls(module).is_empty() {
         ns.extend_from_slice(BUILTINS_STORE);
     }
@@ -89,21 +109,39 @@ fn builtins_de(module: &Module) -> String {
 /// especificador aunque el código sea inalcanzable. Con ellos, el `.ts` generado
 /// no se puede empaquetar: "Module not found: Can't resolve 'mongodb'".
 fn runtime_de(module: &Module) -> String {
-    if !store_decls(module).is_empty() {
+    let mut recortar: Vec<&str> = Vec::new();
+    if store_decls(module).is_empty() {
+        recortar.push("store");
+    }
+    if es_puro(module) {
+        recortar.push("servidor");
+    }
+    if recortar.is_empty() {
         return RUNTIME_TS.to_string();
     }
     let mut out = String::with_capacity(RUNTIME_TS.len());
     let mut dentro = false;
     for linea in RUNTIME_TS.lines() {
-        if linea.starts_with("// @marea:store-inicio") {
-            dentro = true;
-            continue;
-        }
-        if linea.starts_with("// @marea:store-fin") {
+        // Un marcador nunca se copia a la salida, se recorte su región o no:
+        // habla con el codegen, no con quien lee el archivo generado.
+        let es_marcador = linea.starts_with("// @marea:");
+        if !dentro {
+            if let Some(cual) = recortar
+                .iter()
+                .find(|c| linea.starts_with(&format!("// @marea:{c}-inicio")))
+            {
+                let _ = cual;
+                dentro = true;
+                continue;
+            }
+        } else if recortar
+            .iter()
+            .any(|c| linea.starts_with(&format!("// @marea:{c}-fin")))
+        {
             dentro = false;
             continue;
         }
-        if !dentro {
+        if !dentro && !es_marcador {
             out.push_str(linea);
             out.push('\n');
         }
@@ -298,7 +336,7 @@ pub fn emit(module: &Module) -> Project {
             tipos: &tipos,
         }),
         client: emit_client(&remote, &local, &plain_globals, &builtins, &tipos),
-        demo: emit_demo(&local),
+        demo: emit_demo(&local, es_puro(module)),
     }
 }
 
@@ -908,16 +946,29 @@ fn emit_client(
     s
 }
 
-fn emit_demo(local: &[&FnDecl]) -> String {
+fn emit_demo(local: &[&FnDecl], puro: bool) -> String {
     let has_main = local.iter().any(|f| f.name == "main");
     let mut s = String::new();
     s.push_str("// Generado por Marea — orquestador de la demo.\n");
-    s.push_str("import { startServer, stopServer } from \"./runtime.ts\";\n");
-    s.push_str("import \"./server.ts\";\n");
+    // Un módulo que no cruza la frontera no tiene servidor que arrancar, y su
+    // runtime ya no exporta `startServer`: importarlo sería un error de carga.
+    if !puro {
+        s.push_str("import { startServer, stopServer } from \"./runtime.ts\";\n");
+        s.push_str("import \"./server.ts\";\n");
+    }
     if has_main {
         s.push_str("import { main } from \"./client.ts\";\n");
     }
-    s.push_str("\nawait startServer();\ntry {\n");
+    s.push('\n');
+    if puro {
+        if has_main {
+            s.push_str("await main();\n");
+        } else {
+            s.push_str("console.log(\"[marea] módulo sin main(): nada que ejecutar\");\n");
+        }
+        return s;
+    }
+    s.push_str("await startServer();\ntry {\n");
     if has_main {
         s.push_str("  await main();\n");
     } else {

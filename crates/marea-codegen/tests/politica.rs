@@ -221,3 +221,73 @@ fn con_store_el_runtime_conserva_los_backends() {
     }
     assert!(p.client.contains("__store"), "{}", p.client);
 }
+
+// ============== El runtime que puede vivir fuera de Node ==============
+
+/// Un módulo que no cruza la frontera de red ni declara almacenes no necesita
+/// nada de Node, y arrastrarlo le impide vivir en un componente de cliente o en
+/// el edge. Es la frontera que el lenguaje presume de tener resuelta, así que no
+/// puede ser el propio runtime quien la cierre.
+#[test]
+fn un_modulo_puro_no_arrastra_node() {
+    let p = marea_codegen::emit(
+        &marea_syntax::parse(
+            "fn ficha(t: String) -> Html { return `<li>{t}</li>`; }\n\
+             fn main() { print(ficha(\"x\")); }",
+        )
+        .unwrap(),
+    );
+    for atadura in ["node:http", "node:fs", "process.env", "http.createServer"] {
+        assert!(
+            !p.runtime.contains(atadura),
+            "el runtime puro no debe mencionar {atadura}"
+        );
+    }
+    // Y el import tampoco puede pedir lo que el runtime recortado ya no exporta.
+    for n in ["__register", "__rpc", "fetch", "post", "__store"] {
+        assert!(
+            !p.client.contains(&format!(" {n},")) && !p.client.contains(&format!("{{ {n},")),
+            "el import de un módulo puro no debe pedir '{n}'"
+        );
+    }
+    // La demo no puede arrancar un servidor que ya no existe.
+    assert!(!p.demo.contains("startServer"), "{}", p.demo);
+    // Pero el núcleo reactivo SÍ tiene que seguir ahí: es lo que hará falta
+    // para un manejador de evento, y es puro.
+    assert!(
+        p.runtime.contains("export function __signal"),
+        "{}",
+        p.runtime
+    );
+    assert!(
+        p.runtime.contains("export function __effect"),
+        "{}",
+        p.runtime
+    );
+    // Los marcadores hablan con el codegen, no con quien lee la salida.
+    assert!(
+        !p.runtime.contains("@marea:"),
+        "quedaron marcadores en la salida"
+    );
+}
+
+/// Y en cuanto el módulo cruza la frontera, el runtime vuelve entero: el
+/// recorte no puede llevarse el transporte de quien sí lo usa.
+#[test]
+fn un_modulo_con_server_conserva_el_transporte() {
+    let p = marea_codegen::emit(
+        &marea_syntax::parse(
+            "@server fn dime() -> String { return \"hola\"; }\n\
+             @client fn main() { print(dime()); }",
+        )
+        .unwrap(),
+    );
+    for necesario in [
+        "node:http",
+        "export function startServer",
+        "export async function __rpc",
+    ] {
+        assert!(p.runtime.contains(necesario), "falta {necesario}");
+    }
+    assert!(p.client.contains("__rpc"), "{}", p.client);
+}

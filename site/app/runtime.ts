@@ -5,6 +5,11 @@
 //   - lado cliente:  __rpc(), que serializa la llamada y la manda por fetch.
 // Más los builtins del lenguaje.
 
+// @marea:servidor-inicio — el codegen recorta hasta @marea:servidor-fin cuando
+// el módulo no cruza la frontera de red ni declara almacenes. Aquí dentro está
+// todo lo que ata este runtime a Node: `node:http`, `node:fs` y `process.env`.
+// Un módulo que sólo calcula y devuelve marcado no necesita nada de esto, y
+// arrastrarlo le impide vivir en un componente de cliente o en el edge.
 import http from "node:http";
 import fs from "node:fs";
 
@@ -129,6 +134,8 @@ function __tokenDe(req: http.IncomingMessage): string {
   return "";
 }
 
+// @marea:servidor-fin
+
 /// Error de validación del límite: lo provoca una petición mal formada, no un
 /// fallo del servidor, así que se responde 400 y no 500.
 export class __BoundaryError extends Error {}
@@ -137,6 +144,11 @@ export function __badRequest(detalle: string): never {
   throw new __BoundaryError(detalle);
 }
 
+// @marea:servidor-inicio — el codegen recorta hasta @marea:servidor-fin cuando
+// el módulo no cruza la frontera de red ni declara almacenes. Aquí dentro está
+// todo lo que ata este runtime a Node: `node:http`, `node:fs` y `process.env`.
+// Un módulo que sólo calcula y devuelve marcado no necesita nada de esto, y
+// arrastrarlo le impide vivir en un componente de cliente o en el edge.
 let __server: http.Server | null = null;
 
 // Sirve archivos estáticos de la app web (index.html, client.js) desde la raíz
@@ -353,6 +365,8 @@ export async function __rpc(fn: string, args: unknown[]): Promise<unknown> {
   }
   return (data as Record<string, unknown>).ok;
 }
+
+// @marea:servidor-fin
 
 // Comparación de variantes para 'match' (best-effort hasta tener uniones reales).
 export function __marea_is(value: unknown, tag: string): boolean {
@@ -623,6 +637,11 @@ interface __Backend {
 }
 // @marea:store-fin
 
+// @marea:servidor-inicio — el codegen recorta hasta @marea:servidor-fin cuando
+// el módulo no cruza la frontera de red ni declara almacenes. Aquí dentro está
+// todo lo que ata este runtime a Node: `node:http`, `node:fs` y `process.env`.
+// Un módulo que sólo calcula y devuelve marcado no necesita nada de esto, y
+// arrastrarlo le impide vivir en un componente de cliente o en el edge.
 // --------------------------------------------------------------------------
 // RED SALIENTE
 //
@@ -711,6 +730,8 @@ export function fetch(url: string): Promise<string> {
 export function post(url: string, cuerpo: string): Promise<string> {
   return __http(url, "POST", cuerpo);
 }
+
+// @marea:servidor-fin
 
 // --- lectura de JSON por ruta ---
 // El lenguaje no tiene valores dinámicos, así que una respuesta se lee por

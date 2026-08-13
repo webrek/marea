@@ -73,7 +73,10 @@ fn demo_orquesta_servidor_y_main() {
 
 #[test]
 fn runtime_lleva_el_transporte() {
-    let p = build("@client fn main() { print(1); }");
+    // El fuente DEBE cruzar la frontera: un módulo que sólo calcula ya no lleva
+    // el runtime de servidor (se recorta para que pueda vivir fuera de Node),
+    // así que probar el transporte con un módulo puro no probaría nada.
+    let p = build("@server fn s() -> Int { return 1; }\n@client fn main() { print(s()); }");
     assert!(p.runtime.contains("export async function __rpc"));
     assert!(p.runtime.contains("export function startServer"));
 }
@@ -608,7 +611,10 @@ fn ensure_store_memoiza_la_promesa_de_carga() {
 // false → el tope del cuerpo quedaba desactivado.
 #[test]
 fn los_limites_de_entorno_son_a_prueba_de_nan() {
-    let p = build("@client fn f() { print(\"x\"); }");
+    // El fuente DEBE cruzar la frontera: un módulo que sólo calcula ya no lleva
+    // el runtime de servidor (se recorta para que pueda vivir fuera de Node),
+    // así que probar el transporte con un módulo puro no probaría nada.
+    let p = build("@server fn s() -> Int { return 1; }\n@client fn f() { print(s()); }");
     assert!(p.runtime.contains("__envInt"), "{}", p.runtime);
     assert!(
         !p.runtime.contains("Number(process.env.MAREA_MAX_BODY"),
@@ -620,7 +626,10 @@ fn los_limites_de_entorno_son_a_prueba_de_nan() {
 // blanca `GET /server.ts` filtraba los handlers y `GET /*.log` el store.
 #[test]
 fn los_estaticos_solo_sirven_extensiones_en_lista_blanca() {
-    let p = build("@client fn f() { print(\"x\"); }");
+    // El fuente DEBE cruzar la frontera: un módulo que sólo calcula ya no lleva
+    // el runtime de servidor (se recorta para que pueda vivir fuera de Node),
+    // así que probar el transporte con un módulo puro no probaría nada.
+    let p = build("@server fn s() -> Int { return 1; }\n@client fn f() { print(s()); }");
     assert!(
         p.runtime.contains("const mime = __MIME[ext];"),
         "debe resolver el MIME antes de leer el archivo:\n{}",
