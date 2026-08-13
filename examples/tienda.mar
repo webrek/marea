@@ -58,17 +58,12 @@ fn catalogo() -> List<Producto> {
 
 // Búsqueda por texto + categoría + tope de precio, devuelta como DATOS.
 @server
-fn buscar(q: String, cat: String, tope: Int, soloGratis: Bool, i: Int) -> List<Producto> {
-    let ps = all(productos);
-    if i < len(ps) {
-        let p = ps[i];
-        let resto = buscar(q, cat, tope, soloGratis, i + 1);
-        if coincide(p, q, cat, tope, soloGratis) {
-            return concat([p], resto);
-        }
-        return resto;
+fn buscar(q: String, cat: String, tope: Int, soloGratis: Bool) -> List<Producto> {
+    let mut out = [];
+    for p in all(productos) {
+        if coincide(p, q, cat, tope, soloGratis) { out = append(out, p); }
     }
-    return [];
+    return out;
 }
 
 fn coincide(p: Producto, q: String, cat: String, tope: Int, soloGratis: Bool) -> Bool {
@@ -141,16 +136,17 @@ fn calificar(idx: Int, quien: String, estrellas: Int, texto: String) {
 @server
 fn calificacion(idx: Int) -> Int {
     let rs = all(resenas);
-    return promedio(rs, 0, idx, 0, 0);
+    return promedio(rs, idx);
 }
 
-fn promedio(rs: List<Resena>, i: Int, idx: Int, suma: Int, cuenta: Int) -> Int {
-    if i < len(rs) {
-        let r = rs[i];
+fn promedio(rs: List<Resena>, idx: Int) -> Int {
+    let mut suma = 0;
+    let mut cuenta = 0;
+    for r in rs {
         if r.refIdx == idx {
-            return promedio(rs, i + 1, idx, suma + r.estrellas, cuenta + 1);
+            suma = suma + r.estrellas;
+            cuenta = cuenta + 1;
         }
-        return promedio(rs, i + 1, idx, suma, cuenta);
     }
     if cuenta < 1 { return 0; }
     return suma / cuenta;
@@ -162,15 +158,12 @@ fn preguntar(idx: Int, quien: String, texto: String) {
 }
 
 @server
-fn preguntasDe(idx: Int, i: Int) -> List<Pregunta> {
-    let qs = all(preguntas);
-    if i < len(qs) {
-        let q = qs[i];
-        let resto = preguntasDe(idx, i + 1);
-        if q.refIdx == idx { return concat([q], resto); }
-        return resto;
+fn preguntasDe(idx: Int) -> List<Pregunta> {
+    let mut out = [];
+    for q in all(preguntas) {
+        if q.refIdx == idx { out = append(out, q); }
     }
-    return [];
+    return out;
 }
 
 // --------------------------------------------------------------------------
@@ -251,11 +244,12 @@ fn tarjeta(p: Producto, idx: Int) -> Html {
 </li>`;
 }
 
-fn tarjetas(xs: List<Producto>, i: Int) -> Html {
-    if i < len(xs) {
-        return concat(tarjeta(xs[i], i), tarjetas(xs, i + 1));
+fn tarjetas(xs: List<Producto>) -> Html {
+    let mut out = ``;
+    for p, i in xs {
+        out = `{!out}{!tarjeta(p, i)}`;
     }
-    return "";
+    return out;
 }
 
 @client
@@ -271,13 +265,13 @@ fn vista() -> Html {
                     concat(" (", concat(dinero(carritoTotal), ")</p>"))))
             )
         ),
-        concat("<ul class=\"grid\">", concat(tarjetas(xs, 0), "</ul>"))
+        concat("<ul class=\"grid\">", concat(tarjetas(xs), "</ul>"))
     );
 }
 
 @client
 fn refrescar() {
-    resultados = buscar(consulta, categoria, 0, soloGratis, 0);
+    resultados = buscar(consulta, categoria, 0, soloGratis);
 }
 
 @client

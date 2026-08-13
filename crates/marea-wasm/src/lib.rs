@@ -217,6 +217,7 @@ fn is_string_type(t: &Type) -> bool {
 fn constructs_list(module: &Module) -> bool {
     fn in_block(b: &Block) -> bool {
         b.stmts.iter().any(|s| match s {
+            Stmt::For { .. } => false,
             Stmt::Let(l) => in_expr(&l.value),
             Stmt::Assign { value, .. } => in_expr(value),
             Stmt::Effect { body, .. } => in_block(body),
@@ -442,6 +443,11 @@ fn collect_locals(
 ) -> Result<(), String> {
     for stmt in &block.stmts {
         match stmt {
+            Stmt::For { .. } => {
+                return Err("el bucle 'for' vive en el runtime de TypeScript; el backend \
+                            WASM aún no lo soporta"
+                    .to_string())
+            }
             Stmt::Let(l) => {
                 if l.reactive {
                     return Err(
@@ -561,6 +567,10 @@ fn emit_block(block: &Block, indent: usize, ctx: &mut Ctx) -> Result<String, Str
 fn emit_stmt(stmt: &Stmt, indent: usize, ctx: &mut Ctx) -> Result<String, String> {
     let p = pad(indent);
     match stmt {
+        // El backend WASM es de expresiones: el bucle vive en el de TypeScript.
+        Stmt::For { .. } => Err("el bucle 'for' vive en el runtime de TypeScript; el \
+             backend WASM aún no lo soporta"
+            .to_string()),
         Stmt::Let(l) => {
             // Registra el tipo estático de la variable para resolver `x.campo`:
             // por anotación `let x: T = ..` o por el literal `Expr::Record`.
@@ -921,6 +931,8 @@ fn emit_member(object: &Expr, field: &str, ctx: &mut Ctx) -> Result<String, Stri
 fn collect_strings_block(block: &Block, out: &mut Vec<String>, seen: &mut HashSet<String>) {
     for stmt in &block.stmts {
         match stmt {
+            // El backend WASM es de expresiones: el bucle vive en el de TypeScript.
+            Stmt::For { .. } => {}
             Stmt::Let(l) => collect_strings_expr(&l.value, out, seen),
             Stmt::Assign { value, .. } => collect_strings_expr(value, out, seen),
             Stmt::Effect { body, .. } => collect_strings_block(body, out, seen),

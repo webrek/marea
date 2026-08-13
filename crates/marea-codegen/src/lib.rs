@@ -855,6 +855,16 @@ fn emit_stmt(stmt: &Stmt, indent: usize, reactive: &HashSet<String>) -> String {
             }
         }
         // Efecto: se re-ejecuta cuando cambian las reactivas que lee.
+        Stmt::For { var, index, iter, body, .. } => {
+            // Bucle clásico sobre índice; el elemento y el índice son `const`
+            // porque dentro del bucle son inmutables.
+            let it = emit_expr(iter, reactive);
+            let i = index.clone().unwrap_or_else(|| "__i".to_string());
+            let cuerpo = emit_block_inner(body, indent + 2, reactive);
+            format!(
+                "{p}{{\n{p}  const __xs = {it};\n{p}  for (let {i} = 0; {i} < __xs.length; {i}++) {{\n{p}    const {var} = __xs[{i}];\n{cuerpo}\n{p}  }}\n{p}}}"
+            )
+        }
         Stmt::Effect { body, .. } => {
             let inner = emit_block_inner(body, indent + 1, reactive);
             format!("{p}__effect(async () => {{\n{inner}\n{p}}});")

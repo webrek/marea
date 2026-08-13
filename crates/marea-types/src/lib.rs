@@ -758,6 +758,45 @@ impl Checker {
                     }
                 }
             }
+            Stmt::For { var, var_span, index, index_span, iter, body, .. } => {
+                let it = self.check_expr(iter);
+                let elem = match &it {
+                    Ty::List(e) => (**e).clone(),
+                    Ty::Unknown => Ty::Unknown,
+                    otro => {
+                        self.error(TypeError::new(
+                            "E_FOR_NO_LISTA",
+                            format!("'for' recorre una lista, no '{}'", otro.display()),
+                            iter.span(),
+                        ));
+                        Ty::Unknown
+                    }
+                };
+                // El elemento y el índice viven en un scope propio y son
+                // INMUTABLES: reasignarlos no cambiaría la lista, así que
+                // permitirlo solo crearía una expectativa falsa.
+                self.scopes.push(HashMap::new());
+                if builtins::lookup(var).is_some() {
+                    self.error(TypeError::new(
+                        "E_REDEFINE_BUILTIN",
+                        format!("no se puede llamar '{var}' al elemento: es un builtin"),
+                        *var_span,
+                    ));
+                }
+                self.scopes.last_mut().unwrap().insert(var.clone(), (elem, false));
+                if let Some(i) = index {
+                    if builtins::lookup(i).is_some() {
+                        self.error(TypeError::new(
+                            "E_REDEFINE_BUILTIN",
+                            format!("no se puede llamar '{i}' al índice: es un builtin"),
+                            index_span.unwrap_or(*var_span),
+                        ));
+                    }
+                    self.scopes.last_mut().unwrap().insert(i.clone(), (Ty::Int, false));
+                }
+                self.check_block_in_current_scope(body);
+                self.scopes.pop();
+            }
             Stmt::Effect { body, .. } => {
                 self.check_block(body);
             }
@@ -2226,7 +2265,9 @@ fn stmt_terminates(stmt: &Stmt) -> bool {
     match stmt {
         Stmt::Return { .. } => true,
         Stmt::Expr(e) => expr_terminates(e),
-        Stmt::Let(_) | Stmt::Assign { .. } | Stmt::Effect { .. } => false,
+        // Un `for` no garantiza retorno: la lista puede estar vacía y el
+        // cuerpo no ejecutarse ni una vez.
+        Stmt::Let(_) | Stmt::Assign { .. } | Stmt::Effect { .. } | Stmt::For { .. } => false,
     }
 }
 

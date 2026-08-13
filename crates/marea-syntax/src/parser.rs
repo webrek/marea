@@ -408,6 +408,7 @@ impl Parser {
         }
         match self.peek_kind() {
             TokenKind::Let | TokenKind::Reactive => Ok(Stmt::Let(self.parse_let()?)),
+            TokenKind::For => self.parse_for(),
             TokenKind::Effect => {
                 let kw = self.advance();
                 let body = self.parse_block()?;
@@ -439,6 +440,25 @@ impl Parser {
                 Ok(Stmt::Expr(expr))
             }
         }
+    }
+
+    /// `for x in xs { ... }`, o `for x, i in xs { ... }` para llevar el índice.
+    fn parse_for(&mut self) -> PResult<Stmt> {
+        let kw = self.expect(&TokenKind::For, "'for'")?;
+        let (var, var_span) = self.expect_ident("el nombre del elemento")?;
+        let (index, index_span) = if self.eat(&TokenKind::Comma) {
+            let (n, sp) = self.expect_ident("el nombre del índice")?;
+            (Some(n), Some(sp))
+        } else {
+            (None, None)
+        };
+        self.expect(&TokenKind::In, "'in' tras el nombre del elemento")?;
+        // Igual que en la condición de un `if`: aquí un `{` abre el cuerpo del
+        // bucle, no un literal de registro.
+        let iter = self.with_no_struct_literal(|p| p.parse_expr())?;
+        let body = self.parse_block()?;
+        let span = kw.span.to(body.span);
+        Ok(Stmt::For { var, var_span, index, index_span, iter, body, span })
     }
 
     fn parse_assign(&mut self) -> PResult<Stmt> {

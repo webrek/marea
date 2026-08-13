@@ -165,6 +165,7 @@ fn stmt_span(stmt: &Stmt) -> Span {
         Stmt::Return { span, .. } => *span,
         Stmt::Assign { span, .. } => *span,
         Stmt::Effect { span, .. } => *span,
+        Stmt::For { span, .. } => *span,
         Stmt::Expr(e) => e.span(),
     }
 }
@@ -281,6 +282,17 @@ fn find_in_block(block: &Block, offset: usize) -> Option<Node<'_>> {
 /// encaja, devuelve el propio `Stmt`.
 fn find_in_stmt(stmt: &Stmt, offset: usize) -> Node<'_> {
     match stmt {
+        Stmt::For { iter, body, .. } => {
+            if let Some(n) = find_in_expr(iter, offset) {
+                return n;
+            }
+            for s in &body.stmts {
+                if contains(stmt_span(s), offset) {
+                    return find_in_stmt(s, offset);
+                }
+            }
+            Node::Stmt(stmt)
+        }
         Stmt::Let(l) => {
             if let Some(ty) = &l.ty {
                 if let Some(n) = find_in_type(ty, offset) {

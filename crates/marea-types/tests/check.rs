@@ -1316,3 +1316,64 @@ fn un_dato_interpolado_llega_escapado_al_dom() {
     );
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
+
+// --- el bucle for ---
+
+// Sin bucle, todo recorrido era una función recursiva con índice: en la tienda
+// eran cinco de veintiocho funciones, todas con la misma forma.
+#[test]
+fn el_for_recorre_una_lista() {
+    let errs = check_src(
+        "fn suma(xs: List<Int>) -> Int { let mut n = 0; for x in xs { n = n + x; } return n; }",
+    );
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+#[test]
+fn el_for_con_indice_liga_un_int() {
+    let errs = check_src(
+        "type P = { a: Int };\n\
+         fn f(xs: List<P>) -> Int { let mut n = 0; for p, i in xs { n = n + p.a + i; } return n; }",
+    );
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+#[test]
+fn el_for_solo_recorre_listas() {
+    let errs = check_src("fn f(n: Int) { for x in n { print(x); } }");
+    assert!(has_code(&errs, "E_FOR_NO_LISTA"), "{:?}", codes(&errs));
+}
+
+// El elemento y el índice son inmutables: reasignarlos no cambiaría la lista,
+// así que permitirlo solo crearía una expectativa falsa.
+#[test]
+fn el_elemento_y_el_indice_son_inmutables() {
+    let a = check_src("fn f(xs: List<Int>) { for x in xs { x = 1; } }");
+    assert!(has_code(&a, "E_ASSIGN_IMMUTABLE"), "{:?}", codes(&a));
+    let b = check_src("fn f(xs: List<Int>) { for x, i in xs { i = 1; } }");
+    assert!(has_code(&b, "E_ASSIGN_IMMUTABLE"), "{:?}", codes(&b));
+}
+
+// Y no escapan del bucle.
+#[test]
+fn el_elemento_no_escapa_del_bucle() {
+    let errs = check_src("fn f(xs: List<Int>) -> Int { for x in xs { print(x); } return x; }");
+    assert!(has_code(&errs, "E_UNRESOLVED_NAME"), "{:?}", codes(&errs));
+}
+
+// Un `for` no garantiza retorno: la lista puede estar vacía y el cuerpo no
+// ejecutarse ni una vez.
+#[test]
+fn un_for_no_cuenta_como_retorno() {
+    let errs = check_src("fn f(xs: List<Int>) -> Int { for x in xs { return x; } }");
+    assert!(has_code(&errs, "E_MISSING_RETURN"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn los_for_anidados_valen() {
+    let errs = check_src(
+        "fn f(xs: List<List<Int>>) -> Int { \
+           let mut n = 0; for fila in xs { for c in fila { n = n + c; } } return n; }",
+    );
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}

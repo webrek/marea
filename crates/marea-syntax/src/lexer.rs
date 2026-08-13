@@ -244,6 +244,8 @@ impl<'a> Lexer<'a> {
             "return" => TokenKind::Return,
             "import" => TokenKind::Import,
             "effect" => TokenKind::Effect,
+            "for" => TokenKind::For,
+            "in" => TokenKind::In,
             "store" => TokenKind::Store,
             "true" => TokenKind::Bool(true),
             "false" => TokenKind::Bool(false),

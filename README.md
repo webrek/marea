@@ -147,6 +147,27 @@ fn buscar(q: String, i: Int) -> List<Producto> {
 }
 ```
 
+### Bucles
+
+`for x in xs { ... }` recorre una lista, y `for x, i in xs` lleva además el
+índice. Siempre sobre una lista, así que **siempre termina**: no hay `while` y
+por tanto no hay bucles infinitos que escribir por accidente.
+
+```marea
+fn tarjetas(xs: List<Producto>) -> Html {
+    let mut out = ``;
+    for p, i in xs {
+        out = `{!out}{!tarjeta(p, i)}`;
+    }
+    return out;
+}
+```
+
+El elemento y el índice son **inmutables** y no escapan del bucle: reasignarlos
+no cambiaría la lista, así que permitirlo solo crearía una expectativa falsa. Y
+un `for` no cuenta como retorno —la lista puede estar vacía—, de modo que una
+función con retorno declarado sigue necesitando su `return`.
+
 ### Plantillas de texto
 
 Construir HTML concatenando es ilegible: una tarjeta con seis campos son doce

@@ -35,6 +35,7 @@ field_def   = IDENT ":" type ;
 block       = "{" stmt* "}" ;
 stmt        = let_stmt
             | assign
+            | for_stmt
             | effect_stmt
             | "return" expr? ";"
             | expr ( ";" )? ;        (* ';' obligatorio salvo if/match *)
@@ -42,6 +43,7 @@ stmt        = let_stmt
 let_stmt    = ( "let" | "reactive" ) "mut"? IDENT ( ":" type )? "=" expr ";" ;
 assign      = IDENT "=" expr ";" ;
 effect_stmt = "effect" block ;
+for_stmt    = "for" IDENT [ "," IDENT ] "in" expr block ;
 
 (* --- expresiones, por precedencia (menor a mayor) --- *)
 expr        = or_expr ;

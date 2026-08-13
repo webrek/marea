@@ -36,6 +36,8 @@ pub enum TokenKind {
     Return,
     Import,
     Effect,
+    For,
+    In,
     Store,
 
     // '@' de los atributos de ubicación: @server, @client, @edge

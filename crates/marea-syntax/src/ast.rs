@@ -108,6 +108,18 @@ pub struct Block {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
+    /// `for x in xs { ... }` — recorre una lista. Con índice: `for x, i in xs`.
+    /// Siempre sobre una lista, así que siempre termina: no hay `while` y por
+    /// tanto no hay bucles infinitos que escribir por accidente.
+    For {
+        var: String,
+        var_span: Span,
+        index: Option<String>,
+        index_span: Option<Span>,
+        iter: Expr,
+        body: Block,
+        span: Span,
+    },
     Let(LetStmt),
     Return { value: Option<Expr>, span: Span },
     /// Asignación a una variable existente: `n = n + 1;`.
