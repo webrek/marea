@@ -61,6 +61,23 @@ impl Checker {
                 for parte in parts {
                     if let marea_syntax::ast::TemplatePart::Interp { expr, raw } = parte {
                         let t = self.check_expr(expr);
+                        // `on` produce un ATRIBUTO: escapado deja de serlo y el
+                        // elemento queda con un `data-marea-on-...` que ningún
+                        // manejador reclama, es decir un botón mudo y ni un
+                        // aviso. Es el hueco crudo o nada.
+                        if !*raw && crate::eventos::es_llamada_a_on(expr) {
+                            self.error(TypeError::new(
+                                "E_ON_ESCAPADO",
+                                format!(
+                                    "'{}' escribe un atributo, así que va en un hueco CRUDO: \
+                                     escribe '{{!{}(...)}}'. Escapado, el navegador lo lee como \
+                                     texto y el manejador nunca se engancha",
+                                    crate::eventos::ON,
+                                    crate::eventos::ON
+                                ),
+                                expr.span(),
+                            ));
+                        }
                         if *raw && !self.is_subtype(&t, &Ty::Html) {
                             self.error(TypeError::new(
                                 "E_INTERP_CRUDA_NO_HTML",
@@ -344,7 +361,7 @@ impl Checker {
         // del usuario se compila a `async`.
         if let Some(ctx) = self.init_context {
             let nombre = callee_name(callee);
-            if !es_sincrono(&nombre) {
+            if !crate::eventos::es_sincrono_con_eventos(&nombre) {
                 self.error(TypeError::new(
                     "E_BOUNDARY_IN_INIT",
                     format!(
@@ -361,6 +378,12 @@ impl Checker {
         if let Expr::Ident { name, .. } = callee {
             if matches!(name.as_str(), "save" | "all" | "update" | "remove") {
                 return self.check_state_builtin(name, args, span);
+            }
+            // El modelo de eventos se chequea aparte: el evento tiene que ser
+            // uno de los conocidos y el manejador tener forma de manejador,
+            // cosas que la firma del builtin sola no dice.
+            if name == crate::eventos::ON {
+                return self.check_on_builtin(args, span);
             }
             // La red saliente vive en el servidor, igual que el estado: desde el
             // navegador la llamada la haría el cliente (otro origen, otras

@@ -1,0 +1,14 @@
+// DEBE FALLAR: E_EVENTO_DESCONOCIDO
+//
+// El evento de 'on' se comprueba contra una lista cerrada. Sin esa lista, un
+// nombre mal escrito no da error en ninguna parte: el navegador acepta
+// `addEventListener("clcik", ...)` sin rechistar y lo que queda es un botón que
+// no hace nada —un fallo sin síntoma más allá de "no pasa nada al pulsar"—.
+//
+// El error trae además la lista de los eventos válidos, que es la mitad del
+// arreglo: casi siempre el que se quería es uno de ellos.
+
+@client
+fn vista() -> Html {
+    return `<button {!on("clcik", fn() { print(1); })}>pulsa</button>`;
+}

@@ -139,6 +139,10 @@ const BUILTINS_PURO: &[&str] = &[
     "text",
     "escape",
     "html",
+    // El modelo de eventos. Va en los builtins de SIEMPRE porque el despachador
+    // no trae nada de Node: sin DOM (en el servidor) `on` registra el cierre y
+    // no engancha nada, igual que `render` escribe en consola.
+    "on",
     "__div",
     "__rem",
     "append",
@@ -1213,6 +1217,20 @@ fn escapar_plantilla(t: &str) -> String {
         .replace("${", "\\${")
 }
 
+/// `on` es SÍNCRONO: registra un cierre en la tabla del runtime y devuelve el
+/// atributo, sin tocar la red ni el disco. Emitirlo con `await` sería, además de
+/// una espera de nada, romper el rastreo de dependencias reactivas justo donde
+/// más duele: `on` se llama DENTRO de la plantilla que pinta la vista, así que
+/// un await ahí suspende el effect antes de que termine de leer sus signals.
+///
+/// La lista canónica de síncronos es `marea_syntax::builtins::SINCRONOS`, que
+/// pertenece a la otra mitad del reparto; hasta que `on` entre ahí la excepción
+/// vive aquí —y otra igual en el verificador—. Cuando se pueda tocar ese crate,
+/// esto se borra y la lista vuelve a ser una sola.
+fn es_sincrono_aqui(name: &str) -> bool {
+    es_sincrono(name) || name == "on"
+}
+
 /// ¿El inicializador de una `reactive` es un recurso? Lo es cuando llama a una
 /// función del usuario: el codegen emite `await` para ésas, y un `await` no cabe
 /// en el cuerpo síncrono de un memo. Los builtins síncronos no cuentan.
@@ -1220,7 +1238,7 @@ fn es_recurso(e: &Expr) -> bool {
     match e {
         Expr::Call { callee, .. } => matches!(
             callee.as_ref(),
-            Expr::Ident { name, .. } if !es_sincrono(name)
+            Expr::Ident { name, .. } if !es_sincrono_aqui(name)
         ),
         _ => false,
     }
@@ -1488,7 +1506,7 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
             // update/remove) son async (pegan a la BD) y SÍ se awaitan.
             let is_sync_builtin = matches!(
                 callee.as_ref(),
-                Expr::Ident { name, .. } if es_sincrono(name)
+                Expr::Ident { name, .. } if es_sincrono_aqui(name)
             );
             if is_sync_builtin {
                 format!("{}({})", callee_ts, a.join(", "))

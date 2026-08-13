@@ -1,0 +1,29 @@
+// El modelo de EVENTOS: la frontera del tiempo en la otra dirección.
+//
+// 'contador.mar' enseña la mitad que ya había: cambia una 'reactive mut' y todo
+// lo que la leyó se recomputa solo. Pero desde la interfaz no se podía cambiar
+// nada, así que ese estado solo lo movía el propio programa. Esto es la vuelta.
+//
+// 'on' recibe el evento y un CIERRE, y devuelve el atributo que ata el elemento
+// a ese manejador: como es marcado (Html), entra en un hueco crudo '{!...}'
+// igual que cualquier otro, sin sintaxis nueva que aprender. Dentro del cierre
+// se asigna a la reactiva, y con eso se cierra el círculo entero:
+//
+//     clic → manejador → 'cuenta' cambia → la vista se vuelve a pintar
+//
+// El compilador comprueba las tres cosas que el apaño anterior
+// (onclick="marea.f(3)" a mano, funciones sueltas en window) no comprobaba
+// nadie: que "click" sea un evento que existe, que el manejador tenga forma de
+// manejador y que esto no se escriba en una @server, donde no hay DOM.
+//
+// Pruébalo:  marea build-app examples/contador-clic.mar /tmp/contador
+//            node /tmp/contador/serve.ts
+
+reactive mut cuenta = 0;
+
+@client
+fn vista() -> Html {
+    return `<p>Llevas <b>{text(cuenta)}</b> clic(s).</p>
+<button {!on("click", fn() { cuenta = cuenta + 1; })}>súmame</button>
+<button {!on("click", fn() { cuenta = 0; })}>reiniciar</button>`;
+}

@@ -32,17 +32,24 @@ export async function __rpc(fn, args) {
 // runtime.ts. Mientras se lee este archivo SIN generar, el import de abajo da lo
 // mismo que la inserción, así que `tsc --checkJs` lo comprueba igual.
 export * from "./nucleo.js";
-import { __effect } from "./nucleo.js";
+import { __effect, __podar } from "./nucleo.js";
 // @marea:nucleo-fin
 
 // --- el puente reactividad ↔ DOM ---
 // Envuelve la vista en un effect: cada vez que cambia un signal que la vista
 // leyó, se vuelve a pintar el #app. La vista lee sus reactivas en su parte
 // SÍNCRONA (antes de cualquier await), así que la suscripción queda registrada.
+//
+// El re-pintado tira los nodos viejos, y con ellos los manejadores que llevaban
+// puestos: `__podar` los saca de la tabla mirando qué IDs nombra el marcado
+// nuevo. Los OYENTES no se tocan —cuelgan del documento, no de los nodos—, que
+// es lo que hace que re-pintar no deje ninguno huérfano.
 export function __mount(vista) {
   const app = typeof document !== "undefined" && document.getElementById("app");
   if (!app) return;
   __effect(async () => {
-    app.innerHTML = await vista();
+    const marcado = String(await vista());
+    __podar(marcado);
+    app.innerHTML = marcado;
   });
 }

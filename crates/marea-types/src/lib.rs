@@ -12,6 +12,10 @@
 //! (narrowing) cada rama a su variante.
 
 pub mod builtins;
+/// El modelo de eventos (`on`). Público porque la lista de eventos válidos es
+/// la única que hay: quien la necesite —el completado del editor, mañana— la
+/// consume de aquí en vez de copiarla.
+pub mod eventos;
 
 // El verificador se implementa a lo largo de estos módulos: cada uno
 // aporta su bloque `impl Checker`.
