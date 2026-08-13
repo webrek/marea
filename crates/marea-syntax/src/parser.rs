@@ -180,16 +180,17 @@ impl Parser {
     // --- items ---
 
     fn parse_item(&mut self) -> PResult<Item> {
-        let location = self.parse_location()?;
+        let anotacion = self.parse_anotacion()?;
+        let sin_anotacion = anotacion.location.is_none() && !anotacion.es_session;
         match self.peek_kind() {
-            TokenKind::Fn => Ok(Item::Fn(self.parse_fn(location)?)),
-            TokenKind::Type if location.is_none() => Ok(Item::Type(self.parse_type_decl()?)),
-            TokenKind::Let | TokenKind::Reactive if location.is_none() => {
+            TokenKind::Fn => Ok(Item::Fn(self.parse_fn(anotacion)?)),
+            TokenKind::Type if sin_anotacion => Ok(Item::Type(self.parse_type_decl()?)),
+            TokenKind::Let | TokenKind::Reactive if sin_anotacion => {
                 Ok(Item::Let(self.parse_let()?))
             }
-            TokenKind::Store if location.is_none() => self.parse_store(),
-            _ if location.is_some() => Err(SyntaxError::new(
-                "los atributos de ubicación (@server/@client/@edge) solo aplican a funciones",
+            TokenKind::Store if sin_anotacion => self.parse_store(),
+            _ if !sin_anotacion => Err(SyntaxError::new(
+                "las anotaciones (@server/@client/@edge/@session) solo aplican a funciones",
                 self.peek().span,
             )),
             _ => Err(SyntaxError::new(
@@ -217,30 +218,57 @@ impl Parser {
         })
     }
 
-    fn parse_location(&mut self) -> PResult<Option<Location>> {
+    /// La anotación de una función: `@server`, `@client`, `@edge` —con política
+    /// opcional entre paréntesis, `@server(Usuario)`— o `@session`.
+    ///
+    /// La política va en el mismo hueco que un tipo cualquiera y no introduce
+    /// palabras clave: `Public` es un tipo builtin más. Por eso escala a roles
+    /// (`@server(Admin)`) sin tocar la gramática.
+    fn parse_anotacion(&mut self) -> PResult<Anotacion> {
         if !self.check(&TokenKind::At) {
-            return Ok(None);
+            return Ok(Anotacion::default());
         }
         let at = self.advance();
-        let (name, span) = self.expect_ident("nombre de ubicación tras '@'")?;
-        let loc = match name.as_str() {
+        let (name, span) = self.expect_ident("nombre de anotación tras '@'")?;
+        if name == "session" {
+            return Ok(Anotacion {
+                location: None,
+                politica: None,
+                es_session: true,
+            });
+        }
+        let location = match name.as_str() {
             "server" => Location::Server,
             "client" => Location::Client,
             "edge" => Location::Edge,
             other => {
                 return Err(SyntaxError::new(
                     format!(
-                        "ubicación desconocida '@{}'; usa @server, @client o @edge",
+                        "anotación desconocida '@{}'; usa @server, @client, @edge o @session",
                         other
                     ),
                     at.span.to(span),
                 ))
             }
         };
-        Ok(Some(loc))
+        // Política: `@server(Usuario)`. Opcional en la gramática; que falte o no
+        // sea aceptable lo decide el verificador, que es quien sabe si el
+        // programa declaró identidad.
+        let politica = if self.eat(&TokenKind::LParen) {
+            let t = self.parse_type()?;
+            self.expect(&TokenKind::RParen, "')' para cerrar la política")?;
+            Some(t)
+        } else {
+            None
+        };
+        Ok(Anotacion {
+            location: Some(location),
+            politica,
+            es_session: false,
+        })
     }
 
-    fn parse_fn(&mut self, location: Option<Location>) -> PResult<FnDecl> {
+    fn parse_fn(&mut self, anotacion: Anotacion) -> PResult<FnDecl> {
         let fn_tok = self.expect(&TokenKind::Fn, "'fn'")?;
         let (name, _) = self.expect_ident("nombre de función")?;
         self.expect(&TokenKind::LParen, "'(' tras el nombre de la función")?;
@@ -268,7 +296,9 @@ impl Parser {
         let body = self.parse_block()?;
         let span = fn_tok.span.to(body.span);
         Ok(FnDecl {
-            location,
+            location: anotacion.location,
+            politica: anotacion.politica,
+            es_session: anotacion.es_session,
             name,
             params,
             return_type,

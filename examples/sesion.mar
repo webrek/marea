@@ -1,0 +1,45 @@
+// La frontera de red decide también QUIÉN la cruza.
+//
+// La ubicación de una función ya es parte de su tipo. El permiso también: si el
+// compilador genera el cruce, dejar fuera quién puede hacerlo sería contradecir
+// la tesis. Así que cada @server dice a quién deja llegar, y no decirlo no
+// compila —en cuanto el programa declara qué es una identidad—.
+
+type Usuario = { nombre: String, admin: Bool };
+type Post = { autor: String, texto: String };
+
+store posts: Post;
+
+// La @session traduce un token en una identidad. Hay como mucho una por
+// programa, la invoca el runtime con lo que venga en la petición, y devolver una
+// unión obliga a que el fallo se cubra: no hay forma de leer al usuario sin
+// haber contemplado que no lo haya.
+@session
+fn quien(token: String) -> Usuario | NoAutorizado {
+    if contains(token, "admin") {
+        return Usuario { nombre: "ada", admin: true };
+    }
+    if len(token) > 0 {
+        return Usuario { nombre: "invitado", admin: false };
+    }
+    return NoAutorizado;
+}
+
+// Exige identidad. El Usuario NO viaja en los argumentos: lo inyecta el runtime
+// tras resolver el token, así que el cliente no puede fabricarlo.
+@server(Usuario)
+fn publicar(texto: String) {
+    save(posts, Post { autor: "yo", texto: texto });
+}
+
+// Público, dicho a propósito. Es la otra mitad de la regla: que algo sea abierto
+// es una decisión que se escribe, no un descuido que se hereda.
+@server(Public)
+fn feed() -> List<Post> {
+    return all(posts);
+}
+
+@client
+fn vista() -> Html {
+    return `<h1>Feed</h1>`;
+}

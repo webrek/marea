@@ -153,6 +153,10 @@ pub fn type_lookup(name: &str) -> Option<Ty> {
         "Unit" => Some(Ty::Unit),
         // `Record` es el tipo registro abierto: acceso a campo → Unknown.
         "Record" => Some(Ty::Unknown),
+        // Marcador de política: `@server(Public)` es decir "aquí no exijo
+        // identidad", explícitamente. No tiene valores —no hay forma de
+        // construir uno— así que sólo sirve donde va una política.
+        "Public" => Some(Ty::Named("Public".to_string())),
         _ => None,
     }
 }
@@ -190,7 +194,7 @@ pub const VALUE_NAMES: &[&str] = &[
 /// Todos los nombres de tipo builtin. `List` no está en `type_lookup` (se trata
 /// como caso especial por su argumento) pero sí es un nombre de tipo válido.
 pub const TYPE_NAMES: &[&str] = &[
-    "Int", "Float", "Bool", "String", "Unit", "Html", "Record", "List",
+    "Int", "Float", "Bool", "String", "Unit", "Html", "Record", "List", "Public",
 ];
 
 #[cfg(test)]

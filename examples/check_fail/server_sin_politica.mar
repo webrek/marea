@@ -1,0 +1,17 @@
+// E_SERVER_SIN_POLITICA — el programa declara qué es una identidad, así que
+// cada handler tiene que decir a quién deja cruzar. 'ventas' no lo dice.
+//
+// La regla está acotada: sin la @session de abajo, este mismo archivo compila.
+// No se le puede exigir identidad a un programa que no ha dicho qué es una.
+
+type Usuario = { nombre: String };
+
+@session
+fn quien(token: String) -> Usuario | NoAutorizado {
+    return NoAutorizado;
+}
+
+@server
+fn ventas() -> Int {
+    return 42;
+}

@@ -48,6 +48,18 @@ pub struct BoundaryCrossing {
     pub span: Span,
 }
 
+/// La función `@session` del programa (Fase A). Su presencia es lo que activa
+/// la exigencia de política: sin identidad declarada no hay a quién exigirle
+/// nada, y en cuanto la hay, `@server` a secas deja de compilar.
+#[derive(Debug, Clone)]
+struct Sesion {
+    /// Nombre de la función `@session`. La invoca el runtime, no el programa.
+    fn_name: String,
+    /// Nombre del tipo de identidad que resuelve. Es el único que puede
+    /// aparecer como política de un handler.
+    identidad: String,
+}
+
 /// Firma global de una función (Fase A).
 #[derive(Debug, Clone)]
 struct FnSig {
@@ -68,6 +80,10 @@ pub fn check(module: &Module) -> Vec<TypeError> {
     let mut checker = Checker::new();
     checker.collect(module);
     checker.collect_globals(module);
+    // La identidad se recolecta después de los alias (necesita resolverlos) y
+    // antes de las políticas, que se comparan contra ella.
+    checker.collect_session(module);
+    checker.check_politicas(module);
     checker.check_bodies(module);
     checker.errors
 }
@@ -77,6 +93,10 @@ pub fn check_with_boundaries(module: &Module) -> (Vec<TypeError>, Vec<BoundaryCr
     let mut checker = Checker::new();
     checker.collect(module);
     checker.collect_globals(module);
+    // La identidad se recolecta después de los alias (necesita resolverlos) y
+    // antes de las políticas, que se comparan contra ella.
+    checker.collect_session(module);
+    checker.check_politicas(module);
     checker.check_bodies(module);
     (checker.errors, checker.crossings)
 }
@@ -113,6 +133,8 @@ struct Checker {
     init_context: Option<&'static str>,
     /// Tipo de retorno declarado de la función actual.
     current_return: Ty,
+    /// La `@session` del programa (Fase A), si la declara.
+    session: Option<Sesion>,
     errors: Vec<TypeError>,
     crossings: Vec<BoundaryCrossing>,
 }
@@ -130,6 +152,7 @@ impl Checker {
             current_location: None,
             init_context: None,
             current_return: Ty::Unit,
+            session: None,
             errors: Vec::new(),
             crossings: Vec::new(),
         }

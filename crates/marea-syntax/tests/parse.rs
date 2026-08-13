@@ -155,9 +155,55 @@ fn parse_error_reporta_posicion() {
 }
 
 #[test]
-fn ubicacion_invalida_es_error() {
+fn anotacion_invalida_es_error() {
     let err = parse("@servidor fn v() {}").unwrap_err();
-    assert!(err.message.contains("ubicación desconocida"));
+    assert!(
+        err.message.contains("anotación desconocida"),
+        "{}",
+        err.message
+    );
+    // El mensaje enumera las cuatro que sí existen, @session incluida.
+    assert!(err.message.contains("@session"), "{}", err.message);
+}
+
+// --- política: quién puede cruzar la frontera ---
+
+#[test]
+fn parse_politica_en_server() {
+    let m = parse("@server(Usuario) fn borrar(i: Int) {}").unwrap();
+    let Item::Fn(f) = &m.items[0] else { panic!() };
+    assert_eq!(f.location, Some(Location::Server));
+    let Some(Type::Name { name, .. }) = &f.politica else {
+        panic!("sin política: {:?}", f.politica)
+    };
+    assert_eq!(name, "Usuario");
+}
+
+#[test]
+fn server_sin_politica_parsea_igual() {
+    // La gramática la deja opcional; que falte lo juzga el verificador, que es
+    // quien sabe si el programa declaró identidad.
+    let m = parse("@server fn feed() {}").unwrap();
+    let Item::Fn(f) = &m.items[0] else { panic!() };
+    assert!(f.politica.is_none());
+    assert!(!f.es_session);
+}
+
+#[test]
+fn parse_session() {
+    let m =
+        parse("@session fn quien(t: String) -> Usuario | NoAutorizado { return NoAutorizado; }")
+            .unwrap();
+    let Item::Fn(f) = &m.items[0] else { panic!() };
+    assert!(f.es_session);
+    // No es una ubicación: no se anota como @server ni se registra por RPC.
+    assert_eq!(f.location, None);
+}
+
+#[test]
+fn politica_sin_cerrar_es_error() {
+    let err = parse("@server(Usuario fn f() {}").unwrap_err();
+    assert!(err.message.contains("')'"), "{}", err.message);
 }
 
 // --- registros y listas (Fase 0: contrato AST + desambiguación) ---

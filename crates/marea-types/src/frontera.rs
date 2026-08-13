@@ -213,3 +213,173 @@ pub(crate) fn is_serializable(ty: &Ty) -> bool {
         Ty::Fn { .. } => false,
     }
 }
+
+// --- Política: quién puede cruzar la frontera ---------------------------------
+//
+// La ubicación ya es parte del tipo de una función; el permiso también debería
+// serlo. Si la tesis es que la frontera de red la maneja el compilador, decidir
+// quién la cruza no puede quedar fuera: un middleware sería contradecirse.
+//
+// La forma es la misma que ya se usó dos veces en este lenguaje. `Html` volvió
+// el escapado no-opcional; `$tag` volvió infalsificable la variante. Aquí: que
+// algo sea público hay que escribirlo.
+
+impl Checker {
+    /// Fase A: localiza la función `@session` y deduce el tipo de identidad que
+    /// resuelve. Su presencia es lo que activa la exigencia de política.
+    pub(crate) fn collect_session(&mut self, module: &Module) {
+        for item in &module.items {
+            let Item::Fn(f) = item else { continue };
+            if !f.es_session {
+                continue;
+            }
+            if let Some(previa) = &self.session {
+                self.error(TypeError::new(
+                    "E_SESSION_DUPLICADA",
+                    format!(
+                        "ya hay una función @session ('{}'); un programa resuelve la \
+                         identidad de una sola manera",
+                        previa.fn_name
+                    ),
+                    f.span,
+                ));
+                continue;
+            }
+            // Firma: recibe el token y devuelve una unión con la identidad y al
+            // menos un fallo. La unión obliga a que quien la use cubra el caso
+            // de "no autorizado": es la regla del match aplicada a la identidad.
+            let params_ok = f.params.len() == 1
+                && matches!(
+                    self.ty_from_syntax(&f.params[0].ty),
+                    Ty::String | Ty::Unknown
+                );
+            let variantes = match &f.return_type {
+                Some(Type::Union { variants, .. }) => variants
+                    .iter()
+                    .filter_map(|v| match v {
+                        Type::Name { name, .. } => Some(name.clone()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>(),
+                _ => Vec::new(),
+            };
+            // La identidad es la primera variante que resuelve a un tipo
+            // declarado; el resto son los fallos (`NoAutorizado`, …).
+            let identidad = variantes.iter().find(|v| self.aliases.contains_key(*v));
+            match (params_ok, identidad) {
+                (true, Some(id)) if variantes.len() >= 2 => {
+                    self.session = Some(Sesion {
+                        fn_name: f.name.clone(),
+                        identidad: id.clone(),
+                    });
+                }
+                _ => {
+                    self.error(TypeError::new(
+                        "E_SESSION_FIRMA",
+                        format!(
+                            "una función @session recibe el token y devuelve la identidad o \
+                             un fallo: 'fn {}(token: String) -> TuTipo | NoAutorizado'",
+                            f.name
+                        ),
+                        f.span,
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Fase A: comprueba la política de cada handler. Sin `@session` declarada
+    /// no se exige nada —no se le puede pedir identidad a un programa que no ha
+    /// dicho qué es una identidad—, pero en cuanto existe, `@server` a secas
+    /// deja de compilar.
+    pub(crate) fn check_politicas(&mut self, module: &Module) {
+        for item in &module.items {
+            let Item::Fn(f) = item else { continue };
+            if f.es_session {
+                continue;
+            }
+            let en_servidor = matches!(f.location, Some(Location::Server) | Some(Location::Edge));
+            match &f.politica {
+                Some(politica) => self.check_politica_declarada(f, politica, en_servidor),
+                None if en_servidor && self.session.is_some() => {
+                    let quien = self.session.as_ref().map(|s| s.identidad.clone());
+                    self.error(TypeError::new(
+                        "E_SERVER_SIN_POLITICA",
+                        format!(
+                            "'{}' cruza la frontera y no dice quién puede llegar hasta ella; \
+                             escribe '@server({})' si exige identidad o '@server(Public)' si \
+                             de verdad es pública",
+                            f.name,
+                            quien.unwrap_or_else(|| "Identidad".to_string())
+                        ),
+                        f.span,
+                    ));
+                }
+                None => {}
+            }
+        }
+    }
+
+    fn check_politica_declarada(&mut self, f: &FnDecl, politica: &Type, en_servidor: bool) {
+        if !en_servidor {
+            self.error(TypeError::new(
+                "E_POLITICA_OFF_SERVER",
+                format!(
+                    "'{}' no cruza la frontera de red, así que no tiene a quién exigirle \
+                     identidad; la política solo aplica a @server y @edge",
+                    f.name
+                ),
+                politica.span(),
+            ));
+            return;
+        }
+        let Type::Name { name, args, .. } = politica else {
+            self.error(TypeError::new(
+                "E_POLITICA_DESCONOCIDA",
+                "la política es el nombre de un tipo: '@server(Public)' o el tipo que \
+                 resuelve tu función @session"
+                    .to_string(),
+                politica.span(),
+            ));
+            return;
+        };
+        if !args.is_empty() {
+            self.error(TypeError::new(
+                "E_POLITICA_DESCONOCIDA",
+                format!("la política '{name}' no lleva parámetros de tipo"),
+                politica.span(),
+            ));
+            return;
+        }
+        // `Public` es la decisión explícita de no exigir identidad. Vale siempre,
+        // también sin @session: es lo que hace que la regla sea una decisión y no
+        // un impuesto.
+        if name == "Public" {
+            return;
+        }
+        match &self.session {
+            None => self.error(TypeError::new(
+                "E_POLITICA_SIN_SESSION",
+                format!(
+                    "'{}' exige una identidad de tipo '{name}', pero el programa no declara \
+                     ninguna función @session que la resuelva",
+                    f.name
+                ),
+                politica.span(),
+            )),
+            Some(s) if s.identidad != *name => {
+                let esperado = s.identidad.clone();
+                self.error(TypeError::new(
+                    "E_POLITICA_NO_COINCIDE",
+                    format!(
+                        "la política de '{}' es '{name}', pero la @session del programa \
+                         resuelve '{esperado}'",
+                        f.name
+                    ),
+                    politica.span(),
+                ));
+            }
+            Some(_) => {}
+        }
+    }
+}

@@ -1543,3 +1543,153 @@ fn los_for_anidados_valen() {
     );
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
+
+// ==================== POLÍTICA: quién cruza la frontera ====================
+//
+// La regla está ACOTADA a propósito: sin `@session` no se exige nada, porque no
+// se le puede pedir identidad a un programa que no ha dicho qué es una
+// identidad. En cuanto la declara, `@server` a secas deja de compilar.
+
+/// Un programa con identidad y todos sus handlers decididos.
+const CON_SESSION: &str = "\
+type Usuario = { nombre: String };
+@session fn quien(t: String) -> Usuario | NoAutorizado { return NoAutorizado; }
+@server(Usuario) fn borrar(i: Int) { print(i); }
+@server(Public) fn feed() -> Int { return 1; }
+";
+
+#[test]
+fn un_programa_con_politicas_completas_tipa() {
+    let errs = check_src(CON_SESSION);
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+#[test]
+fn sin_session_no_se_exige_politica() {
+    // Es lo que hace que la regla no cueste una migración: los 27 handlers que
+    // ya existen en el repo no declaran identidad y siguen compilando igual.
+    let errs = check_src("@server fn feed() -> Int { return 1; }");
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+#[test]
+fn e_server_sin_politica() {
+    let src = "\
+type Usuario = { nombre: String };
+@session fn quien(t: String) -> Usuario | NoAutorizado { return NoAutorizado; }
+@server fn ventas() -> Int { return 1; }
+";
+    let errs = check_src(src);
+    assert!(
+        has_code(&errs, "E_SERVER_SIN_POLITICA"),
+        "{:?}",
+        codes(&errs)
+    );
+    // El mensaje propone las dos salidas, con el tipo real del programa.
+    let e = errs
+        .iter()
+        .find(|e| e.code == "E_SERVER_SIN_POLITICA")
+        .unwrap();
+    assert!(e.message.contains("@server(Usuario)"), "{}", e.message);
+    assert!(e.message.contains("@server(Public)"), "{}", e.message);
+}
+
+#[test]
+fn public_es_una_decision_valida_siempre() {
+    // Incluso sin @session: decir "esto es público" nunca es un error, porque
+    // el punto de la regla es que se escriba, no que se exija identidad.
+    let errs = check_src("@server(Public) fn feed() -> Int { return 1; }");
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+#[test]
+fn e_politica_off_server() {
+    // (No se llama `vista`: esa tiene su propia regla, debe devolver Html.)
+    let errs = check_src("@client fn contar() -> Int { return 1; }");
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+    let errs = check_src("@client(Public) fn contar() -> Int { return 1; }");
+    assert!(
+        has_code(&errs, "E_POLITICA_OFF_SERVER"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+#[test]
+fn e_politica_sin_session() {
+    let src = "\
+type Usuario = { nombre: String };
+@server(Usuario) fn borrar(i: Int) { print(i); }
+";
+    let errs = check_src(src);
+    assert!(
+        has_code(&errs, "E_POLITICA_SIN_SESSION"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+#[test]
+fn e_politica_no_coincide() {
+    let src = "\
+type Usuario = { nombre: String };
+type Admin = { nivel: Int };
+@session fn quien(t: String) -> Usuario | NoAutorizado { return NoAutorizado; }
+@server(Admin) fn borrar(i: Int) { print(i); }
+";
+    let errs = check_src(src);
+    assert!(
+        has_code(&errs, "E_POLITICA_NO_COINCIDE"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+#[test]
+fn e_session_duplicada() {
+    let src = "\
+type Usuario = { nombre: String };
+@session fn quien(t: String) -> Usuario | NoAutorizado { return NoAutorizado; }
+@session fn otro(t: String) -> Usuario | NoAutorizado { return NoAutorizado; }
+";
+    assert!(has_code(&check_src(src), "E_SESSION_DUPLICADA"));
+}
+
+#[test]
+fn e_session_firma() {
+    let base = "type Usuario = { nombre: String };\n";
+    // Sin unión de retorno: no obliga a cubrir el fallo.
+    let src = format!(
+        "{base}@session fn quien(t: String) -> Usuario {{ return Usuario {{ nombre: \"a\" }}; }}"
+    );
+    assert!(
+        has_code(&check_src(&src), "E_SESSION_FIRMA"),
+        "retorno no-unión"
+    );
+    // Sin parámetro de token.
+    let src =
+        format!("{base}@session fn quien() -> Usuario | NoAutorizado {{ return NoAutorizado; }}");
+    assert!(has_code(&check_src(&src), "E_SESSION_FIRMA"), "sin token");
+    // El token no es String.
+    let src = format!(
+        "{base}@session fn quien(t: Int) -> Usuario | NoAutorizado {{ return NoAutorizado; }}"
+    );
+    assert!(
+        has_code(&check_src(&src), "E_SESSION_FIRMA"),
+        "token no String"
+    );
+}
+
+#[test]
+fn e_session_no_invocable() {
+    // Llamarla sería elegir tu propia identidad pasando el token que quieras.
+    let src = format!(
+        "{CON_SESSION}@server(Public) fn colar() -> Int {{ quien(\"loquesea\"); return 1; }}"
+    );
+    let errs = check_src(&src);
+    assert!(
+        has_code(&errs, "E_SESSION_NO_INVOCABLE"),
+        "{:?}",
+        codes(&errs)
+    );
+}

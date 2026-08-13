@@ -57,7 +57,10 @@ fn type_aliases(module: &Module) -> std::collections::HashMap<String, Type> {
 
 /// Una función con `@server` o `@edge` corre "remota": handler + stub RPC.
 fn is_remote(f: &FnDecl) -> bool {
-    matches!(f.location, Some(Location::Server) | Some(Location::Edge))
+    // Una `@session` NO se registra como handler: la invoca el runtime con el
+    // token de la petición. Exponerla por RPC dejaría que cualquiera pidiera la
+    // identidad de un token arbitrario, que es un oráculo de sesiones.
+    !f.es_session && matches!(f.location, Some(Location::Server) | Some(Location::Edge))
 }
 
 pub fn emit(module: &Module) -> Project {

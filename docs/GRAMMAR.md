@@ -12,10 +12,19 @@ item        = fn_decl
             | let_stmt
             | store_decl ;
 
-(* --- ubicación: solo aplica a funciones --- *)
-location    = "@" ( "server" | "client" | "edge" ) ;
+(* --- anotaciones: solo aplican a funciones --- *)
+anotacion   = location | session ;
+location    = "@" ( "server" | "client" | "edge" ) politica? ;
+(* La política dice QUIÉN puede cruzar la frontera hasta este handler. Va en el
+   mismo hueco que un tipo cualquiera, así que no introduce palabras clave:
+   `Public` es un tipo builtin. Por eso escala a roles —`@server(Admin)`— sin
+   tocar la gramática. Que falte, o que sobre en un @client, lo juzga el
+   verificador: es quien sabe si el programa declaró una identidad. *)
+politica    = "(" type ")" ;
+(* Traduce un token en una identidad; la invoca el runtime, no el programa. *)
+session     = "@" "session" ;
 
-fn_decl     = location? "fn" IDENT "(" params? ")" ( "->" type )? block ;
+fn_decl     = anotacion? "fn" IDENT "(" params? ")" ( "->" type )? block ;
 params      = param ( "," param )* ","? ;
 param       = IDENT ":" type ;
 

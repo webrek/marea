@@ -37,9 +37,28 @@ pub enum Location {
     Edge,
 }
 
+/// Lo que se escribe antes de un `fn`: dónde corre y quién puede llegar hasta
+/// él. Es un paso intermedio del parser; lo que sobrevive son los campos de
+/// [`FnDecl`].
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Anotacion {
+    pub location: Option<Location>,
+    pub politica: Option<Type>,
+    pub es_session: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct FnDecl {
     pub location: Option<Location>,
+    /// El tipo entre paréntesis de `@server(T)`: la **política** del handler,
+    /// es decir quién puede cruzar la frontera hasta él. `Public` es la decisión
+    /// explícita de no exigir identidad; cualquier otro tipo exige una del tipo
+    /// que resuelva la función `@session`. `None` es "no se decidió", que deja
+    /// de compilar en cuanto el programa declara identidad.
+    pub politica: Option<Type>,
+    /// `@session`: la función que traduce un token en una identidad. Hay como
+    /// mucho una por programa, la invoca el runtime y no el código del usuario.
+    pub es_session: bool,
     pub name: String,
     pub params: Vec<Param>,
     pub return_type: Option<Type>,

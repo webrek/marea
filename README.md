@@ -412,9 +412,10 @@ MAREA_DB=mysql    MAREA_DB_URL=mysql://user:pass@host/db    node /tmp/x/demo.ts 
 MAREA_DB=mongodb  MAREA_DB_URL=mongodb://host/db            node /tmp/x/demo.ts   # npm i mongodb
 ```
 
-**Lo que la validación del límite NO cubre**, dicho sin rodeos: no hay
-autenticación de ninguna clase —todo `@server` es invocable por quien alcance el
-puerto, y `MAREA_HOST=0.0.0.0` lo expone a la red—; las uniones solo se
+**Lo que la validación del límite NO cubre**, dicho sin rodeos: la autorización
+está **a medias** —el verificador ya la exige (ver abajo), pero el runtime
+todavía no la aplica: hoy todo `@server` sigue siendo invocable por quien alcance
+el puerto, y `MAREA_HOST=0.0.0.0` lo expone a la red—; las uniones solo se
 comprueban como "no nulo", porque todavía no hay discriminante de runtime; un
 tipo recursivo se valida a profundidad 1; y las comprobaciones de `Origin`/`Host`
 son defensa en profundidad contra navegadores (`MAREA_ALLOWED_ORIGINS` y
@@ -449,6 +450,57 @@ prototipo. Los identificadores SQL se comillan por dialecto.
 | `postgres` | `pg`            | `npm i pg`         | cadena de conexión         |
 | `mysql`    | `mysql2/promise`| `npm i mysql2`     | cadena de conexión         |
 | `mongodb`  | `mongodb`       | `npm i mongodb`    | cadena de conexión         |
+
+## Quién cruza la frontera: la política de un handler
+
+> **Estado: fase 1 de 2 — sólo el verificador.** El compilador ya exige que cada
+> handler diga quién puede llegar hasta él, y `marea check` lo hace cumplir. Pero
+> **el runtime todavía no lo aplica**: el endpoint RPC sigue atendiendo a
+> cualquiera. Hasta que llegue la fase 2 esto es una garantía de compilación, no
+> de ejecución. No despliegues nada apoyándote en ella.
+
+La ubicación de una función ya es parte de su tipo. El permiso también debería
+serlo: si la tesis es que el compilador maneja la frontera de red, dejar fuera
+*quién* la cruza sería contradecirse, y resolverlo con un middleware sería volver
+al pegamento del que Marea intenta salir.
+
+```marea
+type Usuario = { nombre: String, admin: Bool };
+
+// Traduce un token en una identidad. Como mucho una por programa; la invoca el
+// runtime con lo que venga en la petición, no tu código.
+@session
+fn quien(token: String) -> Usuario | NoAutorizado { ... }
+
+@server(Usuario) fn publicar(texto: String) { ... }  // exige identidad
+@server(Public)  fn feed() -> List<Post> { ... }     // pública, a propósito
+@server          fn ventas() -> Int { ... }          // ❌ no compila
+```
+
+Tres piezas, y la tercera es la que importa:
+
+1. **La identidad no viaja en los argumentos.** El compilador la inyecta tras
+   resolver el token y la **omite de la firma del cliente**, así que no es
+   falsificable: el cliente nunca la manda. Es la misma jugada que `$tag` —quitar
+   el dato de donde el atacante escribe—.
+2. **El retorno de `@session` es una unión**, así que el fallo hay que cubrirlo:
+   no hay forma de leer al usuario sin haber contemplado que no lo haya. Y
+   llamarla desde el programa es un error (`E_SESSION_NO_INVOCABLE`): sería
+   elegirte tu propia identidad pasando el token que quieras.
+3. **`@server` a secas deja de compilar** (`E_SERVER_SIN_POLITICA`). Que algo sea
+   público hay que escribirlo. Es la lección de `Html`: el escapado dejó de
+   olvidarse cuando dejó de ser opcional, no cuando avisaba.
+
+**La regla está acotada a propósito:** sólo se activa cuando el programa declara
+una `@session`. No se le puede exigir identidad a un programa que no ha dicho qué
+*es* una identidad, y así los ejemplos que ya existían siguen compilando sin
+tocar una línea. Lo que previene es el fallo peligroso —tienes auth y se te
+olvida en un handler—, no el honesto, que es no tener auth y que se vea porque no
+hay ningún `@session` en el archivo.
+
+Como la política ocupa el hueco de un tipo cualquiera, escala a roles
+(`@server(Admin)`) sin gramática nueva. `examples/sesion.mar` es el ejemplo
+completo; `examples/check_fail/server_sin_politica.mar`, el que debe fallar.
 
 ## App web de verdad: las dos fronteras tocando el DOM
 
@@ -496,6 +548,11 @@ manejadores; `vista()` se monta en un `effect` que re-pinta `#app` al cambiar.
       SQLite, PostgreSQL, MySQL y MongoDB (elegidos por `MAREA_DB`, sin cambiar el `.mar`)
 - [x] **App web (RPC + reactivo + DOM)** — `marea build-app` genera una página real
       donde las `@server` se llaman por RPC y el estado `reactive` de módulo re-pinta el DOM
+- [x] **Política, fase 1 (verificador)** — `@session` + `@server(T)`/`@server(Public)`;
+      `@server` sin decidir deja de compilar en cuanto el programa declara identidad
+- [ ] **Política, fase 2 (runtime)** — el endpoint RPC resuelve el token, inyecta la
+      identidad y responde 401; hasta entonces la garantía es sólo de compilación
+- [ ] **Módulos** — `import`, para que un programa deje de ser un archivo
 
 ## Licencia
 

@@ -310,6 +310,25 @@ impl Checker {
     }
 
     pub(crate) fn check_call(&mut self, callee: &Expr, args: &[Expr], span: Span) -> Ty {
+        // La `@session` la invoca el runtime al recibir la petición, con el
+        // token que venga en ella. Llamarla desde el programa sería fabricarse
+        // una identidad pasando el token que uno quiera: justo lo que la
+        // anotación existe para impedir.
+        if let Some(s) = &self.session {
+            let nombre = callee_name(callee);
+            if nombre == s.fn_name {
+                let fn_name = s.fn_name.clone();
+                self.error(TypeError::new(
+                    "E_SESSION_NO_INVOCABLE",
+                    format!(
+                        "'{fn_name}' es la @session del programa: la llama el runtime con el \
+                         token de la petición. Llamarla desde aquí sería elegir tu propia \
+                         identidad; recibe la que te pasa '@server(...)'"
+                    ),
+                    span,
+                ));
+            }
+        }
         // Dentro de un inicializador que se evalúa de forma síncrona (el memo de
         // una `reactive`, o una global de módulo) no puede haber ninguna llamada
         // que el codegen emita con `await`: eso es todo salvo un puñado de
