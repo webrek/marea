@@ -156,7 +156,7 @@ function __serveStatic(req: http.IncomingMessage, res: http.ServerResponse): boo
   // Lista blanca de extensiones servibles. Sin ella, la raíz estática (que es
   // el propio directorio de salida) expone `server.ts` —la lista completa de
   // handlers, anulando la anti-enumeración del endpoint— y el `.log` del store
-  // de archivo, es decir all los datos persistidos.
+  // de archivo, es decir todos los datos persistidos.
   const dot = path.lastIndexOf(".");
   const ext = dot === -1 ? "" : path.slice(dot);
   const mime = __MIME[ext];
@@ -521,7 +521,7 @@ export function text(x: unknown): string {
 }
 // Escapa un texto para incrustarlo en HTML. El lenguaje construye marcado
 // concatenando cadenas y 'render' lo inyecta por innerHTML, así que sin esto un
-// dato persistido vía RPC se ejecuta como marcado en all los clientes.
+// dato persistido vía RPC se ejecuta como marcado en todos los clientes.
 // División entera. En JS `7/0` es Infinity y `0/0` es NaN: valores que no son
 // enteros y que se colarían dentro de un Int mintiendo sobre su tipo. El backend
 // WASM trapea, así que aquí también se corta —el mismo programa no puede dar

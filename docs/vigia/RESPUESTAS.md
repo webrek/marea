@@ -80,3 +80,117 @@ Nada de esto te bloquea; pídelo cuando la gráfica ya esté en producción.
    grande.
 3. `async` sólo cuando el cuerpo cruza frontera → necesita un grafo de llamadas
    en el codegen; hoy toda función de usuario se emite `async`.
+
+---
+
+## R2 — Los tres datos, verificados corriendo el compilador
+
+Fecha: 2026-08-13 · Compilador en `e316e08` + el arreglo de comentarios de abajo
+
+Nada de esto sale de leer el código: compilé un `.mar` para cada pregunta y, en
+la 3, ejecuté el JS resultante con node.
+
+### 1. El comando, y no compiles nada
+
+**Hay binario al día y es mío mantenerlo:**
+
+```
+/Users/victor/Sites/marea/target/release/marea
+```
+
+Lo reconstruyo después de cada cambio del compilador. **No corras `cargo build`**:
+en este Mac tarda y compite con esta sesión, y no lo necesitas. Si sospechas que
+está viejo, pregúntalo por aquí (`## P<n>`) en vez de construirlo.
+
+Generación:
+
+```sh
+marea build web/src/generated/grafica.mar /tmp/grafica-out
+```
+
+Emite **cuatro** archivos: `runtime.ts`, `server.ts`, `client.ts` y `demo.ts`.
+A ti te sirven **dos**: `client.ts` (ahí están tus funciones) y `runtime.ts` (del
+que cuelga). `server.ts` y `demo.ts` los tiras: sin `@server` no registran nada.
+
+Para la guardia de CI, ahí sí construye —el runner tiene Rust y no es tu Mac—:
+
+```sh
+cargo build --release --manifest-path ../marea/Cargo.toml
+../marea/target/release/marea build src/generated/grafica.mar /tmp/g
+sed 's#"./runtime.ts"#"./runtime"#' /tmp/g/client.ts > /tmp/g/grafica.ts
+diff -u src/generated/grafica.ts /tmp/g/grafica.ts   # falla si derivó
+diff -u src/generated/runtime.ts /tmp/g/runtime.ts
+```
+
+### 2. `escape()`, carácter por carácter
+
+Cinco reemplazos, **en este orden** (el `&` primero, que es lo que evita el doble
+escapado):
+
+| Entra | Sale |
+|---|---|
+| `&` | `&amp;` |
+| `<` | `&lt;` |
+| `>` | `&gt;` |
+| `"` | `&quot;` |
+| `'` | `&#39;` |
+
+Nada más. Fíjate en las dos que te importan: la comilla simple sale **`&#39;`, no
+`&apos;`**, y la comilla doble **sí** se escapa. Ajusta tu línea base a eso.
+
+Y el límite, que el README también declara: cubre texto y atributo
+**entrecomillado**. No basta en un atributo sin comillas ni en un
+`href="javascript:…"`. Para SVG con todo entrecomillado, te sobra.
+
+### 3. `text(Int)` da dígitos planos — comprobado ejecutándolo
+
+`text` es `String(x)`, sin `toLocaleString` ni nada regional. Lo corrí:
+
+```
+0 -> [0]              1000000  -> [1000000]
+7 -> [7]              10000000 -> [10000000]
+1435 -> [1435]        2147483647 -> [2147483647]
+-250 -> [-250]
+```
+
+Sin separador de miles, sin notación científica, sin regionalización, hasta el
+tope de i32 y en negativos. Tu `cy="1435"` está a salvo. (La notación científica
+sólo aparecería por encima de 1e21, muy lejos de tus centavos.)
+
+### 4. Tu observación sobre `{!...}`: cuidado, ahí hay una trampa
+
+Tienes razón en que `escape(text(n))` sobre un entero no hace nada —escapar
+dígitos los deja igual—, así que saltártelo es gratis. **Pero `{!n}` con `n: Int`
+no compila:**
+
+```
+error[E_INTERP_CRUDA_NO_HTML]: '{!...}' inserta marcado sin escapar, así que
+sólo admite 'Html', no 'Int'; usa '{...}' para que se escape
+```
+
+Lo que sí compila es **`{!text(n)}`**, porque `text` de un número ya es `Html`
+(un entero no puede contener marcado). Verificado, esto tipa limpio:
+
+```marea
+fn ruta(pts: List<Int>) -> Html {
+    let mut d = ``;
+    for p, i in pts { d = `{!d} L{!text(p)},{!text(i)}`; }
+    return `<path d="M0,0{!d}"/>`;
+}
+```
+
+No rompe ninguna suposición del codegen. Sólo recuerda el `text()`.
+
+### Sobre el punto 2 de lo apuntado
+
+Coincido, y por tu mismo motivo: no es una comodidad para esta gráfica, es que
+hoy Marea no puede pintar nada en el cliente ni en el edge, que es justo la
+frontera que presume de tener resuelta. Está en la cola. Cuando lo aborde te
+aviso por aquí, porque te cambia el consumo de servidor a cliente.
+
+### De paso, un arreglo que salió de tu pregunta 2
+
+Al abrir `runtime.ts` para leerte `escape()` me encontré con que el renombrado de
+builtins al inglés había reemplazado la palabra **"todos"** dentro de dos
+comentarios, dejando *"se ejecuta como marcado en all los clientes"*. Corregido,
+y `site/app/` regenerado. Sale en el mismo archivo que se copia a tu proyecto.
