@@ -357,3 +357,27 @@ fn apuntar(mensaje: &str, ruta: &str, fuente: &str, span: Span) -> String {
         mensaje, ruta, linea, col, linea, texto, "", cursor
     )
 }
+
+/// Une los módulos de un programa en uno solo, en orden topológico.
+///
+/// Es lo que consume el codegen: la salida de Marea es un bundle plano —un
+/// `client.ts` y un `server.ts`—, no un módulo ES por archivo, así que emitir
+/// por separado daría una copia del runtime de 43 KB por módulo y ninguna forma
+/// de que una función llame a otra.
+///
+/// Los `import` desaparecen aquí: ya cumplieron su papel en el verificador, que
+/// es donde deciden qué ve cada módulo. Aplanar DESPUÉS de verificar es lo que
+/// permite que el aislamiento sea real y el bundle siga siendo plano.
+///
+/// El orden importa y es el topológico: las dependencias van antes, así que una
+/// constante de módulo que dependa de otra se inicializa en el orden correcto.
+pub fn aplanar(program: &Program) -> Module {
+    let mut items = Vec::new();
+    for m in &program.modulos {
+        items.extend(m.modulo.items.iter().cloned());
+    }
+    Module {
+        items,
+        imports: Vec::new(),
+    }
+}

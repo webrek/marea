@@ -8,6 +8,13 @@
 import http from "node:http";
 import fs from "node:fs";
 
+// El `fetch` del entorno, capturado antes de que lo tape el builtin homónimo de
+// Marea (`export function fetch`, más abajo). Una declaración de módulo gana al
+// global en TODO el archivo, así que sin esto `__rpc` acababa llamando al
+// builtin del lenguaje —que pasa por la lista blanca anti-SSRF y rechaza
+// loopback, es decir el propio servidor— y `__http` se llamaba a sí mismo.
+const __fetchDelEntorno: typeof globalThis.fetch = globalThis.fetch;
+
 // Lee un entero positivo del entorno. Un valor ausente o mal formado cae al
 // valor por defecto en vez de convertirse en NaN: `size > NaN` es siempre false,
 // así que un `MAREA_MAX_BODY=ilimitado` desactivaría el tope del cuerpo, y un
@@ -335,7 +342,7 @@ export function stopServer(): Promise<void> {
 
 // La llamada del cliente que CRUZA la frontera de red.
 export async function __rpc(fn: string, args: unknown[]): Promise<unknown> {
-  const res = await fetch(MAREA_URL, {
+  const res = await __fetchDelEntorno(MAREA_URL, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ fn, args }),
@@ -677,7 +684,7 @@ async function __http(u: string, metodo: string, cuerpo: string | null): Promise
   const control = new AbortController();
   const reloj = setTimeout(() => control.abort(), __envInt("MAREA_HTTP_TIMEOUT", 10_000));
   try {
-    const res = await fetch(url, {
+    const res = await __fetchDelEntorno(url, {
       method: metodo,
       headers: cuerpo === null ? {} : { "content-type": "application/json" },
       body: cuerpo === null ? undefined : cuerpo,

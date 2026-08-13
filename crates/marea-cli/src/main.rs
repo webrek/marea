@@ -77,6 +77,17 @@ fn main() -> ExitCode {
             }
             Err(code) => code,
         },
+        // Con `import`, el front-end es otro: hay que resolver el grafo, chequear
+        // todos los módulos y APLANARLOS. La salida de Marea es un bundle plano,
+        // así que emitir módulo a módulo daría una copia del runtime por archivo
+        // y ninguna forma de que una función llame a otra.
+        "build" if tiene_imports(&src) => {
+            let out_dir = out_arg.unwrap_or("marea-out");
+            match frontend_programa(path, no_check) {
+                Ok(module) => build(&module, out_dir),
+                Err(code) => code,
+            }
+        }
         "build" => {
             let out_dir = out_arg.unwrap_or("marea-out");
             match frontend(&src, no_check) {
@@ -114,6 +125,13 @@ fn main() -> ExitCode {
             let out_dir = out_arg.unwrap_or("marea-web");
             match frontend(&src, no_check) {
                 Ok(module) => build_web(&module, out_dir),
+                Err(code) => code,
+            }
+        }
+        "build-app" if tiene_imports(&src) => {
+            let out_dir = out_arg.unwrap_or("marea-app");
+            match frontend_programa(path, no_check) {
+                Ok(module) => build_app(&module, out_dir),
                 Err(code) => code,
             }
         }
@@ -391,4 +409,61 @@ fn check_programa(path: &str) -> ExitCode {
         if programa.modulos.len() == 1 { "" } else { "s" }
     );
     ExitCode::FAILURE
+}
+
+/// Front-end de los comandos de compilación cuando el archivo tiene `import`:
+/// resuelve el grafo, chequea TODOS los módulos y devuelve el programa aplanado
+/// listo para el codegen.
+fn frontend_programa(path: &str, no_check: bool) -> Result<marea_syntax::Module, ExitCode> {
+    let programa = match marea_syntax::program::resolve_program(std::path::Path::new(path)) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{}", e.render());
+            return Err(ExitCode::FAILURE);
+        }
+    };
+    let mut sintaxis = 0usize;
+    for m in &programa.modulos {
+        for e in marea_syntax::parse_recovering(&m.fuente).1 {
+            eprintln!("{}:", m.nombre);
+            eprintln!("{}\n", e.render(&m.fuente));
+            sintaxis += 1;
+        }
+    }
+    if sintaxis > 0 {
+        eprintln!(
+            "{} error{} de sintaxis",
+            sintaxis,
+            if sintaxis == 1 { "" } else { "es" }
+        );
+        return Err(ExitCode::FAILURE);
+    }
+    if !no_check {
+        let errores = marea_types::check_program(&programa);
+        if !errores.is_empty() {
+            for pe in &errores {
+                let m = &programa.modulos[pe.modulo];
+                eprintln!("{}:", m.nombre);
+                eprintln!("{}\n", pe.error.render(&m.fuente));
+            }
+            let n = errores.len();
+            eprintln!(
+                "{} error{} de tipos (usa --no-check para compilar de todos modos)",
+                n,
+                if n == 1 { "" } else { "es" }
+            );
+            return Err(ExitCode::FAILURE);
+        }
+    }
+    println!(
+        "  {} módulos: {}",
+        programa.modulos.len(),
+        programa
+            .modulos
+            .iter()
+            .map(|m| m.nombre.as_str())
+            .collect::<Vec<_>>()
+            .join(" -> ")
+    );
+    Ok(marea_syntax::program::aplanar(&programa))
 }

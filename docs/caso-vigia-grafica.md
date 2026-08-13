@@ -110,10 +110,27 @@ buen caso de prueba para el lenguaje.
 ## Criterio de aceptación: el oráculo
 
 La versión en TypeScript ya funciona y está en producción, así que hay con qué
-comparar. Un script alimenta las mismas series a las dos implementaciones y
-compara el SVG **carácter por carácter**.
+comparar. Un script (`web/scripts/oraculo-marea.tsx`) alimenta las mismas series
+a las dos implementaciones y compara la salida.
 
-Mientras no salga idéntico, producción sigue con la de TypeScript.
+> **Corregido el 13-ago-2026.** Este documento decía "carácter por carácter". Era
+> un criterio imposible **por construcción**, y el error era mío: TypeScript
+> calcula en flotante y redondea a un decimal, Marea trunca enteros sobre el
+> viewBox multiplicado por diez. Esa décima no es un defecto a corregir, es la
+> resolución del método. Quien persiga el cero está persiguiendo un fantasma.
+>
+> **Criterio real:** etiquetas del eje **idénticas como texto**, y geometría
+> dentro de **0.1 unidades** del viewBox de 760×288 — nueve centésimas de píxel
+> en pantalla. Tampoco se compara el orden de emisión: Marea emite las etiquetas
+> por altura y TypeScript por serie, y en SVG dos textos que no se solapan dan
+> igual en cualquier orden.
+
+Resultado con tres tiendas: etiquetas del eje idénticas, misma cantidad de
+líneas, desviación máxima 0.10 en coordenadas y 0.10 en el reparto vertical de
+las etiquetas. Las cinco insignias de veredicto de la página coinciden en texto
+y en clases.
+
+Mientras no cumpla ese criterio, producción sigue con la de TypeScript.
 
 Casos mínimos:
 

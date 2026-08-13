@@ -223,3 +223,63 @@ a ser el `sed` de la extensión.
 No corre prisa hoy: con el parche tengo la gráfica funcionando en local y puedo
 seguir con las etiquetas y el estado vacío. Pero no la mandamos a producción con
 un archivo generado que hay que editar a mano.
+
+---
+
+## P5 — Sin `import`, migrar el sitio significa un solo archivo
+
+Fecha: 2026-08-13
+
+Contexto nuevo: la decisión pasó de "la gráfica en Marea" a **migrar el sitio
+entero**. Con eso, la falta de `import` deja de ser una incomodidad y se vuelve
+la restricción que manda en el diseño.
+
+### El caso concreto
+
+Escribí la segunda pieza —la insignia de veredicto, que sale en toda la web— en
+su propio `ui.mar`. Tipó a la primera. Al ir a generarla me encontré con que **no
+hay forma de tener dos módulos**:
+
+- `marea build a.mar` y `marea build b.mar` emiten cada uno **su propio
+  `runtime.ts` de 43 KB**. Dos copias del mismo runtime en el bundle.
+- Y no hay manera de que una función de `b.mar` llame a una de `a.mar`.
+
+Así que fusioné los dos en `src/generated/sitio.mar`. Va por **317 líneas** con
+dos piezas migradas: la gráfica y la insignia. Faltan las tarjetas de producto,
+el rango de precios, la paginación, los filtros, el buscador y el marcado de seis
+páginas. Ese archivo se va a un par de miles de líneas, y no por complejidad del
+sitio, sino porque el lenguaje no deja partirlo.
+
+Su propio `tienda.mar` es la misma demostración: un marketplace entero en un
+archivo, con el índice de secciones escrito en un comentario de cabecera porque
+no hay otra cosa que haga de índice.
+
+### Lo que pido
+
+**`import`.** Y la versión mínima me sirve: que `import "./ui.mar"` una los
+archivos antes de verificar tipos, sin espacios de nombres, sin exportación
+selectiva, sin resolución de paquetes. Con poder partir el programa en archivos
+por tema me vale; lo demás es refinamiento.
+
+Si prefieren algo aún más barato de implementar y ya me desatasca: un
+`include "./ui.mar"` puramente textual, resuelto antes del lexer. Feo, pero
+convierte "un archivo de 2000 líneas" en "diez de 200" sin tocar el verificador
+ni el codegen.
+
+### Por qué creo que les toca a ustedes y no es capricho mío
+
+Un lenguaje cuya tesis es escribir aplicaciones web completas se va a topar con
+esto en cuanto alguien escriba la segunda pantalla. No es una necesidad de Vigía:
+es la primera vez que alguien intenta usar Marea para algo que no cabe en un
+ejemplo, y la primera pared que aparece es "no puedo partir el archivo".
+
+Efecto secundario que ya noto: con un módulo único, tocar la insignia regenera
+también la gráfica, así que la guardia de deriva compara todo el archivo cada
+vez. No es grave, pero es ruido que crece con el sitio.
+
+### Lo que no les pido
+
+No pido espacios de nombres, ni visibilidad `pub`, ni resolución tipo npm.
+Tampoco corre prisa hoy: puedo seguir migrando piezas al archivo único un buen
+rato antes de que se vuelva insoportable. Pero si van a tocar el front-end
+pronto, esto cambia cómo se ve un proyecto de Marea de verdad.

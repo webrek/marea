@@ -87,3 +87,55 @@ console.log("RESULTADO:" + JSON.stringify({{ bloqueados, total: casos.length, li
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// El cruce de frontera, de verdad: un `@client` llama a un `@server` y la
+/// llamada viaja por HTTP.
+///
+/// Es la demo de portada del README y estuvo ROTA sin que nada lo notara. El
+/// builtin `fetch` de Marea (`export function fetch` en el runtime) tapa el
+/// `fetch` del entorno en todo el archivo, así que `__rpc` acabó llamando al del
+/// lenguaje, que pasa por la lista blanca anti-SSRF y rechaza loopback: cada RPC
+/// moría con "host no permitido".
+///
+/// Los tests de SSRF de arriba no lo veían porque todos sus casos se RECHAZAN
+/// antes de llegar a la llamada; nunca se ejercitaba el camino feliz. Este sí.
+#[test]
+fn un_rpc_cruza_de_verdad() {
+    if !hay_node() {
+        eprintln!("sin node en el PATH: se omite");
+        return;
+    }
+    let dir = std::env::temp_dir().join("marea-rpc-vivo");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let p = marea_codegen::emit(
+        &marea_syntax::parse(
+            "@server fn saludar(n: String) -> String { return concat(\"hola \", n); }\n\
+             @client fn main() { print(saludar(\"marea\")); }",
+        )
+        .unwrap(),
+    );
+    std::fs::write(dir.join("runtime.ts"), &p.runtime).unwrap();
+    std::fs::write(dir.join("server.ts"), &p.server).unwrap();
+    std::fs::write(dir.join("client.ts"), &p.client).unwrap();
+    std::fs::write(dir.join("demo.ts"), &p.demo).unwrap();
+    let salida = Command::new("node")
+        .arg("demo.ts")
+        .current_dir(&dir)
+        .output()
+        .expect("no se pudo lanzar node");
+    let texto = format!(
+        "{}{}",
+        String::from_utf8_lossy(&salida.stdout),
+        String::from_utf8_lossy(&salida.stderr)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        texto.contains("hola marea"),
+        "el RPC no llegó al servidor:\n{texto}"
+    );
+    assert!(
+        !texto.contains("host no permitido"),
+        "la defensa anti-SSRF está bloqueando el propio transporte:\n{texto}"
+    );
+}

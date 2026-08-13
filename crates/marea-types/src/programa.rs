@@ -55,6 +55,7 @@ pub fn check_program_with_boundaries(
 
     let sesion = resolver_sesion(program, &mut errores);
     comprobar_almacenes_del_programa(program, &mut errores);
+    comprobar_nombres_unicos(program, &mut errores);
 
     for m in &program.modulos {
         let deps = deps_por_ruta(program, m);
@@ -286,6 +287,51 @@ fn comprobar_almacenes_del_programa(program: &Program, errores: &mut Vec<Program
                 }),
                 None => {
                     visto.insert(name.clone(), m.nombre.clone());
+                }
+            }
+        }
+    }
+}
+
+/// Dos módulos no pueden DECLARAR el mismo nombre de nivel superior.
+///
+/// No contradice el aislamiento —que va de qué VE cada módulo—, sino que se
+/// deriva de cómo se emite: la salida es un bundle plano, así que dos `fn fmt`
+/// en archivos distintos acabarían siendo la misma declaración de JavaScript y
+/// una se comería a la otra en silencio. Aquí se dice antes, y con los dos
+/// archivos delante.
+///
+/// Importar un nombre no es declararlo, así que reutilizarlo no cuenta. La
+/// alternativa —renombrar al emitir (`usuarios__fmt`)— quita la restricción,
+/// pero ensucia la salida generada, que es un archivo que la gente commitea y
+/// compara; queda para cuando esto estorbe de verdad.
+fn comprobar_nombres_unicos(program: &Program, errores: &mut Vec<ProgramTypeError>) {
+    let mut visto: HashMap<String, String> = HashMap::new();
+    for m in &program.modulos {
+        for item in &m.modulo.items {
+            let (nombre, span) = match item {
+                Item::Fn(f) => (f.name.clone(), f.span),
+                Item::Type(t) => (t.name.clone(), t.span),
+                Item::Let(l) => (l.name.clone(), l.span),
+                // Los almacenes ya los cubre comprobar_almacenes_del_programa,
+                // con un mensaje que explica lo de la tabla compartida.
+                Item::Store { .. } => continue,
+            };
+            match visto.get(&nombre) {
+                Some(donde) => errores.push(ProgramTypeError {
+                    modulo: m.id,
+                    error: TypeError::new(
+                        "E_NOMBRE_DUPLICADO_EN_PROGRAMA",
+                        format!(
+                            "'{nombre}' ya se declara en '{donde}'. Los módulos se emiten en un \
+                             solo bundle, así que los nombres de nivel superior son de todo el \
+                             programa: renombra uno de los dos"
+                        ),
+                        span,
+                    ),
+                }),
+                None => {
+                    visto.insert(nombre, m.nombre.clone());
                 }
             }
         }
