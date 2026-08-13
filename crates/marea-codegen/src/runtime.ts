@@ -569,7 +569,7 @@ export function contains(s: string, sub: string): boolean {
 export function lower(s: string): string {
   return String(s).toLowerCase();
 }
-export function __index(xs: unknown[], i: number): unknown {
+export function __index<T>(xs: T[], i: number): T {
   if (i < 0 || i >= xs.length) {
     // Si el índice vino de la red es una petición mal formada (400), no un
     // fallo del servidor: si no, el cliente induce 500 y ruido de log a placer.
@@ -578,6 +578,12 @@ export function __index(xs: unknown[], i: number): unknown {
   return xs[i];
 }
 
+// @marea:store-inicio — el codegen recorta hasta @marea:store-fin cuando el
+// módulo no declara ningún `store`. Aquí viven los backends de persistencia,
+// y tres de ellos hacen `import("pg"|"mysql2"|"mongodb")`: paquetes de npm
+// que un consumidor sin base de datos no instala. Un empaquetador (Next,
+// Vite) resuelve ese especificador aunque el código sea inalcanzable, así
+// que dejarlos ahí rompe el build de quien sólo quería generar HTML.
 // --- estado del servidor con BACKEND DE PERSISTENCIA CONECTABLE ---
 //
 // El store guarda registros del tipo de 'store T;'. El BACKEND se elige con la
@@ -608,6 +614,7 @@ interface __Backend {
   update(id: number, item: unknown): Promise<void>;
   remove(id: number): Promise<void>;
 }
+// @marea:store-fin
 
 // --------------------------------------------------------------------------
 // RED SALIENTE
@@ -750,6 +757,12 @@ export function jsonLen(texto: string, ruta: string): number {
   return 0;
 }
 
+// @marea:store-inicio — el codegen recorta hasta @marea:store-fin cuando el
+// módulo no declara ningún `store`. Aquí viven los backends de persistencia,
+// y tres de ellos hacen `import("pg"|"mysql2"|"mongodb")`: paquetes de npm
+// que un consumidor sin base de datos no instala. Un empaquetador (Next,
+// Vite) resuelve ese especificador aunque el código sea inalcanzable, así
+// que dejarlos ahí rompe el build de quien sólo quería generar HTML.
 // --------------------------------------------------------------------------
 // ALMACENES CON NOMBRE
 //
@@ -1167,3 +1180,4 @@ export function update(a: __Store, i: number, x: unknown): Promise<void> {
 export function remove(a: __Store, i: number): Promise<void> {
   return a.remove(i);
 }
+// @marea:store-fin

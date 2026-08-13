@@ -143,3 +143,83 @@ compilara y midiera. El reparto vertical de esas etiquetas necesita ordenar por
 posición, y sin cierres ni `sort` va a salir por conteo de rangos con dos bucles
 anidados — si eso les parece señal de que falta algo en el lenguaje, ahí tienen
 un caso concreto; a mí no me bloquea.
+
+---
+
+## P4 — El runtime generado no se puede empaquetar en Next. Ni en el servidor
+
+Fecha: 2026-08-13
+
+R3 recibida y de acuerdo en todo. Atarlo con tests en vez de con un aviso es
+mejor que lo que pedí. Y me quedo con los dos apuntes: mis escalas no meten
+negativos (el `.mar` sujeta `yMin` a 0 antes de escalar), así que ni la
+truncación hacia cero ni el `-0` me tocan hoy — pero ahora sé por qué, que era
+lo que importaba.
+
+Esto es lo que se estrelló al enchufarlo de verdad.
+
+### El caso concreto
+
+Metí la gráfica en un componente de **servidor**, como recomendaba R1. La página
+devuelve **500**:
+
+```
+Module not found: Can't resolve 'mongodb'
+  1036 |       const { MongoClient } = await import("mongodb");
+Import trace:
+  Server Component:
+    ./web/src/generated/runtime.ts
+    ./web/src/generated/grafica.ts
+    ./web/src/components/MareaPriceChart.tsx
+    ./web/src/app/modelo/[id]/page.tsx
+```
+
+Lo mismo con `pg` y `mysql2/promise`. Mi módulo **no usa `store`**: ese código es
+inalcanzable. Da igual — el empaquetador resuelve el especificador antes de
+saber si se ejecuta.
+
+Esto corrige lo que dijimos los dos: R1 decía que en el servidor el runtime "da
+igual" porque `node:http` es de Node. Cierto para `node:http`. **No para los tres
+drivers**, que son paquetes de npm que nadie instaló. Hoy, tal cual sale, el
+`.ts` de Marea **no se puede empaquetar en Next**, ni en cliente ni en servidor.
+
+### Lo que probé, por si les ahorra el camino
+
+| Intento | Resultado |
+|---|---|
+| `@ts-nocheck` en el runtime | No. No es un error de tipos, es del empaquetador |
+| `serverExternalPackages: ["pg","mysql2","mongodb"]` en Next | No. Los resuelve igual |
+| Especificador no literal: `import(__drv("pg"))` con `__drv` identidad | No. Turbopack dobla la constante |
+| **Sustituir la línea del import por un `throw`** | **Sí.** Es lo que corre ahora |
+
+También hay un segundo parche, menor: indexar una lista emite `unknown`
+(`__index(dias, ult)`), y al pasarlo a una función tipada, `strict` lo rechaza.
+Lo tapo con `@ts-nocheck` en el cliente generado. Menciono el tipo exacto por si
+tiparlo es de una línea: `__index<T>(xs: T[], i: number): T`.
+
+### Por qué esto sí bloquea producción
+
+No es que sea feo: es que **el post-proceso ya no es un `sed` cosmético**. Paso de
+quitar una extensión a arrancarle tres líneas de código a un archivo generado de
+43 KB, a mano, cada vez que regeneremos. Y choca de frente con la guardia de
+deriva que ustedes mismos propusieron en R2: si CI regenera y compara contra lo
+commiteado, el parche hace que **siempre** difiera, salvo que el parche viva
+dentro de la propia guardia. Que es exactamente el tipo de cosa que se rompe en
+silencio dentro de seis meses.
+
+### Lo que pido
+
+Su punto 2 de "apuntado para cuando lo quieras bonito" —partir el runtime y
+emitir sólo los builtins que el módulo usa— **no es para cuando esté bonito: es
+lo que separa esto de producción**. Lo confirmo con el caso de arriba, no de
+oídas.
+
+Si el corte entero es grande, hay una versión pequeña que me desatasca igual y
+seguramente les vale para cualquier consumidor con empaquetador: **emitir los
+backends de `store` sólo cuando el módulo declara algún `store`**. Mi `.mar` no
+declara ninguno; con eso, las tres líneas no existirían y el post-proceso vuelve
+a ser el `sed` de la extensión.
+
+No corre prisa hoy: con el parche tengo la gráfica funcionando en local y puedo
+seguir con las etiquetas y el estado vacío. Pero no la mandamos a producción con
+un archivo generado que hay que editar a mano.

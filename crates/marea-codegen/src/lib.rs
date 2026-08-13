@@ -37,10 +37,79 @@ pub struct AppProject {
 }
 
 /// Builtins provistos por el runtime; no se transpilan ni se registran.
-const BUILTINS: &str = "{ __store, __register, __badRequest, __rpc, print, concat, render, len, \
-     text, escape, html, __div, __rem, append, contains, lower, fetch, post, jsonText, \
-     jsonInt, jsonFloat, jsonLen, __index, save, all, update, remove, __marea_is, \
-     __signal, __memo, __resource, __effect }";
+const BUILTINS_BASE: &[&str] = &[
+    "__register",
+    "__badRequest",
+    "__rpc",
+    "print",
+    "concat",
+    "render",
+    "len",
+    "text",
+    "escape",
+    "html",
+    "__div",
+    "__rem",
+    "append",
+    "contains",
+    "lower",
+    "fetch",
+    "post",
+    "jsonText",
+    "jsonInt",
+    "jsonFloat",
+    "jsonLen",
+    "__index",
+    "__marea_is",
+    "__signal",
+    "__memo",
+    "__resource",
+    "__effect",
+];
+
+/// Los que sólo existen si el módulo declara algún `store`. Importarlos cuando
+/// no los hay traería un import a nombres que el runtime recortado ya no exporta.
+const BUILTINS_STORE: &[&str] = &["__store", "save", "all", "update", "remove"];
+
+/// La lista de importación del runtime para este módulo.
+fn builtins_de(module: &Module) -> String {
+    let mut ns: Vec<&str> = BUILTINS_BASE.to_vec();
+    if !store_decls(module).is_empty() {
+        ns.extend_from_slice(BUILTINS_STORE);
+    }
+    format!("{{ {} }}", ns.join(", "))
+}
+
+/// El runtime que le toca a este módulo.
+///
+/// Sin `store`, se recorta todo lo marcado con `@marea:store-inicio` /
+/// `@marea:store-fin`. No es una optimización de tamaño: ahí dentro hay tres
+/// `import("pg" | "mysql2" | "mongodb")`, paquetes de npm que un consumidor sin
+/// base de datos no instala, y un empaquetador (Next, Vite) RESUELVE ese
+/// especificador aunque el código sea inalcanzable. Con ellos, el `.ts` generado
+/// no se puede empaquetar: "Module not found: Can't resolve 'mongodb'".
+fn runtime_de(module: &Module) -> String {
+    if !store_decls(module).is_empty() {
+        return RUNTIME_TS.to_string();
+    }
+    let mut out = String::with_capacity(RUNTIME_TS.len());
+    let mut dentro = false;
+    for linea in RUNTIME_TS.lines() {
+        if linea.starts_with("// @marea:store-inicio") {
+            dentro = true;
+            continue;
+        }
+        if linea.starts_with("// @marea:store-fin") {
+            dentro = false;
+            continue;
+        }
+        if !dentro {
+            out.push_str(linea);
+            out.push('\n');
+        }
+    }
+    out
+}
 
 /// Los alias de `type` del módulo, para resolver los tipos declarados al emitir
 /// los validadores del límite de red.
@@ -145,7 +214,8 @@ pub fn emit(module: &Module) -> Project {
     // vez y el contenido inyectado nunca se vuelve a escanear. Así un nombre de
     // tipo/campo que coincida con otro centinela (p.ej. un campo llamado como el
     // placeholder) no puede corromper la sustitución siguiente.
-    let runtime = RUNTIME_TS.to_string();
+    let runtime = runtime_de(module);
+    let builtins = builtins_de(module);
     let sesion = session_fn(module);
 
     Project {
@@ -157,8 +227,9 @@ pub fn emit(module: &Module) -> Project {
             &type_aliases(module),
             &store_decls(module),
             sesion.as_deref(),
+            &builtins,
         ),
-        client: emit_client(&remote, &local, &plain_globals),
+        client: emit_client(&remote, &local, &plain_globals, &builtins),
         demo: emit_demo(&local),
     }
 }
@@ -198,9 +269,10 @@ pub fn emit_app(module: &Module) -> AppProject {
         console.log(`[marea] app web en http://127.0.0.1:${puerto()}`);\n"
         .to_string();
     let sesion = session_fn(module);
+    let builtins = builtins_de(module);
 
     AppProject {
-        runtime: RUNTIME_TS.to_string(),
+        runtime: runtime_de(module),
         server: emit_server(
             &remote,
             &shared,
@@ -208,6 +280,7 @@ pub fn emit_app(module: &Module) -> AppProject {
             &type_aliases(module),
             &store_decls(module),
             sesion.as_deref(),
+            &builtins,
         ),
         serve,
         client_js: emit_client_js(
@@ -617,10 +690,11 @@ fn emit_server(
     aliases: &std::collections::HashMap<String, Type>,
     stores: &[(String, String)],
     sesion: Option<&str>,
+    builtins: &str,
 ) -> String {
     let mut s = String::new();
     s.push_str("// Generado por Marea — lado servidor.\n");
-    s.push_str(&format!("import {} from \"./runtime.ts\";\n\n", BUILTINS));
+    s.push_str(&format!("import {} from \"./runtime.ts\";\n\n", builtins));
     // Un almacén por `store nombre: T;`. Vive solo aquí: el verificador ya
     // impide usar el estado del servidor fuera de @server.
     for (nombre, esquema) in stores {
@@ -702,10 +776,15 @@ fn emit_server(
     s
 }
 
-fn emit_client(remote: &[&FnDecl], local: &[&FnDecl], globals: &[&LetStmt]) -> String {
+fn emit_client(
+    remote: &[&FnDecl],
+    local: &[&FnDecl],
+    globals: &[&LetStmt],
+    builtins: &str,
+) -> String {
     let mut s = String::new();
     s.push_str("// Generado por Marea — lado cliente.\n");
-    s.push_str(&format!("import {} from \"./runtime.ts\";\n\n", BUILTINS));
+    s.push_str(&format!("import {} from \"./runtime.ts\";\n\n", builtins));
     let no_reactive: HashSet<String> = HashSet::new();
     for l in globals {
         s.push_str(&format!(

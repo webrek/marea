@@ -281,7 +281,14 @@ fn app_servidor_sirve_estaticos() {
 
 #[test]
 fn store_builtins_son_async_y_se_awaitan() {
-    let p = build("@server fn g(x: Int) { save(almacen, x); } @server fn t() -> List<Int> { return all(almacen); }");
+    // El fuente DEBE declarar el almacén: sin `store`, el runtime emitido ya no
+    // trae la capa de persistencia (se recorta para que un empaquetador no
+    // tropiece con los drivers de npm). Antes esto pasaba con un fuente que ni
+    // siquiera tipaba.
+    let p = build(
+        "store almacen: Int;\n@server fn g(x: Int) { save(almacen, x); }\n\
+         @server fn t() -> List<Int> { return all(almacen); }",
+    );
     // Con backends de BD, las operaciones del store son asíncronas (I/O).
     assert!(p.runtime.contains("export function save"), "{}", p.runtime);
     assert!(p.runtime.contains("export function all"), "{}", p.runtime);
@@ -296,7 +303,7 @@ fn store_builtins_son_async_y_se_awaitan() {
 
 #[test]
 fn store_persiste_a_disco() {
-    let p = build("@server fn g(x: Int) { save(almacen, x); }");
+    let p = build("store almacen: Int;\n@server fn g(x: Int) { save(almacen, x); }");
     // El runtime carga el store del archivo y lo reescribe en cada guardar.
     assert!(p.runtime.contains("readFileSync"), "{}", p.runtime);
     assert!(p.runtime.contains("writeFileSync"), "{}", p.runtime);

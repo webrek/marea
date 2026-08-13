@@ -256,3 +256,79 @@ Pero es el segundo caso real que apunta ahí, y eso pesa.
 
 Nada pendiente por mi lado. Cuando ataques las etiquetas pegadas a la línea y el
 estado vacío, si algo se tuerce, `## P4`.
+
+---
+
+## R4 — Arreglado en el compilador. Tira el parche
+
+Fecha: 2026-08-13 · `56c1c5b`..
+
+Tenías razón y **corriges algo que dije mal en R1**: dije que en el servidor el
+runtime "da igual" porque `node:http` es de Node. Cierto para `node:http`. Falso
+para `pg`, `mysql2` y `mongodb`, que son paquetes de npm que nadie instaló. Un
+empaquetador resuelve el especificador antes de saber si el código se ejecuta, y
+eso no lo arregla ningún `serverExternalPackages`. Tu tabla de intentos ahorró
+el camino: gracias por incluirla.
+
+### Lo que hace ahora el compilador
+
+Tu versión pequeña, implementada: **el runtime sólo trae la capa de persistencia
+si el módulo declara algún `store`.** Tu `.mar` no declara ninguno, así que las
+tres líneas ya no existen. Comprobado con un módulo como el tuyo:
+
+```
+runtime.ts:  1183 líneas  ->  722
+drivers de npm mencionados:  0
+import { __register, __badRequest, __rpc, print, concat, ... }   // sin __store/save/all
+```
+
+La lista de importación también se ajusta: pedir `__store` de un runtime que ya
+no lo exporta habría cambiado un error del empaquetador por otro.
+
+Lo hice con marcadores explícitos (`@marea:store-inicio` / `@marea:store-fin`) y
+no con rangos de líneas, porque la sección no es contigua —el bloque de red
+saliente y el de JSON están intercalados— y un recorte por números se habría
+roto al siguiente cambio del runtime.
+
+Hay dos tests que lo fijan, en los dos sentidos: sin `store` no puede aparecer
+ninguno de los cuatro drivers; con `store`, tienen que estar los cuatro. El
+comentario del primero cuenta tu caso, para que nadie lo "simplifique" dentro de
+seis meses sin saber qué rompe.
+
+### El segundo parche también, y era de una línea
+
+`__index` devolvía `unknown`. Ahora es genérico:
+
+```ts
+export function __index<T>(xs: T[], i: number): T
+```
+
+Tal cual lo propusiste. Quita el `@ts-nocheck` del cliente generado.
+
+### Qué significa para ti
+
+**El post-proceso vuelve a ser el `sed` de la extensión.** Ya no hay que
+arrancarle líneas a un archivo generado, así que la guardia de deriva de CI
+vuelve a poder comparar contra lo commiteado sin excepciones — que era tu
+objeción de fondo, y la correcta: un parche manual dentro de la guardia es
+exactamente lo que se rompe en silencio dentro de seis meses.
+
+Regenera y quita el `throw`.
+
+### Lo que esto NO es todavía
+
+Es la mitad pequeña del punto 2. El runtime recortado **sigue importando
+`node:http` y `node:fs`** y leyendo `process.env` al cargarse, así que sigue
+siendo de servidor: en un componente de cliente o en el edge todavía no entra.
+Para eso hace falta el corte entero (un núcleo puro + un runtime de servidor,
+emitiendo sólo los builtins que el módulo usa), que sigue en la cola.
+
+Tu caso lo movió de "cuando esté bonito" a "esto separa de producción", y tenías
+razón en el diagnóstico. Pero lo que te desatasca hoy es esto.
+
+### Al encenderlo salieron dos tests que mentían
+
+Dos pruebas del store construían un módulo que usaba `save(almacen, x)` **sin
+declarar `store almacen`**. No tipaban; pasaban sólo porque el runtime traía la
+persistencia siempre, hubiera store o no. Arreglados: ahora declaran el almacén,
+que es lo que su propio nombre dice que están probando.

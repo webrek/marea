@@ -159,3 +159,63 @@ fn sin_session_la_politica_falla_cerrada() {
     let cerrado = "}, () => ({ $tag: \"NoAutorizado\" }));";
     assert!(r.ends_with(cerrado), "{r}");
 }
+
+// ===================== El runtime que se puede empaquetar =====================
+
+/// Sin `store`, el runtime emitido NO puede traer los backends de persistencia.
+///
+/// No es tamaño: tres de ellos hacen `import("pg" | "mysql2" | "mongodb")`, que
+/// son paquetes de npm que un consumidor sin base de datos no instala, y un
+/// empaquetador (Next, Vite) RESUELVE el especificador aunque el código sea
+/// inalcanzable. Con ellos dentro, el `.ts` generado no se puede empaquetar:
+/// "Module not found: Can't resolve 'mongodb'". Lo reportó Vigía al meter su
+/// gráfica en un componente de servidor de Next, que es donde `node:http` sí
+/// vale y estos tres no.
+#[test]
+fn sin_store_el_runtime_no_arrastra_drivers_de_npm() {
+    let p = marea_codegen::emit(
+        &marea_syntax::parse("fn grafica(xs: List<Int>) -> Html { return `<svg/>`; }").unwrap(),
+    );
+    for driver in [
+        "\"pg\"",
+        "\"mysql2/promise\"",
+        "\"mongodb\"",
+        "\"node:sqlite\"",
+    ] {
+        assert!(
+            !p.runtime.contains(driver),
+            "el runtime sin store no debe mencionar {driver}"
+        );
+    }
+    // Y la lista de importación tampoco puede pedir lo que ya no se exporta.
+    for n in ["__store", "save", "all", "update", "remove"] {
+        let pedido = format!(" {n},");
+        assert!(
+            !p.client.lines().next().unwrap_or("").contains(&pedido)
+                && !p.client.contains(&format!("{{ {n},")),
+            "el import no debe pedir '{n}' sin store"
+        );
+    }
+}
+
+/// Y con `store`, sigue completo: el recorte no puede llevarse la persistencia
+/// de quien sí la usa.
+#[test]
+fn con_store_el_runtime_conserva_los_backends() {
+    let p = marea_codegen::emit(
+        &marea_syntax::parse(
+            "type P = { x: Int };\nstore cosas: P;\n\
+             @server fn g(p: P) { save(cosas, p); }",
+        )
+        .unwrap(),
+    );
+    for driver in [
+        "\"pg\"",
+        "\"mysql2/promise\"",
+        "\"mongodb\"",
+        "\"node:sqlite\"",
+    ] {
+        assert!(p.runtime.contains(driver), "falta {driver}");
+    }
+    assert!(p.client.contains("__store"), "{}", p.client);
+}
