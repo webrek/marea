@@ -610,3 +610,153 @@ fn parse_recovering_sigue_tras_un_import_roto() {
     assert_eq!(m.imports[0].path, "./b.mar");
     assert_eq!(m.items.len(), 1);
 }
+
+// ---------------------------------------------------------------------------
+// Cierres: `fn(params) -> T { cuerpo }` como expresión. Es la misma forma que
+// una declaración pero sin nombre, así que no hay ni un token nuevo que lexear.
+// ---------------------------------------------------------------------------
+
+/// El valor del primer `let` del cuerpo de la primera función. Los tests de
+/// cierres lo escriben todos así, y esto ahorra dos desestructuraciones cada vez.
+fn primer_valor(m: &Module) -> &Expr {
+    let Item::Fn(f) = &m.items[0] else { panic!() };
+    let Stmt::Let(l) = &f.body.stmts[0] else {
+        panic!("se esperaba un let")
+    };
+    &l.value
+}
+
+#[test]
+fn parse_cierre_con_tipo_de_retorno() {
+    let src = "@client fn v() { let menor = fn(a: Int, b: Int) -> Bool { return a < b; }; }";
+    let m = parse(src).unwrap();
+    let cierre = primer_valor(&m);
+    let Expr::Fn { params, .. } = cierre else {
+        panic!("se esperaba un cierre, hay {cierre:?}")
+    };
+    assert_eq!(params.len(), 2);
+    assert_eq!(params[0].name, "a");
+    assert_eq!(params[1].name, "b");
+    let Expr::Fn { return_type, .. } = cierre else {
+        unreachable!()
+    };
+    let Some(Type::Name { name, .. }) = return_type else {
+        panic!("se esperaba '-> Bool'")
+    };
+    assert_eq!(name, "Bool");
+    let Expr::Fn { body, .. } = cierre else {
+        unreachable!()
+    };
+    assert_eq!(body.stmts.len(), 1);
+}
+
+#[test]
+fn parse_cierre_sin_tipo_de_retorno() {
+    // El `-> T` es opcional en la gramática; si se puede deducir o no lo decide
+    // el verificador, que es quien mira el cuerpo.
+    let src = "@client fn v() { let f = fn(a: Int) { print(a); }; }";
+    let m = parse(src).unwrap();
+    let cierre = primer_valor(&m);
+    let Expr::Fn { return_type, .. } = cierre else {
+        panic!("se esperaba un cierre")
+    };
+    assert!(return_type.is_none());
+}
+
+#[test]
+fn parse_cierre_sin_parametros_y_con_coma_final() {
+    let src = "@client fn v() { let a = fn() { print(1); }; let b = fn(x: Int,) { print(x); }; }";
+    let m = parse(src).unwrap();
+    let Item::Fn(f) = &m.items[0] else { panic!() };
+    let Stmt::Let(a) = &f.body.stmts[0] else {
+        panic!("se esperaba un let")
+    };
+    let Expr::Fn { params, .. } = &a.value else {
+        panic!("se esperaba un cierre")
+    };
+    assert!(params.is_empty());
+    let Stmt::Let(b) = &f.body.stmts[1] else {
+        panic!("se esperaba un let")
+    };
+    let Expr::Fn { params, .. } = &b.value else {
+        panic!("se esperaba un cierre")
+    };
+    assert_eq!(params.len(), 1);
+}
+
+// La razón de ser de los cierres: un `onclick` ES una función que se pasa a
+// otra, y ordenar una lista es pasarle el criterio.
+#[test]
+fn parse_cierre_como_argumento_de_llamada() {
+    let src = "@client fn v() { ordenar(xs, fn(a: Int, b: Int) -> Bool { return a < b; }); }";
+    let m = parse(src).unwrap();
+    let Item::Fn(f) = &m.items[0] else { panic!() };
+    let Stmt::Expr(Expr::Call { args, .. }) = &f.body.stmts[0] else {
+        panic!("se esperaba una llamada")
+    };
+    assert_eq!(args.len(), 2);
+    assert!(matches!(args[1], Expr::Fn { .. }), "{:?}", args[1]);
+}
+
+#[test]
+fn parse_cierre_llamado_en_el_acto() {
+    let src = "@client fn v() { let n = fn() -> Int { return 1; }(); }";
+    let m = parse(src).unwrap();
+    let Expr::Call { callee, args, .. } = primer_valor(&m) else {
+        panic!("se esperaba una llamada")
+    };
+    assert!(args.is_empty());
+    assert!(matches!(**callee, Expr::Fn { .. }), "{:?}", callee);
+}
+
+// La ambigüedad que había que comprobar: `fn` ya abre un elemento de nivel
+// superior. Los dos contextos son disjuntos —el bucle de módulo sólo llama a
+// parse_item, y a la expresión sólo se llega desde dentro de un cuerpo— pero
+// más vale tenerlo escrito que suponerlo.
+#[test]
+fn un_fn_de_nivel_superior_sigue_siendo_un_item() {
+    let src = "@client fn v() { let f = fn() -> Int { return 1; }; }\nfn otra() -> Int { return 2; }";
+    let m = parse(src).unwrap();
+    assert_eq!(m.items.len(), 2, "los dos 'fn' de fuera son items");
+    let Item::Fn(a) = &m.items[0] else { panic!() };
+    let Item::Fn(b) = &m.items[1] else { panic!() };
+    assert_eq!(a.name, "v");
+    assert_eq!(b.name, "otra");
+    // Y el de dentro NO llegó a items: es una expresión del cuerpo.
+    assert!(matches!(a.body.stmts[0], Stmt::Let(_)));
+}
+
+#[test]
+fn una_funcion_anidada_con_nombre_da_un_error_que_explica_el_cierre() {
+    let e = parse("@client fn v() { fn ayuda() -> Int { return 1; } }").expect_err("debe fallar");
+    assert!(e.message.contains("cierre"), "{}", e.message);
+    assert!(e.message.contains("ayuda"), "{}", e.message);
+}
+
+// Un cierre dentro de la condición de un `if` está en el contexto donde
+// `Ident {` NO abre un registro; su cuerpo, entre llaves, sí debe permitirlo.
+#[test]
+fn el_cuerpo_de_un_cierre_admite_literales_de_registro() {
+    let src = "@client fn v() { if fn() -> Bool { let p = P { x: 1 }; }() { } }";
+    let m = parse(src).unwrap();
+    let Item::Fn(f) = &m.items[0] else { panic!() };
+    let Stmt::Expr(Expr::If { cond, .. }) = &f.body.stmts[0] else {
+        panic!("se esperaba un if")
+    };
+    let Expr::Call { callee, .. } = cond.as_ref() else {
+        panic!("se esperaba la llamada al cierre")
+    };
+    let Expr::Fn { body, .. } = callee.as_ref() else {
+        panic!("se esperaba el cierre")
+    };
+    let Stmt::Let(l) = &body.stmts[0] else {
+        panic!("se esperaba un let")
+    };
+    assert!(matches!(l.value, Expr::Record { .. }), "{:?}", l.value);
+}
+
+#[test]
+fn un_cierre_sin_parentesis_es_error() {
+    let e = parse("@client fn v() { let f = fn -> Int { return 1; }; }").expect_err("debe fallar");
+    assert!(e.message.contains("'('"), "{}", e.message);
+}

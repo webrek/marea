@@ -1787,3 +1787,228 @@ fn la_identidad_no_puede_llamarse_como_un_builtin() {
     let errs = con_identidad("@server(print: Usuario) fn publicar() { print(1); }");
     assert!(has_code(&errs, "E_REDEFINE_BUILTIN"), "{:?}", codes(&errs));
 }
+
+// ===========================================================================
+// CIERRES
+//
+// Un cierre es un valor de tipo `Ty::Fn`, que ya existía porque una función
+// declarada también lo tiene. Lo nuevo aquí es tipar el cuerpo en su propio
+// scope, deducir el retorno cuando no se escribe, decir qué se puede capturar
+// y poder LLAMAR a un valor de ese tipo (antes sólo se llamaba por nombre).
+// ===========================================================================
+
+#[test]
+fn un_cierre_tipa_y_se_puede_llamar() {
+    let src = "@client fn v() { let menor = fn(a: Int, b: Int) -> Bool { return a < b; }; print(menor(1, 2)); }";
+    let errs = check_src(src);
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+#[test]
+fn un_cierre_se_puede_llamar_en_el_acto() {
+    let src = "@client fn v() { let n: Int = fn() -> Int { return 7; }(); print(n); }";
+    let errs = check_src(src);
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+#[test]
+fn llamar_un_cierre_chequea_la_aridad() {
+    let src = "@client fn v() { let f = fn(a: Int) -> Int { return a; }; print(f(1, 2)); }";
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_ARITY"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn llamar_un_cierre_chequea_los_tipos_de_los_argumentos() {
+    let src = "@client fn v() { let f = fn(a: Int) -> Int { return a; }; print(f(\"x\")); }";
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_ARG_TYPE"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn el_retorno_de_un_cierre_se_usa_con_su_tipo() {
+    // Si el `Ty::Fn` no llevara bien el retorno, esto pasaría desapercibido.
+    let src = "@client fn v() { let f = fn() -> Int { return 1; }; let s: String = f(); print(s); }";
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_LET_TYPE_MISMATCH"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn el_cuerpo_del_cierre_se_chequea() {
+    let src = "@client fn v() { let f = fn(a: Int) -> Int { return a + \"x\"; }; print(f(1)); }";
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_ARITH_TYPE"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn los_parametros_del_cierre_no_escapan_de_su_cuerpo() {
+    let src = "@client fn v() { let f = fn(a: Int) -> Int { return a; }; print(a); }";
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_UNRESOLVED_NAME"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn un_cierre_con_retorno_declarado_debe_devolverlo_en_todos_los_caminos() {
+    let src = "@client fn v() { let f = fn(a: Int) -> Int { print(a); }; print(f(1)); }";
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_MISSING_RETURN"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn un_cierre_con_retorno_declarado_lo_respeta() {
+    let src = "@client fn v() { let f = fn() -> Int { return \"x\"; }; print(f()); }";
+    let errs = check_src(src);
+    assert!(
+        has_code(&errs, "E_RETURN_TYPE_MISMATCH"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+// --- deducción del retorno ---
+
+#[test]
+fn el_retorno_se_deduce_del_cuerpo() {
+    // Sin `-> T`: el `return` es lo único que dice el tipo, y basta.
+    let src = "@client fn v() { let f = fn(a: Int) { return a * 2; }; let n: Int = f(3); print(n); }";
+    let errs = check_src(src);
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+#[test]
+fn un_cierre_sin_return_deduce_unit() {
+    let src = "@client fn v() { let f = fn(a: Int) { print(a); }; f(1); }";
+    let errs = check_src(src);
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+#[test]
+fn el_retorno_deducido_es_el_de_verdad() {
+    // Se deduce Int; usarlo como String tiene que doler igual que si se hubiera
+    // escrito `-> Int`, o la deducción sería un agujero en vez de una comodidad.
+    let src = "@client fn v() { let f = fn() { return 1; }; let s: String = f(); print(s); }";
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_LET_TYPE_MISMATCH"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn e_cierre_retorno_ambiguo() {
+    // Dos `return` que no coinciden: no hay nada que deducir, y adivinarlo
+    // costaría una regla más larga que escribir `-> Tipo`.
+    let src = "@client fn v() { let f = fn(a: Bool) { if a { return 1; } else { return \"x\"; } }; f(true); }";
+    let errs = check_src(src);
+    assert!(
+        has_code(&errs, "E_CIERRE_RETORNO_AMBIGUO"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+// --- captura ---
+
+#[test]
+fn capturar_un_let_inmutable_esta_bien() {
+    let src = "@client fn v() { let base = 10; let f = fn(a: Int) -> Int { return a + base; }; print(f(1)); }";
+    let errs = check_src(src);
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+#[test]
+fn e_captura_mutable_al_leer() {
+    // Copiar una `mut` crea la expectativa falsa de que reasignarla fuera se
+    // vea dentro. Mejor decirlo que sorprender.
+    let src = "@client fn v() { let mut n = 0; let f = fn() -> Int { return n; }; print(f()); }";
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_CAPTURA_MUTABLE"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn e_captura_mutable_al_asignar() {
+    // La misma trampa en su forma más nítida: escribiría en la copia.
+    let src = "@client fn v() { let mut n = 0; let f = fn() { n = 1; }; f(); }";
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_CAPTURA_MUTABLE"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn una_mut_declarada_dentro_del_cierre_no_es_una_captura() {
+    // Es local suya: no hay dos mitades del programa creyendo tener la misma
+    // variable, así que no hay nada que avisar.
+    let src = "@client fn v() { let f = fn() -> Int { let mut n = 0; n = n + 1; return n; }; print(f()); }";
+    let errs = check_src(src);
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+#[test]
+fn un_cierre_anidado_tambien_delata_la_captura_mutable() {
+    let src = "@client fn v() { let f = fn() -> Int { let mut n = 0; let g = fn() -> Int { return n; }; return g(); }; print(f()); }";
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_CAPTURA_MUTABLE"), "{:?}", codes(&errs));
+}
+
+// --- ubicación heredada ---
+
+#[test]
+fn un_cierre_de_una_server_puede_tocar_el_store() {
+    // La ubicación se hereda del `fn` que lo crea, así que las reglas de estado
+    // le caen encima solas: no hace falta anotar el cierre.
+    let src = "type P = { a: Int };\nstore almacen: P;\n@server fn f() -> Int { let g = fn() -> Int { return len(all(almacen)); }; return g(); }";
+    let errs = check_src(src);
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+#[test]
+fn un_cierre_de_una_client_no_puede_tocar_el_store() {
+    let src = "type P = { a: Int };\nstore almacen: P;\n@client fn f() -> Int { let g = fn() -> Int { return len(all(almacen)); }; return g(); }";
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_STATE_OFF_SERVER"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn un_cierre_de_una_client_sigue_cruzando_la_frontera_al_llamar_una_server() {
+    let src = "@server fn guardar(n: Int) -> Int { return n; }\n@client fn v() { let f = fn() -> Int { return guardar(1); }; print(f()); }";
+    let module = marea_syntax::parse(src).expect("el fuente debe parsear");
+    let (errs, cruces) = check_with_boundaries(&module);
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+    assert_eq!(cruces.len(), 1, "{cruces:?}");
+    assert_eq!(cruces[0].callee, "guardar");
+}
+
+// --- la frontera de red: un cierre es código, no un dato ---
+
+#[test]
+fn un_cierre_no_cruza_la_frontera_de_red() {
+    // `is_serializable` ya decía que `Ty::Fn` no viaja; con cierres eso deja de
+    // ser teórico, porque ahora sí hay forma de escribir uno en un argumento.
+    // Es la razón de que un `sort(xs, criterio)` se quede de este lado.
+    let src = "@server fn guardar(n: Int) -> Int { return n; }\n@client fn v() { print(guardar(fn(a: Int) -> Int { return a; })); }";
+    let errs = check_src(src);
+    assert!(
+        has_code(&errs, "E_BOUNDARY_NOT_SERIALIZABLE"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+#[test]
+fn una_funcion_declarada_tampoco_cruza_la_frontera_de_red() {
+    // El mismo agujero por la otra puerta: pasar el NOMBRE de una función es
+    // pasar un `Ty::Fn` igualmente.
+    let src = "@server fn guardar(n: Int) -> Int { return n; }\nfn doble(x: Int) -> Int { return x * 2; }\n@client fn v() { print(guardar(doble)); }";
+    let errs = check_src(src);
+    assert!(
+        has_code(&errs, "E_BOUNDARY_NOT_SERIALIZABLE"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+#[test]
+fn un_cierre_que_no_cruza_la_red_no_molesta_a_nadie() {
+    // La prohibición es de la RED, no de los cierres: del mismo lado de la
+    // frontera son un valor más, y ahí es donde tienen que seguir siendo
+    // cómodos —que es todo el sentido de tenerlos.
+    let src = "@server fn f(n: Int) -> Int { let doble = fn(x: Int) -> Int { return x * 2; }; return doble(n); }";
+    let errs = check_src(src);
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}

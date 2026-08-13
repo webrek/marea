@@ -93,6 +93,11 @@ impl Checker {
     }
 
     /// Clasifica una llamada respecto a la frontera de red y valida reglas.
+    ///
+    /// Devuelve `true` si la llamada CRUZA la red, para que quien la tipa pueda
+    /// mirar además lo que de verdad se manda: la firma declarada no siempre lo
+    /// dice todo (un parámetro `Unknown` acepta cualquier cosa, incluido un
+    /// cierre, que es código y no un dato).
     pub(crate) fn classify_boundary(
         &mut self,
         callee: &Expr,
@@ -100,14 +105,14 @@ impl Checker {
         params: &[Ty],
         ret: &Ty,
         span: Span,
-    ) {
+    ) -> bool {
         let from = self.current_location;
         let to = callee_loc;
         let callee_name = callee_name(callee);
 
         // Sin ubicación destino o misma ubicación: llamada local, sin frontera.
         if to.is_none() || to == from {
-            return;
+            return false;
         }
 
         // @server llamando @client: prohibido.
@@ -125,7 +130,7 @@ impl Checker {
                 format!("una función {lado} no puede llamar a '{callee_name}' (@client)"),
                 span,
             ));
-            return;
+            return false;
         }
 
         // @client/None/@edge → @server/@edge: cruce válido. Registra y exige
@@ -193,7 +198,9 @@ impl Checker {
                     span,
                 ));
             }
+            return true;
         }
+        false
     }
 }
 

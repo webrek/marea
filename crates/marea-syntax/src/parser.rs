@@ -904,8 +904,65 @@ impl Parser {
             }
             TokenKind::If => self.parse_if(),
             TokenKind::Match => self.parse_match(),
+            TokenKind::Fn => self.parse_fn_expr(),
             _ => Err(SyntaxError::new("se esperaba una expresión", tok.span)),
         }
+    }
+
+    /// Función anónima en posición de expresión: `fn(x: Int) -> Int { ... }`.
+    ///
+    /// No choca con el `fn` que abre un elemento de nivel superior porque los
+    /// dos contextos son disjuntos: el bucle de `parse_module` sólo llama a
+    /// `parse_item`, y aquí sólo se llega desde dentro de un cuerpo. Lo único
+    /// que puede confundirse es intentar declarar una función anidada, y ese
+    /// caso se explica en vez de soltar un "se esperaba '('".
+    fn parse_fn_expr(&mut self) -> PResult<Expr> {
+        let kw = self.expect(&TokenKind::Fn, "'fn'")?;
+        if let TokenKind::Ident(nombre) = self.peek_kind() {
+            let mensaje = format!(
+                "aquí un 'fn' es un cierre y los cierres no llevan nombre; escríbelo \
+                 'fn(...) {{ ... }}' y lígalo con 'let {nombre} = fn(...) {{ ... }};'"
+            );
+            return Err(SyntaxError::new(mensaje, self.peek().span));
+        }
+        self.expect(&TokenKind::LParen, "'(' tras 'fn'")?;
+
+        let mut params = Vec::new();
+        if !self.check(&TokenKind::RParen) {
+            loop {
+                params.push(self.parse_param()?);
+                if !self.eat(&TokenKind::Comma) {
+                    break;
+                }
+                if self.check(&TokenKind::RParen) {
+                    break; // coma final permitida
+                }
+            }
+        }
+        self.expect(
+            &TokenKind::RParen,
+            "')' para cerrar los parámetros del cierre",
+        )?;
+
+        // El `-> T` es opcional: si el cuerpo lo determina, sobra escribirlo.
+        // Quien decide si se puede deducir es el verificador, no la gramática.
+        let return_type = if self.eat(&TokenKind::Arrow) {
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        // El cuerpo va entre llaves, o sea que es un contexto delimitado: dentro
+        // un `Ident {` vuelve a ser un literal de registro aunque el cierre se
+        // haya escrito en la condición de un `if`.
+        let body = self.allow_struct_literal(|p| p.parse_block())?;
+        let span = kw.span.to(body.span);
+        Ok(Expr::Fn {
+            params,
+            return_type,
+            body,
+            span,
+        })
     }
 
     /// Literal de registro: `User { name: "x", age: 1 }`. El identificador y el
@@ -1176,5 +1233,9 @@ fn desplazar_expr(e: &mut Expr, offset: usize) {
             mover(span, offset);
             desplazar_expr(scrutinee, offset);
         }
+        // Como `if` y `match`: se desplaza el span de la expresión, no el de su
+        // bloque. Esta función nunca ha bajado a los cuerpos, y un cierre dentro
+        // de un hueco de plantilla no es motivo para estrenar ese recorrido.
+        Expr::Fn { span, .. } => mover(span, offset),
     }
 }
