@@ -371,3 +371,51 @@ fn el_anidamiento_normal_de_tipos_sigue_valiendo() {
     );
     assert!(marea_syntax::parse(&src).is_ok());
 }
+
+// --- plantillas de texto ---
+
+#[test]
+fn una_plantilla_separa_literales_y_huecos() {
+    let m = marea_syntax::parse("fn f(n: Int) -> Html { return `a{n}b`; }").expect("parsea");
+    let fuente = format!("{m:?}");
+    assert!(fuente.contains("Template"), "{fuente}");
+    assert!(fuente.contains("Interp"), "{fuente}");
+}
+
+// El hueco se parsea aparte, así que sus spans hay que desplazarlos: si no, un
+// error dentro de `{...}` señalaría el principio del archivo.
+#[test]
+fn los_spans_del_hueco_apuntan_a_su_sitio() {
+    let src = "fn f() -> Html {\n    return `hola {noExiste} adios`;\n}";
+    let m = marea_syntax::parse(src).expect("parsea");
+    let fuente = format!("{m:?}");
+    // El identificador del hueco empieza en el byte 35 del archivo, no en 0.
+    let pos = src.find("noExiste").unwrap();
+    assert!(
+        fuente.contains(&format!("start: {pos}")),
+        "el span del hueco debe estar desplazado a {pos}: {fuente}"
+    );
+}
+
+#[test]
+fn una_plantilla_sin_cerrar_es_error() {
+    let e = marea_syntax::parse("fn f() -> Html { return `hola; }").expect_err("debe fallar");
+    assert!(e.message.contains("sin cerrar"), "{}", e.message);
+}
+
+#[test]
+fn un_hueco_vacio_es_error() {
+    let e = marea_syntax::parse("fn f() -> Html { return `a{}b`; }").expect_err("debe fallar");
+    assert!(e.message.contains("vacío"), "{}", e.message);
+}
+
+// Las llaves y las cadenas dentro del hueco no lo cierran antes de tiempo.
+#[test]
+fn el_hueco_respeta_llaves_y_cadenas_anidadas() {
+    assert!(marea_syntax::parse(
+        "fn f() -> Html { return `x{concat(\"}\", \"!\")}y`; }"
+    ).is_ok());
+    assert!(marea_syntax::parse(
+        "type P = { a: Int };\nfn f() -> Html { return `x{P { a: 1 }.a}y`; }"
+    ).is_ok());
+}

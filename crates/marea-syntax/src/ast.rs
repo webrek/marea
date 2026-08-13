@@ -134,6 +134,16 @@ pub struct LetStmt {
     pub span: Span,
 }
 
+/// Una pieza de plantilla ya parseada.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TemplatePart {
+    Lit(String),
+    /// `{expr}` se escapa; `{!expr}` se inserta tal cual y el verificador exige
+    /// que sea `Html`, de modo que la forma cruda no puede colar texto sin
+    /// escapar.
+    Interp { expr: Box<Expr>, raw: bool },
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Int { value: i64, span: Span },
@@ -168,6 +178,10 @@ pub enum Expr {
     /// Literal de lista: `[1, 2, 3]`.
     List { elements: Vec<Expr>, span: Span },
     /// Indexado de lista: `xs[i]`.
+    /// Plantilla de texto: `` `hola {nombre}` ``. Produce `Html`: los huecos
+    /// `{x}` se escapan solos y `{!x}` inserta marcado que ya es seguro, así que
+    /// olvidarse del escapado deja de ser posible.
+    Template { parts: Vec<TemplatePart>, span: Span },
     Index { object: Box<Expr>, index: Box<Expr>, span: Span },
 }
 
@@ -195,7 +209,8 @@ impl Expr {
             | Expr::Match { span, .. }
             | Expr::Record { span, .. }
             | Expr::List { span, .. }
-            | Expr::Index { span, .. } => *span,
+            | Expr::Template { span, .. } => *span,
+            Expr::Index { span, .. } => *span,
         }
     }
 }

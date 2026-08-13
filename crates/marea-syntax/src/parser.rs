@@ -8,7 +8,7 @@
 
 use crate::ast::*;
 use crate::error::SyntaxError;
-use crate::token::{Token, TokenKind};
+use crate::token::{TemplatePiece, Token, TokenKind};
 
 type PResult<T> = Result<T, SyntaxError>;
 
@@ -626,6 +626,26 @@ impl Parser {
                 self.advance();
                 Ok(Expr::Str { value: s, span: tok.span })
             }
+            TokenKind::Template(piezas) => {
+                self.advance();
+                let mut parts = Vec::new();
+                for pieza in piezas {
+                    match pieza {
+                        TemplatePiece::Lit(t) => parts.push(TemplatePart::Lit(t)),
+                        TemplatePiece::Hueco { fuente, offset, crudo } => {
+                            // El hueco se parsea aparte, desplazando sus spans
+                            // al sitio real del archivo: así un error dentro de
+                            // `{...}` señala su columna, no la de la plantilla.
+                            let expr = parse_hueco(&fuente, offset)?;
+                            parts.push(TemplatePart::Interp {
+                                expr: Box::new(expr),
+                                raw: crudo,
+                            });
+                        }
+                    }
+                }
+                Ok(Expr::Template { parts, span: tok.span })
+            }
             TokenKind::Bool(value) => {
                 self.advance();
                 Ok(Expr::Bool { value, span: tok.span })
@@ -813,6 +833,103 @@ impl Parser {
                 Ok(Pattern::Str { value: s, span: tok.span })
             }
             _ => Err(SyntaxError::new("se esperaba un patrón", tok.span)),
+        }
+    }
+}
+
+/// Parsea el fuente de un hueco de plantilla como una expresión suelta,
+/// desplazando los spans para que apunten a su posición real en el archivo.
+fn parse_hueco(fuente: &str, offset: usize) -> PResult<Expr> {
+    let tokens = crate::lexer::Lexer::tokenize(fuente).map_err(|e| desplazar(e, offset))?;
+    let mut p = Parser::new(tokens);
+    let mut expr = p.parse_expr().map_err(|e| desplazar(e, offset))?;
+    // El sub-parser numera desde 0, así que hay que desplazar TODO el árbol: si
+    // no, un error de tipos dentro del hueco señalaría el principio del archivo.
+    desplazar_expr(&mut expr, offset);
+    if !matches!(p.peek().kind, TokenKind::Eof) {
+        return Err(SyntaxError::new(
+            "sobra texto en el hueco de la plantilla",
+            crate::span::Span::new(offset, offset + fuente.len()),
+        ));
+    }
+    Ok(expr)
+}
+
+fn desplazar(e: SyntaxError, offset: usize) -> SyntaxError {
+    SyntaxError::new(
+        e.message,
+        crate::span::Span::new(e.span.start + offset, e.span.end + offset),
+    )
+}
+
+/// Suma `offset` a los spans de toda la expresión, en profundidad.
+fn desplazar_expr(e: &mut Expr, offset: usize) {
+    fn mover(s: &mut crate::span::Span, off: usize) {
+        *s = crate::span::Span::new(s.start + off, s.end + off);
+    }
+    match e {
+        Expr::Int { span, .. }
+        | Expr::Float { span, .. }
+        | Expr::Str { span, .. }
+        | Expr::Bool { span, .. } => mover(span, offset),
+        Expr::Ident { span, .. } => mover(span, offset),
+        Expr::Unary { expr, span, .. } => {
+            mover(span, offset);
+            desplazar_expr(expr, offset);
+        }
+        Expr::Binary { left, right, span, .. } => {
+            mover(span, offset);
+            desplazar_expr(left, offset);
+            desplazar_expr(right, offset);
+        }
+        Expr::Call { callee, args, span } => {
+            mover(span, offset);
+            desplazar_expr(callee, offset);
+            for a in args {
+                desplazar_expr(a, offset);
+            }
+        }
+        Expr::Member { object, span, .. } => {
+            mover(span, offset);
+            desplazar_expr(object, offset);
+        }
+        Expr::Index { object, index, span } => {
+            mover(span, offset);
+            desplazar_expr(object, offset);
+            desplazar_expr(index, offset);
+        }
+        Expr::List { elements, span } => {
+            mover(span, offset);
+            for el in elements {
+                desplazar_expr(el, offset);
+            }
+        }
+        Expr::Record { fields, span, type_name_span, .. } => {
+            mover(span, offset);
+            if let Some(s) = type_name_span {
+                mover(s, offset);
+            }
+            for f in fields {
+                mover(&mut f.span, offset);
+                desplazar_expr(&mut f.value, offset);
+            }
+        }
+        Expr::Template { parts, span } => {
+            mover(span, offset);
+            for parte in parts {
+                if let TemplatePart::Interp { expr, .. } = parte {
+                    desplazar_expr(expr, offset);
+                }
+            }
+        }
+        Expr::If { cond, then_branch, else_branch, span } => {
+            mover(span, offset);
+            desplazar_expr(cond, offset);
+            let _ = (then_branch, else_branch);
+        }
+        Expr::Match { scrutinee, span, .. } => {
+            mover(span, offset);
+            desplazar_expr(scrutinee, offset);
         }
     }
 }

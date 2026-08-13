@@ -789,6 +789,29 @@ impl Checker {
             }
             Expr::List { elements, span } => self.check_list(elements, *span),
             Expr::Index { object, index, .. } => self.check_index(object, index),
+            Expr::Template { parts, .. } => {
+                // Una plantilla SIEMPRE es `Html`: los huecos `{x}` se escapan
+                // al emitir, y `{!x}` solo admite algo que ya sea Html. Por eso
+                // olvidarse del escapado deja de ser posible: no hay forma de
+                // meter texto sin escapar por ninguna de las dos puertas.
+                for parte in parts {
+                    if let marea_syntax::ast::TemplatePart::Interp { expr, raw } = parte {
+                        let t = self.check_expr(expr);
+                        if *raw && !self.is_subtype(&t, &Ty::Html) {
+                            self.error(TypeError::new(
+                                "E_INTERP_CRUDA_NO_HTML",
+                                format!(
+                                    "'{{!...}}' inserta marcado sin escapar, así que sólo admite \
+                                     'Html', no '{}'; usa '{{...}}' para que se escape",
+                                    t.display()
+                                ),
+                                expr.span(),
+                            ));
+                        }
+                    }
+                }
+                Ty::Html
+            }
         }
     }
 

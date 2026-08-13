@@ -533,6 +533,13 @@ fn collect_locals_expr(
             *rec_counter += 1;
             out.push(temp);
         }
+        Expr::Template { parts, .. } => {
+            for parte in parts {
+                if let TemplatePart::Interp { expr, .. } = parte {
+                    collect_locals_expr(expr, out, rec_counter)?;
+                }
+            }
+        }
         Expr::Index { object, index, .. } => {
             collect_locals_expr(object, out, rec_counter)?;
             collect_locals_expr(index, out, rec_counter)?;
@@ -737,6 +744,9 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String, String> {
             ..
         } => emit_record(type_name.as_deref(), fields, ctx),
         Expr::List { elements, .. } => emit_list(elements, ctx),
+        Expr::Template { .. } => Err("las plantillas de texto producen Html y viven en el \
+             runtime de TypeScript; no existen en el backend WASM"
+            .to_string()),
         Expr::Index { object, index, .. } => {
             let obj = emit_expr(object, ctx)?;
             let idx = emit_expr(index, ctx)?;
@@ -976,6 +986,13 @@ fn collect_strings_expr(e: &Expr, out: &mut Vec<String>, seen: &mut HashSet<Stri
         Expr::Index { object, index, .. } => {
             collect_strings_expr(object, out, seen);
             collect_strings_expr(index, out, seen);
+        }
+        Expr::Template { parts, .. } => {
+            for parte in parts {
+                if let TemplatePart::Interp { expr, .. } = parte {
+                    collect_strings_expr(expr, out, seen);
+                }
+            }
         }
         Expr::Int { .. } | Expr::Float { .. } | Expr::Bool { .. } | Expr::Ident { .. } => {}
     }

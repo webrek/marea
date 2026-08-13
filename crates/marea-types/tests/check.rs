@@ -1277,3 +1277,42 @@ fn el_comodin_cubre_el_caso_del_registro() {
     );
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
+
+// --- plantillas: el escapado deja de poder olvidarse ---
+
+// Una plantilla SIEMPRE es Html: los huecos se escapan al emitir.
+#[test]
+fn una_plantilla_es_html() {
+    let errs = check_src("@client fn f(s: String) -> Html { return `hola {s}`; }");
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// Y como Html es subtipo de String, vale también donde se espera texto.
+#[test]
+fn una_plantilla_vale_como_string() {
+    let errs = check_src("fn f(n: Int) -> String { return `n = {text(n)}`; }");
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// La puerta cruda sólo admite lo que YA es Html, así que no puede colar texto
+// sin escapar: es la razón de que la plantilla sea segura por construcción.
+#[test]
+fn la_interpolacion_cruda_exige_html() {
+    let mal = check_src("@client fn f(s: String) -> Html { return `x {!s} y`; }");
+    assert!(has_code(&mal, "E_INTERP_CRUDA_NO_HTML"), "{:?}", codes(&mal));
+    let bien = check_src(
+        "fn trozo() -> Html { return \"<b>x</b>\"; }\n\
+         @client fn f() -> Html { return `x {!trozo()} y`; }",
+    );
+    assert!(bien.is_empty(), "{:?}", codes(&bien));
+}
+
+// Un dato del store interpolado normal se escapa, así que llega al DOM seguro.
+#[test]
+fn un_dato_interpolado_llega_escapado_al_dom() {
+    let errs = check_src(
+        "type P = { texto: String };\n\
+         @client fn vista(p: P) -> Html { return `<li>{p.texto}</li>`; }",
+    );
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}

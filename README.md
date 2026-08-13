@@ -147,6 +147,32 @@ fn buscar(q: String, i: Int) -> List<Producto> {
 }
 ```
 
+### Plantillas de texto
+
+Construir HTML concatenando es ilegible: una tarjeta con seis campos son doce
+`concat` anidados. Una plantilla se escribe entre comillas invertidas y los
+huecos van entre llaves:
+
+```marea
+fn tarjeta(p: Producto, idx: Int) -> Html {
+    return `<li class="card">
+  <h3>{p.titulo}</h3>
+  {!precioBloque(p)}
+  <p class="vend">{p.vendedor} · {text(p.stock)} disponibles</p>
+  <button onclick="marea.alCarrito({text(idx)})">Agregar</button>
+</li>`;
+}
+```
+
+Una plantilla siempre es `Html`, y ahí está lo importante: **`{x}` escapa
+solo**. El escapado deja de ser algo que recordar. La otra puerta, `{!x}`,
+inserta marcado tal cual —para componer fragmentos— pero el verificador exige
+que `x` **ya sea `Html`** (`E_INTERP_CRUDA_NO_HTML`), así que tampoco por ahí
+entra texto sin escapar.
+
+Dentro de un hueco cabe cualquier expresión, con sus llaves y sus cadenas; y un
+error dentro de `{...}` señala su columna real, no el principio de la plantilla.
+
 ### El escapado no es opcional: el tipo `Html`
 
 El sumidero del DOM (`render`) solo acepta `Html`, y a `Html` solo se llega por

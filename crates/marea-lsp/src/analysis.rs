@@ -328,6 +328,10 @@ fn find_in_expr(expr: &Expr, offset: usize) -> Option<Node<'_>> {
         | Expr::Str { .. }
         | Expr::Bool { .. }
         | Expr::Ident { .. } => None,
+        Expr::Template { parts, .. } => parts.iter().find_map(|p| match p {
+            marea_syntax::ast::TemplatePart::Interp { expr, .. } => find_in_expr(expr, offset),
+            _ => None,
+        }),
         Expr::Unary { expr: inner, .. } => find_in_expr(inner, offset),
         Expr::Binary { left, right, .. } => {
             find_in_expr(left, offset).or_else(|| find_in_expr(right, offset))

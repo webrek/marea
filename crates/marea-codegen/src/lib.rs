@@ -791,6 +791,15 @@ fn emit_block_inner(block: &Block, indent: usize, reactive: &HashSet<String>) ->
     lines.join("\n")
 }
 
+/// Neutraliza el texto literal de una plantilla para incrustarlo en una
+/// plantilla de JavaScript: el backtick la cerraría antes de tiempo y `${`
+/// abriría una interpolación que el programa no escribió.
+fn escapar_plantilla(t: &str) -> String {
+    t.replace('\\', "\\\\")
+        .replace('`', "\\`")
+        .replace("${", "\\${")
+}
+
 /// ¿El inicializador de una `reactive` es un recurso? Lo es cuando llama a una
 /// función del usuario: el codegen emite `await` para ésas, y un `await` no cabe
 /// en el cuerpo síncrono de un memo. Los builtins síncronos no cuentan.
@@ -1081,6 +1090,28 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
             format!("[{}]", parts.join(", "))
         }
         // Indexado -> acceso con verificación de rango (lanza si está fuera).
+        Expr::Template { parts, .. } => {
+            // Se emite como plantilla de JS. Cada hueco `{x}` pasa por
+            // `escape(...)`; `{!x}` va tal cual, y el verificador ya garantizó
+            // que es Html. El texto literal se neutraliza para que un backtick
+            // o un `${` del propio contenido no rompan la plantilla generada.
+            let mut out = String::from("`");
+            for parte in parts {
+                match parte {
+                    TemplatePart::Lit(t) => out.push_str(&escapar_plantilla(t)),
+                    TemplatePart::Interp { expr, raw } => {
+                        let e = emit_expr(expr, reactive);
+                        if *raw {
+                            out.push_str(&format!("${{{e}}}"));
+                        } else {
+                            out.push_str(&format!("${{escape({e})}}"));
+                        }
+                    }
+                }
+            }
+            out.push('`');
+            out
+        }
         Expr::Index { object, index, .. } => {
             format!(
                 "__index({}, {})",

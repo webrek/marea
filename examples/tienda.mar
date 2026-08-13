@@ -220,50 +220,35 @@ fn estrellitas(n: Int) -> Html {
 
 fn insignia(p: Producto) -> Html {
     if p.envioGratis {
-        return "<span class=\"envio\">Envío gratis</span>";
+        return `<span class="envio">Envío gratis</span>`;
     }
-    return "";
+    return ``;
 }
 
 fn etiquetaStock(s: Int) -> Html {
-    if s < 1 { return "<span class=\"agotado\">Sin stock</span>"; }
-    if s < 5 { return concat("<span class=\"pocas\">¡Últimas ", concat(text(s), " disponibles!</span>")); }
-    return concat("<span class=\"hay\">", concat(text(s), " disponibles</span>"));
+    if s < 1 { return `<span class="agotado">Sin stock</span>`; }
+    if s < 5 { return `<span class="pocas">¡Últimas {text(s)} disponibles!</span>`; }
+    return `<span class="hay">{text(s)} disponibles</span>`;
 }
 
 fn precioBloque(p: Producto) -> Html {
     if p.descuento > 0 {
-        return concat(
-            concat("<p class=\"antes\">", concat(dinero(p.precio), "</p>")),
-            concat(
-                concat("<p class=\"precio\">", dinero(precioFinal(p))),
-                concat("<span class=\"off\">", concat(text(p.descuento), "% OFF</span></p>"))
-            )
-        );
+        return `<p class="antes">{!dinero(p.precio)}</p>
+        <p class="precio">{!dinero(precioFinal(p))}<span class="off">{text(p.descuento)}% OFF</span></p>`;
     }
-    return concat("<p class=\"precio\">", concat(dinero(p.precio), "</p>"));
+    return `<p class="precio">{!dinero(p.precio)}</p>`;
 }
 
+// Con plantillas, la tarjeta se lee de un vistazo. Los datos del store van en
+// huecos normales, así que se escapan solos: olvidarse ya no es posible.
 fn tarjeta(p: Producto, idx: Int) -> Html {
-    return concat(
-        concat(
-            concat("<li class=\"card\"><h3>", concat(escape(p.titulo), "</h3>")),
-            precioBloque(p)
-        ),
-        concat(
-            concat(
-                concat("<p class=\"vend\">", concat(escape(p.vendedor), " ")),
-                concat(estrellitas(p.reputacion), concat(" ", insignia(p)))
-            ),
-            concat(
-                concat("</p><p class=\"st\">", concat(etiquetaStock(p.stock), "</p>")),
-                concat(
-                    concat("<button onclick=\"marea.agregarAlCarrito(", text(idx)),
-                    ")\">Agregar al carrito</button></li>"
-                )
-            )
-        )
-    );
+    return `<li class="card">
+  <h3>{p.titulo}</h3>
+  {!precioBloque(p)}
+  <p class="vend">{p.vendedor} {!estrellitas(p.reputacion)} {!insignia(p)}</p>
+  <p class="st">{!etiquetaStock(p.stock)}</p>
+  <button onclick="marea.agregarAlCarrito({text(idx)})">Agregar al carrito</button>
+</li>`;
 }
 
 fn tarjetas(xs: List<Producto>, i: Int) -> Html {
