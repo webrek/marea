@@ -181,6 +181,8 @@ fn ciclo_de_vida_completo_con_diagnosticos() {
         .unwrap();
 
     // El servidor debe terminar sin error.
-    let resultado = server.join().expect("el hilo del servidor no debe entrar en pánico");
+    let resultado = server
+        .join()
+        .expect("el hilo del servidor no debe entrar en pánico");
     assert!(resultado.is_ok(), "run debe terminar limpio: {resultado:?}");
 }

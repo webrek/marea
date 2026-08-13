@@ -113,10 +113,7 @@ fn build_layouts(module: &Module) -> Result<HashMap<String, StructLayout>, Strin
                     })?;
                     cols.push((fd.name.clone(), ty_name));
                 }
-                layouts.insert(
-                    decl.name.clone(),
-                    StructLayout { fields: cols },
-                );
+                layouts.insert(decl.name.clone(), StructLayout { fields: cols });
             }
         }
     }
@@ -252,9 +249,9 @@ fn constructs_list(module: &Module) -> bool {
                         None => false,
                     }
             }
-            Expr::Match { scrutinee, arms, .. } => {
-                in_expr(scrutinee) || arms.iter().any(|a| in_expr(&a.body))
-            }
+            Expr::Match {
+                scrutinee, arms, ..
+            } => in_expr(scrutinee) || arms.iter().any(|a| in_expr(&a.body)),
             _ => false,
         }
     }
@@ -416,8 +413,8 @@ fn emit_func(
     // `return` plano (p.ej. termina en un `if/else` con return en ambas ramas),
     // el validador WASM no deduce que la caída es inalcanzable y exigiría un i32.
     // Un `(unreachable)` final lo marca como inalcanzable y produce WAT válido.
-    let needs_unreachable = f.return_type.is_some()
-        && !matches!(f.body.stmts.last(), Some(Stmt::Return { .. }));
+    let needs_unreachable =
+        f.return_type.is_some() && !matches!(f.body.stmts.last(), Some(Stmt::Return { .. }));
     let tail = if needs_unreachable {
         "\n    (unreachable)"
     } else {
@@ -444,9 +441,11 @@ fn collect_locals(
     for stmt in &block.stmts {
         match stmt {
             Stmt::For { .. } => {
-                return Err("el bucle 'for' vive en el runtime de TypeScript; el backend \
+                return Err(
+                    "el bucle 'for' vive en el runtime de TypeScript; el backend \
                             WASM aún no lo soporta"
-                    .to_string())
+                        .to_string(),
+                )
             }
             Stmt::Let(l) => {
                 if l.reactive {
@@ -478,9 +477,7 @@ fn check_let_type(t: &Type) -> Result<(), String> {
     match t {
         Type::Name { .. } => Ok(()),
         Type::Union { .. } => Err("el backend WASM aún no soporta tipos unión".to_string()),
-        Type::Record { .. } => {
-            Err("el backend WASM aún no soporta registros inline".to_string())
-        }
+        Type::Record { .. } => Err("el backend WASM aún no soporta registros inline".to_string()),
     }
 }
 
@@ -691,8 +688,12 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String, String> {
                 });
             }
             match op {
-                BinOp::And => Ok(format!("(if (result i32) {l} (then {r}) (else (i32.const 0)))")),
-                BinOp::Or => Ok(format!("(if (result i32) {l} (then (i32.const 1)) (else {r}))")),
+                BinOp::And => Ok(format!(
+                    "(if (result i32) {l} (then {r}) (else (i32.const 0)))"
+                )),
+                BinOp::Or => Ok(format!(
+                    "(if (result i32) {l} (then (i32.const 1)) (else {r}))"
+                )),
                 _ => Ok(format!("({} {l} {r})", wasm_binop(*op))),
             }
         }
@@ -749,9 +750,7 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String, String> {
         }
         Expr::Member { object, field, .. } => emit_member(object, field, ctx),
         Expr::Record {
-            type_name,
-            fields,
-            ..
+            type_name, fields, ..
         } => emit_record(type_name.as_deref(), fields, ctx),
         Expr::List { elements, .. } => emit_list(elements, ctx),
         Expr::Template { .. } => Err("las plantillas de texto producen Html y viven en el \
@@ -762,14 +761,10 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String, String> {
             let idx = emit_expr(index, ctx)?;
             // dirección del elemento = ptr + (idx + 1) * 4  (la longitud ocupa
             // la palabra 0; los elementos empiezan en la palabra 1).
-            Ok(format!(
-                "(call $__index {obj} {idx})"
-            ))
+            Ok(format!("(call $__index {obj} {idx})"))
         }
         Expr::Float { .. } => Err("WASM aún no soporta flotantes (sólo i32 por ahora)".to_string()),
-        Expr::If { .. } => {
-            Err("WASM aún no soporta 'if' en posición de expresión".to_string())
-        }
+        Expr::If { .. } => Err("WASM aún no soporta 'if' en posición de expresión".to_string()),
         Expr::Match { .. } => Err("WASM aún no soporta 'match'".to_string()),
     }
 }
@@ -813,8 +808,8 @@ fn emit_record(
     fields: &[FieldInit],
     ctx: &mut Ctx,
 ) -> Result<String, String> {
-    let name = type_name
-        .ok_or("WASM no puede inferir el tipo del registro: anótalo como 'T { ... }'")?;
+    let name =
+        type_name.ok_or("WASM no puede inferir el tipo del registro: anótalo como 'T { ... }'")?;
     let layout = ctx
         .layouts
         .get(name)
@@ -825,10 +820,7 @@ fn emit_record(
     let mut vistos: HashSet<&str> = HashSet::new();
     for fi in fields {
         if layout.index_of(&fi.name).is_none() {
-            return Err(format!(
-                "el tipo '{name}' no tiene un campo '{}'",
-                fi.name
-            ));
+            return Err(format!("el tipo '{name}' no tiene un campo '{}'", fi.name));
         }
         if !vistos.insert(fi.name.as_str()) {
             return Err(format!(
@@ -977,7 +969,9 @@ fn collect_strings_expr(e: &Expr, out: &mut Vec<String>, seen: &mut HashSet<Stri
                 }
             }
         }
-        Expr::Match { scrutinee, arms, .. } => {
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
             collect_strings_expr(scrutinee, out, seen);
             for arm in arms {
                 collect_strings_expr(&arm.body, out, seen);
@@ -1019,7 +1013,9 @@ fn collect_strings_expr(e: &Expr, out: &mut Vec<String>, seen: &mut HashSet<Stri
 fn es_cadena(e: &Expr, ctx: &Ctx) -> bool {
     match e {
         Expr::Str { .. } => true,
-        Expr::Ident { name, .. } => ctx.vars.get(name).map(|t| t == "String" || t == "Html") == Some(true),
+        Expr::Ident { name, .. } => {
+            ctx.vars.get(name).map(|t| t == "String" || t == "Html") == Some(true)
+        }
         Expr::Call { callee, .. } => matches!(
             callee.as_ref(),
             Expr::Ident { name, .. } if name == "concat"

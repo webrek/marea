@@ -7,7 +7,7 @@
 use marea_lsp::analysis::{
     analyze, collect_symbols, find_node_at, top_level_index, Node, Severity, SymbolClass,
 };
-use marea_lsp::conversions::{neutral_to_diagnostic, symbol_to_document_symbol, span_to_location};
+use marea_lsp::conversions::{neutral_to_diagnostic, span_to_location, symbol_to_document_symbol};
 use marea_lsp::documents::DocumentStore;
 use marea_lsp::line_index::LineIndex;
 
@@ -69,7 +69,10 @@ fn error_de_sintaxis_no_corre_chequeo_de_tipos() {
         "no debe haber diagnósticos de tipos sobre un AST parcial: {:?}",
         analysis.diagnostics
     );
-    assert!(analysis.diagnostics.iter().all(|d| d.severity == Severity::Error));
+    assert!(analysis
+        .diagnostics
+        .iter()
+        .all(|d| d.severity == Severity::Error));
 }
 
 #[test]
@@ -179,11 +182,13 @@ fn collect_symbols_lista_funciones_y_tipos() {
     assert!(symbols
         .iter()
         .any(|s| s.class == SymbolClass::Fn && s.name == "origen"));
-    assert!(symbols
-        .iter()
-        .filter(|s| s.class == SymbolClass::Fn)
-        .count()
-        >= 3);
+    assert!(
+        symbols
+            .iter()
+            .filter(|s| s.class == SymbolClass::Fn)
+            .count()
+            >= 3
+    );
 }
 
 #[test]
@@ -307,6 +312,8 @@ fn document_store_update_sin_apertura_crea() {
     let mut store = DocumentStore::new();
     let uri = Uri::from_str("file:///nuevo.mar").unwrap();
     store.update(uri.clone(), "fn f() {}\n".to_string(), 5);
-    let doc = store.get(&uri).expect("update crea el documento si no existía");
+    let doc = store
+        .get(&uri)
+        .expect("update crea el documento si no existía");
     assert_eq!(doc.version, 5);
 }

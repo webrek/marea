@@ -21,11 +21,7 @@ impl SyntaxError {
         let (line, col) = line_col(src, self.span.start);
         let line_str = src.lines().nth(line - 1).unwrap_or("");
         let width = self.span.end.saturating_sub(self.span.start).max(1);
-        let caret = format!(
-            "{}{}",
-            " ".repeat(col.saturating_sub(1)),
-            "^".repeat(width)
-        );
+        let caret = format!("{}{}", " ".repeat(col.saturating_sub(1)), "^".repeat(width));
         format!(
             "error: {}\n  --> línea {}, columna {}\n{:>4} | {}\n{:>4} | {}",
             self.message, line, col, line, line_str, "", caret
@@ -35,7 +31,11 @@ impl SyntaxError {
 
 impl std::fmt::Display for SyntaxError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} (en {}..{})", self.message, self.span.start, self.span.end)
+        write!(
+            f,
+            "{} (en {}..{})",
+            self.message, self.span.start, self.span.end
+        )
     }
 }
 

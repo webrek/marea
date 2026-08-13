@@ -264,10 +264,7 @@ impl Checker {
                                 format!("la función '{}' ya está declarada", f.name),
                                 f.span,
                             )
-                            .with_note(format!(
-                                "primera declaración en el byte {}",
-                                prev.start
-                            )),
+                            .with_note(format!("primera declaración en el byte {}", prev.start)),
                         );
                     } else {
                         fn_spans.insert(f.name.clone(), f.span);
@@ -281,10 +278,7 @@ impl Checker {
                                 format!("el tipo '{}' ya está declarado", t.name),
                                 t.span,
                             )
-                            .with_note(format!(
-                                "primera declaración en el byte {}",
-                                prev.start
-                            )),
+                            .with_note(format!("primera declaración en el byte {}", prev.start)),
                         );
                     } else {
                         type_spans.insert(t.name.clone(), t.span);
@@ -292,7 +286,12 @@ impl Checker {
                     }
                 }
                 Item::Let(_) => {}
-                Item::Store { name, name_span, ty, span } => {
+                Item::Store {
+                    name,
+                    name_span,
+                    ty,
+                    span,
+                } => {
                     if store_decls.iter().any(|(n, _, _)| n == name) {
                         self.error(TypeError::new(
                             "E_DUPLICATE_STORE",
@@ -644,13 +643,12 @@ impl Checker {
                     self.validate_type_exists(decl);
                     let declared = self.ty_from_syntax(decl);
                     // Un literal del fuente vale como Html (confianza directa).
-                    let value_ty = if matches!(declared, Ty::Html)
-                        && matches!(l.value, Expr::Str { .. })
-                    {
-                        Ty::Html
-                    } else {
-                        value_ty.clone()
-                    };
+                    let value_ty =
+                        if matches!(declared, Ty::Html) && matches!(l.value, Expr::Str { .. }) {
+                            Ty::Html
+                        } else {
+                            value_ty.clone()
+                        };
                     // `reactive` es laxo con la inferencia, pero no puede serlo
                     // con `Html`: saltarse el subtipado ahí permitía
                     // `reactive h: Html = s;` con un String cualquiera.
@@ -710,7 +708,12 @@ impl Checker {
                     ));
                 }
             }
-            Stmt::Assign { name, name_span, value, .. } => {
+            Stmt::Assign {
+                name,
+                name_span,
+                value,
+                ..
+            } => {
                 let value_ty = self.check_expr(value);
                 let mut target = None;
                 for scope in self.scopes.iter().rev() {
@@ -759,7 +762,15 @@ impl Checker {
                     }
                 }
             }
-            Stmt::For { var, var_span, index, index_span, iter, body, .. } => {
+            Stmt::For {
+                var,
+                var_span,
+                index,
+                index_span,
+                iter,
+                body,
+                ..
+            } => {
                 let it = self.check_expr(iter);
                 let elem = match &it {
                     Ty::List(e) => (**e).clone(),
@@ -784,7 +795,10 @@ impl Checker {
                         *var_span,
                     ));
                 }
-                self.scopes.last_mut().unwrap().insert(var.clone(), (elem, false));
+                self.scopes
+                    .last_mut()
+                    .unwrap()
+                    .insert(var.clone(), (elem, false));
                 if let Some(i) = index {
                     if builtins::lookup(i).is_some() {
                         self.error(TypeError::new(
@@ -793,7 +807,10 @@ impl Checker {
                             index_span.unwrap_or(*var_span),
                         ));
                     }
-                    self.scopes.last_mut().unwrap().insert(i.clone(), (Ty::Int, false));
+                    self.scopes
+                        .last_mut()
+                        .unwrap()
+                        .insert(i.clone(), (Ty::Int, false));
                 }
                 self.check_block_in_current_scope(body);
                 self.scopes.pop();
@@ -816,17 +833,40 @@ impl Checker {
             Expr::Str { .. } => Ty::String,
             Expr::Bool { .. } => Ty::Bool,
             Expr::Ident { name, span } => self.resolve_ident(name, *span),
-            Expr::Unary { op, expr: inner, span } => self.check_unary(*op, inner, *span),
-            Expr::Binary { op, left, right, span } => self.check_binary(*op, left, right, *span),
+            Expr::Unary {
+                op,
+                expr: inner,
+                span,
+            } => self.check_unary(*op, inner, *span),
+            Expr::Binary {
+                op,
+                left,
+                right,
+                span,
+            } => self.check_binary(*op, left, right, *span),
             Expr::Call { callee, args, span } => self.check_call(callee, args, *span),
-            Expr::Member { object, field, span } => self.check_member(object, field, *span),
-            Expr::If { cond, then_branch, else_branch, .. } => {
-                self.check_if(cond, then_branch, else_branch.as_deref())
-            }
-            Expr::Match { scrutinee, arms, span } => self.check_match(scrutinee, arms, *span),
-            Expr::Record { type_name, type_name_span, fields, span } => {
-                self.check_record(type_name.as_deref(), *type_name_span, fields, *span)
-            }
+            Expr::Member {
+                object,
+                field,
+                span,
+            } => self.check_member(object, field, *span),
+            Expr::If {
+                cond,
+                then_branch,
+                else_branch,
+                ..
+            } => self.check_if(cond, then_branch, else_branch.as_deref()),
+            Expr::Match {
+                scrutinee,
+                arms,
+                span,
+            } => self.check_match(scrutinee, arms, *span),
+            Expr::Record {
+                type_name,
+                type_name_span,
+                fields,
+                span,
+            } => self.check_record(type_name.as_deref(), *type_name_span, fields, *span),
             Expr::List { elements, span } => self.check_list(elements, *span),
             Expr::Index { object, index, .. } => self.check_index(object, index),
             Expr::Template { parts, .. } => {
@@ -1041,8 +1081,9 @@ impl Checker {
                 // sea subtipo del otro: `Html` es texto, así que compararlo con
                 // un `String` es legítimo (y comparar dos literales del fuente,
                 // que tipan como Html, con una variable String, es lo normal).
-                let compatibles =
-                    lt.is_scalar() && rt.is_scalar() && (self.is_subtype(&lt, &rt) || self.is_subtype(&rt, &lt));
+                let compatibles = lt.is_scalar()
+                    && rt.is_scalar()
+                    && (self.is_subtype(&lt, &rt) || self.is_subtype(&rt, &lt));
                 if !compatibles {
                     self.error(TypeError::new(
                         "E_ARITH_TYPE",
@@ -1164,7 +1205,10 @@ impl Checker {
         if args.len() != expected {
             self.error(TypeError::new(
                 "E_ARITY",
-                format!("'{name}' espera {expected} argumento(s), se recibieron {}", args.len()),
+                format!(
+                    "'{name}' espera {expected} argumento(s), se recibieron {}",
+                    args.len()
+                ),
                 span,
             ));
             false
@@ -1250,9 +1294,10 @@ impl Checker {
             // dos estructuras. Sobre listas conserva el tipo del elemento —el
             // verificador no tiene genéricos, así que la firma se calcula aquí
             // desde los argumentos— y unir listas incompatibles es un error.
-            if name == "concat" && args.len() == 2 && matches!(
-                self.check_expr(&args[0]), Ty::List(_)
-            ) {
+            if name == "concat"
+                && args.len() == 2
+                && matches!(self.check_expr(&args[0]), Ty::List(_))
+            {
                 let ts: Vec<Ty> = args.iter().map(|a| self.check_expr(a)).collect();
                 let mut elems = Vec::new();
                 for (i, t) in ts.iter().enumerate() {
@@ -1354,7 +1399,11 @@ impl Checker {
 
         match &callee_ty {
             Ty::Unknown => Ty::Unknown,
-            Ty::Fn { params, ret, location } => {
+            Ty::Fn {
+                params,
+                ret,
+                location,
+            } => {
                 // Clasifica el cruce de frontera y valida serializabilidad.
                 self.classify_boundary(callee, *location, params, ret, span);
 
@@ -1428,7 +1477,11 @@ impl Checker {
         if matches!(from, Some(Location::Server) | Some(Location::Edge))
             && to == Some(Location::Client)
         {
-            let lado = if from == Some(Location::Edge) { "@edge" } else { "@server" };
+            let lado = if from == Some(Location::Edge) {
+                "@edge"
+            } else {
+                "@server"
+            };
             self.error(TypeError::new(
                 "E_CALL_CLIENT_FROM_SERVER",
                 format!("una función {lado} no puede llamar a '{callee_name}' (@client)"),
@@ -1440,10 +1493,7 @@ impl Checker {
         // @client/None/@edge → @server/@edge: cruce válido. Registra y exige
         // que argumentos y retorno sean serializables.
         let is_valid_target = matches!(to, Some(Location::Server) | Some(Location::Edge));
-        let is_valid_source = matches!(
-            from,
-            None | Some(Location::Client) | Some(Location::Edge)
-        );
+        let is_valid_source = matches!(from, None | Some(Location::Client) | Some(Location::Edge));
         if is_valid_target && is_valid_source {
             // Un cruce de red es asíncrono. Dentro de un inicializador que se
             // evalúa de forma síncrona no hay dónde esperarlo: el memo de una
@@ -1581,7 +1631,10 @@ impl Checker {
         if !matches!(cond_ty, Ty::Bool | Ty::Unknown) {
             self.error(TypeError::new(
                 "E_COND_NOT_BOOL",
-                format!("la condición del 'if' debe ser Bool, no '{}'", cond_ty.display()),
+                format!(
+                    "la condición del 'if' debe ser Bool, no '{}'",
+                    cond_ty.display()
+                ),
                 cond.span(),
             ));
         }
@@ -1598,7 +1651,12 @@ impl Checker {
         Ty::Unit
     }
 
-    fn check_match(&mut self, scrutinee: &Expr, arms: &[marea_syntax::ast::MatchArm], span: Span) -> Ty {
+    fn check_match(
+        &mut self,
+        scrutinee: &Expr,
+        arms: &[marea_syntax::ast::MatchArm],
+        span: Span,
+    ) -> Ty {
         let scrut_ty = self.check_expr(scrutinee);
         // Nombre de la variable escrutada, para el narrowing nominal.
         let scrut_name = if let Expr::Ident { name, .. } = scrutinee {
@@ -1646,27 +1704,30 @@ impl Checker {
                             ));
                         }
                         // Una variante que resuelve a un REGISTRO no se puede
-                    // discriminar en runtime: los registros no llevan etiqueta,
-                    // así que la rama quedaría muerta en silencio (el `match`
-                    // no ejecutaría ninguna). Mejor decirlo al compilar.
-                    if let Some(Some(_)) = self.resolve_named_to_record(name) {
-                        self.error(TypeError::new(
-                            "E_VARIANTE_SIN_ETIQUETA",
-                            format!(
+                        // discriminar en runtime: los registros no llevan etiqueta,
+                        // así que la rama quedaría muerta en silencio (el `match`
+                        // no ejecutaría ninguna). Mejor decirlo al compilar.
+                        if let Some(Some(_)) = self.resolve_named_to_record(name) {
+                            self.error(TypeError::new(
+                                "E_VARIANTE_SIN_ETIQUETA",
+                                format!(
                                 "'{name}' es un registro y no lleva etiqueta en runtime, así que \
                                  esta rama nunca se ejecutaría; usa un comodín (`_` o un nombre) \
                                  para el caso del registro"
                             ),
-                            *pspan,
-                        ));
-                    }
-                    covered.insert(name.clone());
+                                *pspan,
+                            ));
+                        }
+                        covered.insert(name.clone());
                         // Narrowing: dentro de la rama, la variable escrutada es
                         // esta variante (estrechada a Named).
                         self.scopes.push(HashMap::new());
                         if let Some(sn) = &scrut_name {
                             let narrowed = self.narrow_variant(name);
-                            self.scopes.last_mut().unwrap().insert(sn.clone(), (narrowed, false));
+                            self.scopes
+                                .last_mut()
+                                .unwrap()
+                                .insert(sn.clone(), (narrowed, false));
                         }
                         arm_types.push(self.check_expr_html(&arm.body));
                         self.scopes.pop();
@@ -1676,7 +1737,10 @@ impl Checker {
                         has_catch_all = true;
                         let residual = self.residual_narrow(&variants, &covered, &scrut_ty);
                         self.scopes.push(HashMap::new());
-                        self.scopes.last_mut().unwrap().insert(name.clone(), (residual, false));
+                        self.scopes
+                            .last_mut()
+                            .unwrap()
+                            .insert(name.clone(), (residual, false));
                         arm_types.push(self.check_expr_html(&arm.body));
                         self.scopes.pop();
                     }
@@ -1687,7 +1751,10 @@ impl Checker {
                     let residual = self.residual_narrow(&variants, &covered, &scrut_ty);
                     self.scopes.push(HashMap::new());
                     if let Some(sn) = &scrut_name {
-                        self.scopes.last_mut().unwrap().insert(sn.clone(), (residual, false));
+                        self.scopes
+                            .last_mut()
+                            .unwrap()
+                            .insert(sn.clone(), (residual, false));
                     }
                     arm_types.push(self.check_expr_html(&arm.body));
                     self.scopes.pop();
@@ -1755,8 +1822,11 @@ impl Checker {
         if variants.is_empty() {
             return scrut_ty.clone();
         }
-        let residual: Vec<String> =
-            variants.iter().filter(|v| !covered.contains(*v)).cloned().collect();
+        let residual: Vec<String> = variants
+            .iter()
+            .filter(|v| !covered.contains(*v))
+            .cloned()
+            .collect();
         match residual.len() {
             0 => scrut_ty.clone(),
             1 => self.narrow_variant(&residual[0]),
@@ -1833,7 +1903,10 @@ impl Checker {
             if let Some(_prev) = seen.get(&fi.name) {
                 self.error(TypeError::new(
                     "E_DUPLICATE_BINDING",
-                    format!("el campo '{}' está repetido en el literal de registro", fi.name),
+                    format!(
+                        "el campo '{}' está repetido en el literal de registro",
+                        fi.name
+                    ),
                     fi.span,
                 ));
                 continue;
@@ -1843,13 +1916,12 @@ impl Checker {
             match record_fields.iter().find(|(n, _)| n == &fi.name) {
                 Some((_, expected)) => {
                     // Un literal del fuente vale como Html (confianza directa).
-                    let vty = if matches!(expected, Ty::Html)
-                        && matches!(fi.value, Expr::Str { .. })
-                    {
-                        Ty::Html
-                    } else {
-                        vty.clone()
-                    };
+                    let vty =
+                        if matches!(expected, Ty::Html) && matches!(fi.value, Expr::Str { .. }) {
+                            Ty::Html
+                        } else {
+                            vty.clone()
+                        };
                     if !self.is_subtype(&vty, expected) {
                         self.error(TypeError::new(
                             "E_ARG_TYPE",
@@ -1925,10 +1997,7 @@ impl Checker {
         let elem = match tys.first() {
             None => Ty::Unknown,
             Some(first) => {
-                if tys
-                    .iter()
-                    .all(|t| matches!(t, Ty::Unknown) || t == first)
-                {
+                if tys.iter().all(|t| matches!(t, Ty::Unknown) || t == first) {
                     first.clone()
                 } else {
                     self.error(TypeError::new(
@@ -2035,7 +2104,12 @@ impl Checker {
             Type::Record { fields, .. } => Ty::Record(
                 fields
                     .iter()
-                    .map(|f| (f.name.clone(), self.ty_from_syntax_guarded(&f.ty, expanding)))
+                    .map(|f| {
+                        (
+                            f.name.clone(),
+                            self.ty_from_syntax_guarded(&f.ty, expanding),
+                        )
+                    })
                     .collect(),
             ),
         }
@@ -2147,9 +2221,7 @@ impl Checker {
                     return true;
                 }
                 let ok = match self.resolve_named_to_record(n) {
-                    Some(Some(fields)) => {
-                        self.is_subtype_rec(&Ty::Record(fields), sup, unfolding)
-                    }
+                    Some(Some(fields)) => self.is_subtype_rec(&Ty::Record(fields), sup, unfolding),
                     // `Record` abierto: acepta cualquier registro estructural.
                     Some(None) => true,
                     None => false,
@@ -2163,9 +2235,7 @@ impl Checker {
                     return true;
                 }
                 let ok = match self.resolve_named_to_record(n) {
-                    Some(Some(fields)) => {
-                        self.is_subtype_rec(sub, &Ty::Record(fields), unfolding)
-                    }
+                    Some(Some(fields)) => self.is_subtype_rec(sub, &Ty::Record(fields), unfolding),
                     Some(None) => true,
                     None => false,
                 };
@@ -2260,7 +2330,11 @@ fn stmt_terminates(stmt: &Stmt) -> bool {
 
 fn expr_terminates(expr: &Expr) -> bool {
     match expr {
-        Expr::If { then_branch, else_branch, .. } => {
+        Expr::If {
+            then_branch,
+            else_branch,
+            ..
+        } => {
             let then_ok = block_terminates(then_branch);
             let else_ok = match else_branch {
                 Some(eb) => match eb.as_ref() {

@@ -18,8 +18,8 @@ use crate::documents::Document;
 /// lo acepta como item, así que NO se ofrece: aceptar la sugerencia produciría
 /// un error de sintaxis.
 const KEYWORDS: &[&str] = &[
-    "fn", "let", "mut", "reactive", "type", "if", "else", "match", "return",
-    "effect", "store", "true", "false",
+    "fn", "let", "mut", "reactive", "type", "if", "else", "match", "return", "effect", "store",
+    "true", "false",
 ];
 
 /// Valores builtin: la tabla real del compilador.

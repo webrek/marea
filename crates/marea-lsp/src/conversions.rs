@@ -57,11 +57,7 @@ fn severity_to_lsp(severity: Severity) -> DiagnosticSeverity {
 /// `selection_range` son ambos el span del item completo (deben ser iguales o
 /// estar contenidos uno en otro, y aquí coinciden).
 #[allow(deprecated)] // `DocumentSymbol::deprecated` está deprecado pero es un campo obligatorio del struct.
-pub fn symbol_to_document_symbol(
-    symbol: &Symbol,
-    index: &LineIndex,
-    text: &str,
-) -> DocumentSymbol {
+pub fn symbol_to_document_symbol(symbol: &Symbol, index: &LineIndex, text: &str) -> DocumentSymbol {
     let range = index.span_to_range(symbol.span, text);
     DocumentSymbol {
         name: symbol.name.clone(),

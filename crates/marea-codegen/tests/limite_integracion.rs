@@ -99,7 +99,9 @@ fn campo(salida: &str, clave: &str) -> i64 {
     let json = salida.split("RESULTADO:").nth(1).unwrap().trim();
     let pat = format!("\"{clave}\":");
     let resto = &json[json.find(&pat).expect("clave ausente") + pat.len()..];
-    let fin = resto.find(|c: char| !c.is_ascii_digit()).unwrap_or(resto.len());
+    let fin = resto
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(resto.len());
     resto[..fin].parse().expect("número")
 }
 
@@ -116,25 +118,45 @@ fn el_limite_de_red_se_defiende_de_verdad() {
     let s = atacar(&dir, 9788);
 
     // Lo legítimo pasa.
-    assert_eq!(campo(&s, "valido"), 200, "una llamada válida debe pasar:\n{s}");
+    assert_eq!(
+        campo(&s, "valido"),
+        200,
+        "una llamada válida debe pasar:\n{s}"
+    );
     assert_eq!(campo(&s, "getIndex"), 200, "el index debe servirse:\n{s}");
 
     // Lo mal tipado es culpa del cliente: 400, no 500.
     assert_eq!(campo(&s, "tipoMalo"), 400, "objeto donde iba String:\n{s}");
     assert_eq!(campo(&s, "aridad"), 400, "aridad incorrecta:\n{s}");
-    assert_eq!(campo(&s, "intEnorme"), 400, "1e21 no es un Int seguro:\n{s}");
+    assert_eq!(
+        campo(&s, "intEnorme"),
+        400,
+        "1e21 no es un Int seguro:\n{s}"
+    );
     assert_eq!(campo(&s, "sinHandler"), 400, "handler inexistente:\n{s}");
 
     // CSRF: sin exigir JSON, un formulario cross-origin se salta el preflight.
-    assert_eq!(campo(&s, "textPlain"), 415, "text/plain debe rechazarse:\n{s}");
+    assert_eq!(
+        campo(&s, "textPlain"),
+        415,
+        "text/plain debe rechazarse:\n{s}"
+    );
     // …pero el media type es case-insensitive según la RFC.
-    assert_eq!(campo(&s, "ctMayus"), 200, "Application/JSON debe aceptarse:\n{s}");
+    assert_eq!(
+        campo(&s, "ctMayus"),
+        200,
+        "Application/JSON debe aceptarse:\n{s}"
+    );
 
     // Origen ajeno.
     assert_eq!(campo(&s, "origenMalo"), 403, "origen ajeno:\n{s}");
 
     // El código fuente del servidor no se sirve (enumera los handlers).
-    assert_eq!(campo(&s, "getServerTs"), 404, "server.ts no debe servirse:\n{s}");
+    assert_eq!(
+        campo(&s, "getServerTs"),
+        404,
+        "server.ts no debe servirse:\n{s}"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }

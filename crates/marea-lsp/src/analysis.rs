@@ -13,9 +13,7 @@
 //!   - si `parse` tiene éxito, se corren todos los chequeos de tipo y cada
 //!     `TypeError` se mapea a un [`NeutralDiag`].
 
-use marea_syntax::ast::{
-    Block, ElseBranch, Expr, Item, Module, Param, Pattern, Stmt, Type,
-};
+use marea_syntax::ast::{Block, ElseBranch, Expr, Item, Module, Param, Pattern, Stmt, Type};
 use marea_syntax::parse_recovering;
 use marea_syntax::span::Span;
 use marea_types::check;
@@ -366,16 +364,11 @@ fn find_in_expr(expr: &Expr, offset: usize) -> Option<Node<'_>> {
             scrutinee, arms, ..
         } => find_in_expr(scrutinee, offset).or_else(|| {
             arms.iter().find_map(|arm| {
-                find_in_pattern(&arm.pattern, offset)
-                    .or_else(|| find_in_expr(&arm.body, offset))
+                find_in_pattern(&arm.pattern, offset).or_else(|| find_in_expr(&arm.body, offset))
             })
         }),
-        Expr::Record { fields, .. } => {
-            fields.iter().find_map(|fi| find_in_expr(&fi.value, offset))
-        }
-        Expr::List { elements, .. } => {
-            elements.iter().find_map(|e| find_in_expr(e, offset))
-        }
+        Expr::Record { fields, .. } => fields.iter().find_map(|fi| find_in_expr(&fi.value, offset)),
+        Expr::List { elements, .. } => elements.iter().find_map(|e| find_in_expr(e, offset)),
         Expr::Index { object, index, .. } => {
             find_in_expr(object, offset).or_else(|| find_in_expr(index, offset))
         }
@@ -398,12 +391,8 @@ fn find_in_type(ty: &Type, offset: usize) -> Option<Node<'_>> {
     }
     let inner = match ty {
         Type::Name { args, .. } => args.iter().find_map(|a| find_in_type(a, offset)),
-        Type::Union { variants, .. } => {
-            variants.iter().find_map(|v| find_in_type(v, offset))
-        }
-        Type::Record { fields, .. } => {
-            fields.iter().find_map(|f| find_in_type(&f.ty, offset))
-        }
+        Type::Union { variants, .. } => variants.iter().find_map(|v| find_in_type(v, offset)),
+        Type::Record { fields, .. } => fields.iter().find_map(|f| find_in_type(&f.ty, offset)),
     };
     Some(inner.unwrap_or(Node::Type(ty)))
 }

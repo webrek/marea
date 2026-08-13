@@ -9,7 +9,11 @@ use crate::span::Span;
 pub enum TemplatePiece {
     Lit(String),
     /// `{expr}` escapa; `{!expr}` inserta tal cual (y exige que sea Html).
-    Hueco { fuente: String, offset: usize, crudo: bool },
+    Hueco {
+        fuente: String,
+        offset: usize,
+        crudo: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -60,13 +64,13 @@ pub enum TokenKind {
     FatArrow, // =>
 
     // Operadores
-    Eq,       // =
-    EqEq,     // ==
-    BangEq,   // !=
-    Lt,       // <
-    Gt,       // >
-    Le,       // <=
-    Ge,       // >=
+    Eq,     // =
+    EqEq,   // ==
+    BangEq, // !=
+    Lt,     // <
+    Gt,     // >
+    Le,     // <=
+    Ge,     // >=
     Plus,
     Minus,
     Star,

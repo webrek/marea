@@ -65,8 +65,10 @@ impl Ty {
                 format!("fn({}) -> {}", ps.join(", "), ret.display())
             }
             Ty::Record(fields) => {
-                let fs: Vec<String> =
-                    fields.iter().map(|(n, t)| format!("{}: {}", n, t.display())).collect();
+                let fs: Vec<String> = fields
+                    .iter()
+                    .map(|(n, t)| format!("{}: {}", n, t.display()))
+                    .collect();
                 format!("{{ {} }}", fs.join(", "))
             }
             Ty::List(elem) => format!("List<{}>", elem.display()),

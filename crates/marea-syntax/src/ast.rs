@@ -22,7 +22,12 @@ pub enum Item {
     /// `store nombre: Tipo;` — declara un almacén con nombre. El nombre es un
     /// valor de primera clase que se pasa a `guardar`/`todos`/`actualizar`/
     /// `borrar`, de modo que un módulo puede tener varios almacenes.
-    Store { name: String, name_span: Span, ty: Type, span: Span },
+    Store {
+        name: String,
+        name_span: Span,
+        ty: Type,
+        span: Span,
+    },
 }
 
 /// Dónde se ejecuta una función. El compilador genera el cruce de frontera
@@ -85,9 +90,7 @@ pub struct FieldDef {
 impl Type {
     pub fn span(&self) -> Span {
         match self {
-            Type::Name { span, .. }
-            | Type::Union { span, .. }
-            | Type::Record { span, .. } => *span,
+            Type::Name { span, .. } | Type::Union { span, .. } | Type::Record { span, .. } => *span,
         }
     }
 
@@ -121,7 +124,10 @@ pub enum Stmt {
         span: Span,
     },
     Let(LetStmt),
-    Return { value: Option<Expr>, span: Span },
+    Return {
+        value: Option<Expr>,
+        span: Span,
+    },
     /// Asignación a una variable existente: `n = n + 1;`.
     Assign {
         name: String,
@@ -131,7 +137,10 @@ pub enum Stmt {
     },
     /// Efecto reactivo: el bloque se re-ejecuta cuando cambian las variables
     /// reactivas que lee. `effect { print(total); }`.
-    Effect { body: Block, span: Span },
+    Effect {
+        body: Block,
+        span: Span,
+    },
     Expr(Expr),
 }
 
@@ -153,20 +162,55 @@ pub enum TemplatePart {
     /// `{expr}` se escapa; `{!expr}` se inserta tal cual y el verificador exige
     /// que sea `Html`, de modo que la forma cruda no puede colar texto sin
     /// escapar.
-    Interp { expr: Box<Expr>, raw: bool },
+    Interp {
+        expr: Box<Expr>,
+        raw: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
-    Int { value: i64, span: Span },
-    Float { value: f64, span: Span },
-    Str { value: String, span: Span },
-    Bool { value: bool, span: Span },
-    Ident { name: String, span: Span },
-    Unary { op: UnaryOp, expr: Box<Expr>, span: Span },
-    Binary { op: BinOp, left: Box<Expr>, right: Box<Expr>, span: Span },
-    Call { callee: Box<Expr>, args: Vec<Expr>, span: Span },
-    Member { object: Box<Expr>, field: String, span: Span },
+    Int {
+        value: i64,
+        span: Span,
+    },
+    Float {
+        value: f64,
+        span: Span,
+    },
+    Str {
+        value: String,
+        span: Span,
+    },
+    Bool {
+        value: bool,
+        span: Span,
+    },
+    Ident {
+        name: String,
+        span: Span,
+    },
+    Unary {
+        op: UnaryOp,
+        expr: Box<Expr>,
+        span: Span,
+    },
+    Binary {
+        op: BinOp,
+        left: Box<Expr>,
+        right: Box<Expr>,
+        span: Span,
+    },
+    Call {
+        callee: Box<Expr>,
+        args: Vec<Expr>,
+        span: Span,
+    },
+    Member {
+        object: Box<Expr>,
+        field: String,
+        span: Span,
+    },
     If {
         cond: Box<Expr>,
         then_branch: Block,
@@ -188,13 +232,23 @@ pub enum Expr {
         span: Span,
     },
     /// Literal de lista: `[1, 2, 3]`.
-    List { elements: Vec<Expr>, span: Span },
+    List {
+        elements: Vec<Expr>,
+        span: Span,
+    },
     /// Indexado de lista: `xs[i]`.
     /// Plantilla de texto: `` `hola {nombre}` ``. Produce `Html`: los huecos
     /// `{x}` se escapan solos y `{!x}` inserta marcado que ya es seguro, así que
     /// olvidarse del escapado deja de ser posible.
-    Template { parts: Vec<TemplatePart>, span: Span },
-    Index { object: Box<Expr>, index: Box<Expr>, span: Span },
+    Template {
+        parts: Vec<TemplatePart>,
+        span: Span,
+    },
+    Index {
+        object: Box<Expr>,
+        index: Box<Expr>,
+        span: Span,
+    },
 }
 
 /// Inicialización de un campo en un literal de registro: `name: "x"`.

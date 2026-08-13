@@ -105,8 +105,7 @@ fn handle_notification(
             }
         }
         DidCloseTextDocument::METHOD => {
-            let params: DidCloseTextDocumentParams =
-                note.extract(DidCloseTextDocument::METHOD)?;
+            let params: DidCloseTextDocumentParams = note.extract(DidCloseTextDocument::METHOD)?;
             let uri = params.text_document.uri;
             store.close(&uri);
             // Al cerrar, se limpian los diagnósticos del documento: lista vacía.
@@ -261,10 +260,7 @@ fn send_diagnostics(
         diagnostics,
         version,
     };
-    let note = lsp_server::Notification::new(
-        PublishDiagnostics::METHOD.to_string(),
-        params,
-    );
+    let note = lsp_server::Notification::new(PublishDiagnostics::METHOD.to_string(), params);
     connection.sender.send(Message::Notification(note))?;
     Ok(())
 }

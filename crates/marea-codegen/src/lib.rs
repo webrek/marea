@@ -102,7 +102,13 @@ pub fn emit(module: &Module) -> Project {
 
     Project {
         runtime,
-        server: emit_server(&remote, &shared, &plain_globals, &type_aliases(module), &store_decls(module)),
+        server: emit_server(
+            &remote,
+            &shared,
+            &plain_globals,
+            &type_aliases(module),
+            &store_decls(module),
+        ),
         client: emit_client(&remote, &local, &plain_globals),
         demo: emit_demo(&local),
     }
@@ -144,8 +150,7 @@ pub fn emit_app(module: &Module) -> AppProject {
             _ => None,
         })
         .collect();
-    let reactive_names: HashSet<String> =
-        top_reactives.iter().map(|l| l.name.clone()).collect();
+    let reactive_names: HashSet<String> = top_reactives.iter().map(|l| l.name.clone()).collect();
 
     let serve = "// Generado por Marea — arranca el servidor web y lo deja vivo.\n\
         import { startServer, puerto } from \"./runtime.ts\";\n\
@@ -160,9 +165,21 @@ pub fn emit_app(module: &Module) -> AppProject {
 
     AppProject {
         runtime: RUNTIME_TS.to_string(),
-        server: emit_server(&remote, &shared, &plain_globals, &type_aliases(module), &store_decls(module)),
+        server: emit_server(
+            &remote,
+            &shared,
+            &plain_globals,
+            &type_aliases(module),
+            &store_decls(module),
+        ),
         serve,
-        client_js: emit_client_js(&remote, &local, &top_reactives, &reactive_names, &plain_globals),
+        client_js: emit_client_js(
+            &remote,
+            &local,
+            &top_reactives,
+            &reactive_names,
+            &plain_globals,
+        ),
         index_html: APP_HTML.to_string(),
     }
 }
@@ -201,7 +218,10 @@ fn emit_client_js(
             s.push_str(&format!("const {} = __signal({init});\n", l.name));
         } else {
             if es_recurso(&l.value) {
-                s.push_str(&format!("const {} = __resource(async () => {init});\n", l.name));
+                s.push_str(&format!(
+                    "const {} = __resource(async () => {init});\n",
+                    l.name
+                ));
             } else {
                 s.push_str(&format!("const {} = __memo(() => {init});\n", l.name));
             }
@@ -222,7 +242,10 @@ fn emit_client_js(
     // y monta vista() en el DOM si existen.
     s.push_str("\n// --- arranque ---\n");
     let exposed: Vec<String> = local.iter().map(|f| f.name.clone()).collect();
-    s.push_str(&format!("globalThis.marea = {{ {} }};\n", exposed.join(", ")));
+    s.push_str(&format!(
+        "globalThis.marea = {{ {} }};\n",
+        exposed.join(", ")
+    ));
     if local.iter().any(|f| f.name == "main") {
         s.push_str("await main();\n");
     }
@@ -472,7 +495,11 @@ globalThis.mareaCadena = decodificarCadena;
 /// Es deliberadamente estricto en escalares, listas y registros, y permisivo en
 /// uniones y tipos abiertos (`Record`, alias sin resolver), donde el lenguaje
 /// todavía no tiene una representación de runtime con la que discriminar.
-fn js_validator(ty: &Type, aliases: &std::collections::HashMap<String, Type>, expr: &str) -> String {
+fn js_validator(
+    ty: &Type,
+    aliases: &std::collections::HashMap<String, Type>,
+    expr: &str,
+) -> String {
     js_validator_guarded(ty, aliases, expr, &mut HashSet::new())
 }
 
@@ -559,7 +586,10 @@ fn emit_server(
     // Un almacén por `store nombre: T;`. Vive solo aquí: el verificador ya
     // impide usar el estado del servidor fuera de @server.
     for (nombre, esquema) in stores {
-        s.push_str(&format!("const {nombre} = __store({}, {esquema});\n", js_string(nombre)));
+        s.push_str(&format!(
+            "const {nombre} = __store({}, {esquema});\n",
+            js_string(nombre)
+        ));
     }
     if !stores.is_empty() {
         s.push('\n');
@@ -584,7 +614,9 @@ fn emit_server(
         s.push('\n');
         // El transporte ya garantiza que 'args' es un arreglo; aquí exigimos la
         // aridad exacta para que un argumento faltante no se cuele como undefined.
-        let pass: Vec<String> = (0..f.params.len()).map(|i| format!("__args[{i}]")).collect();
+        let pass: Vec<String> = (0..f.params.len())
+            .map(|i| format!("__args[{i}]"))
+            .collect();
         let n = f.params.len();
         // Guarda por argumento derivado del tipo declarado.
         let mut checks = String::new();
@@ -781,7 +813,13 @@ fn emit_stmt(stmt: &Stmt, indent: usize, reactive: &HashSet<String>) -> String {
             }
         }
         // Efecto: se re-ejecuta cuando cambian las reactivas que lee.
-        Stmt::For { var, index, iter, body, .. } => {
+        Stmt::For {
+            var,
+            index,
+            iter,
+            body,
+            ..
+        } => {
             // Bucle clásico sobre índice; el elemento y el índice son `const`
             // porque dentro del bucle son inmutables.
             let it = emit_expr(iter, reactive);
@@ -895,21 +933,23 @@ fn emit_match(
                             "{pin}else {{ const {name} = __m;\n{body}\n{pin}}}\n"
                         ));
                     } else {
-                        s.push_str(&format!(
-                            "{pin}{{ const {name} = __m;\n{body}\n{pin}}}\n"
-                        ));
+                        s.push_str(&format!("{pin}{{ const {name} = __m;\n{body}\n{pin}}}\n"));
                     }
                     caught_all = true;
                 }
             }
             Pattern::Int { value, .. } => {
                 let kw = if chained { "else if" } else { "if" };
-                s.push_str(&format!("{pin}{kw} (__m === {value}) {{\n{body}\n{pin}}}\n"));
+                s.push_str(&format!(
+                    "{pin}{kw} (__m === {value}) {{\n{body}\n{pin}}}\n"
+                ));
                 chained = true;
             }
             Pattern::Bool { value, .. } => {
                 let kw = if chained { "else if" } else { "if" };
-                s.push_str(&format!("{pin}{kw} (__m === {value}) {{\n{body}\n{pin}}}\n"));
+                s.push_str(&format!(
+                    "{pin}{kw} (__m === {value}) {{\n{body}\n{pin}}}\n"
+                ));
                 chained = true;
             }
             Pattern::Str { value, .. } => {
@@ -995,7 +1035,9 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
         }
         Expr::Member { object, field, .. } => format!("{}.{}", emit_expr(object, reactive), field),
         // 'match' en posición de expresión: IIFE que RETORNA el valor de la rama.
-        Expr::Match { scrutinee, arms, .. } => {
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
             format!(
                 "(await (async () => {{\n{}\n}})())",
                 emit_match(scrutinee, arms, 1, reactive, true)
@@ -1192,13 +1234,17 @@ mod tests {
         let no_reactive = HashSet::new();
         let m = marea_syntax::parse("fn f() -> Int { return len(concat(\"a\", \"b\")); }").unwrap();
         let Item::Fn(f) = &m.items[0] else { panic!() };
-        let Stmt::Return { value: Some(e), .. } = &f.body.stmts[0] else { panic!() };
+        let Stmt::Return { value: Some(e), .. } = &f.body.stmts[0] else {
+            panic!()
+        };
         assert_eq!(emit_expr(e, &no_reactive), "len(concat(\"a\", \"b\"))");
 
-        let m = marea_syntax::parse("@server fn g() { print(1); }\n@client fn h() { g(); }")
-            .unwrap();
+        let m =
+            marea_syntax::parse("@server fn g() { print(1); }\n@client fn h() { g(); }").unwrap();
         let Item::Fn(h) = &m.items[1] else { panic!() };
-        let Stmt::Expr(e) = &h.body.stmts[0] else { panic!() };
+        let Stmt::Expr(e) = &h.body.stmts[0] else {
+            panic!()
+        };
         assert!(emit_expr(e, &no_reactive).starts_with("(await "));
     }
 }

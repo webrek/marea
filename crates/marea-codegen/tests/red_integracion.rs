@@ -80,7 +80,10 @@ console.log("RESULTADO:" + JSON.stringify({{ bloqueados, total: casos.length, li
         json.contains(r#""bloqueados":11"#) && json.contains(r#""total":11"#),
         "los once destinos deben rechazarse: {json}"
     );
-    assert!(json.contains(r#""listaOk":1"#), "la lista blanca debe aplicar: {json}");
+    assert!(
+        json.contains(r#""listaOk":1"#),
+        "la lista blanca debe aplicar: {json}"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }

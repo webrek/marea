@@ -201,7 +201,10 @@ mod tests {
     #[test]
     fn value_names_coincide_con_lookup() {
         for n in VALUE_NAMES {
-            assert!(lookup(n).is_some(), "'{n}' está en VALUE_NAMES pero no en lookup()");
+            assert!(
+                lookup(n).is_some(),
+                "'{n}' está en VALUE_NAMES pero no en lookup()"
+            );
         }
     }
 

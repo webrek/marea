@@ -13,11 +13,22 @@
 /// que ya se tienen. Todo lo demás (estado, RPC) es asíncrono.
 pub const SINCRONOS: &[&str] = &[
     // Salida y composición de texto/marcado.
-    "print", "concat", "render", "len", "text", "escape", "html",
+    "print",
+    "concat",
+    "render",
+    "len",
+    "text",
+    "escape",
+    "html",
     // Listas y cadenas.
-    "append", "contains", "lower",
+    "append",
+    "contains",
+    "lower",
     // Lectura de JSON por ruta: puro sobre un texto ya recibido.
-    "jsonText", "jsonInt", "jsonFloat", "jsonLen",
+    "jsonText",
+    "jsonInt",
+    "jsonFloat",
+    "jsonLen",
 ];
 
 /// `true` si el builtin es síncrono. Un nombre que no sea builtin da `false`,

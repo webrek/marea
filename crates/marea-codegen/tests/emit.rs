@@ -55,7 +55,11 @@ fn precedencia_se_conserva_con_parentesis() {
 fn reactive_derivada_es_memo() {
     let p = build("@client fn f() { reactive x = 1; print(x); }");
     // Una 'reactive' (no mut) compila a un memo, y su lectura a '.get()'.
-    assert!(p.client.contains("const x = __memo(() => 1)"), "{}", p.client);
+    assert!(
+        p.client.contains("const x = __memo(() => 1)"),
+        "{}",
+        p.client
+    );
     assert!(p.client.contains("print(x.get())"), "{}", p.client);
 }
 
@@ -80,7 +84,12 @@ fn reactivo_genera_signal_memo_y_effect() {
         "@client fn main() { reactive mut n = 0; reactive doble = n * 2; effect { print(doble); } n = n + 1; }",
     );
     assert!(p.client.contains("const n = __signal(0)"), "{}", p.client);
-    assert!(p.client.contains("const doble = __memo(() => (n.get() * 2))"), "{}", p.client);
+    assert!(
+        p.client
+            .contains("const doble = __memo(() => (n.get() * 2))"),
+        "{}",
+        p.client
+    );
     assert!(p.client.contains("__effect(async () =>"), "{}", p.client);
     // Lectura reactiva -> .get(); asignación -> .set()
     assert!(p.client.contains("print(doble.get())"), "{}", p.client);
@@ -153,9 +162,15 @@ fn match_como_expresion_retorna_valor() {
 fn local_sombrea_a_reactiva() {
     // Un 'let n' no-reactivo dentro de un bloque sombrea a la reactiva externa:
     // su lectura NO debe emitir .get().
-    let p = build("@client fn main() { reactive mut n = 0; effect { let n = 99; print(n); } n = n + 1; }");
+    let p = build(
+        "@client fn main() { reactive mut n = 0; effect { let n = 99; print(n); } n = n + 1; }",
+    );
     assert!(p.client.contains("const n = 99"), "{}", p.client);
-    assert!(p.client.contains("print(n)") && !p.client.contains("print(n.get())"), "{}", p.client);
+    assert!(
+        p.client.contains("print(n)") && !p.client.contains("print(n.get())"),
+        "{}",
+        p.client
+    );
     // La reactiva externa sigue siendo signal.
     assert!(p.client.contains("const n = __signal(0)"), "{}", p.client);
 }
@@ -168,7 +183,10 @@ fn emit_web_genera_html_y_glue() {
     assert!(html.contains("./glue.mjs"), "html: {html}");
     assert!(glue.contains("WebAssembly.instantiate"), "glue: {glue}");
     // vista() devuelve String: el render decodifica el puntero desde memoria.
-    assert!(glue.contains("decodificarCadena(exports.vista())"), "glue: {glue}");
+    assert!(
+        glue.contains("decodificarCadena(exports.vista())"),
+        "glue: {glue}"
+    );
 }
 
 #[test]
@@ -183,7 +201,10 @@ fn web_entry_no_string_no_decodifica() {
     let m = marea_syntax::parse("fn vista() -> Int { return 42; }").unwrap();
     let (_html, glue) = marea_codegen::emit_web(&m);
     assert!(glue.contains("String(exports.vista())"), "glue: {glue}");
-    assert!(!glue.contains("decodificarCadena(exports.vista())"), "glue: {glue}");
+    assert!(
+        !glue.contains("decodificarCadena(exports.vista())"),
+        "glue: {glue}"
+    );
 }
 
 // --- app web (marea build-app): RPC + reactivo + DOM ---
@@ -195,34 +216,56 @@ fn app(src: &str) -> marea_codegen::AppProject {
 #[test]
 fn app_reactiva_de_modulo_es_signal() {
     // Una `reactive mut` de nivel superior se vuelve un signal de módulo.
-    let a = app("reactive mut posts = [];\n@client fn vista() -> String { let p = posts; return \"x\"; }");
-    assert!(a.client_js.contains("const posts = __signal([]);"), "{}", a.client_js);
+    let a = app(
+        "reactive mut posts = [];\n@client fn vista() -> String { let p = posts; return \"x\"; }",
+    );
+    assert!(
+        a.client_js.contains("const posts = __signal([]);"),
+        "{}",
+        a.client_js
+    );
     // La vista lee el signal con .get().
     assert!(a.client_js.contains("posts.get()"), "{}", a.client_js);
 }
 
 #[test]
 fn app_cliente_es_js_sin_tipos_ni_imports_node() {
-    let a = app("@server fn feed() -> List<Int> { return all(almacen); }\n@client fn main() { feed(); }");
+    let a = app(
+        "@server fn feed() -> List<Int> { return all(almacen); }\n@client fn main() { feed(); }",
+    );
     // El cliente de navegador NO importa Node ni lleva anotaciones de tipo.
     assert!(!a.client_js.contains("node:http"), "{}", a.client_js);
     assert!(!a.client_js.contains(": number"), "{}", a.client_js);
     assert!(!a.client_js.contains(": string"), "{}", a.client_js);
     // El @server se vuelve un stub fetch al mismo origen.
     assert!(a.client_js.contains("__rpc(\"feed\""), "{}", a.client_js);
-    assert!(a.client_js.contains("fetch(\"/__marea\""), "{}", a.client_js);
+    assert!(
+        a.client_js.contains("fetch(\"/__marea\""),
+        "{}",
+        a.client_js
+    );
 }
 
 #[test]
 fn app_arranca_main_y_monta_vista() {
-    let a = app("@client fn vista() -> String { return \"hola\"; }\n@client fn main() { print(\"hi\"); }");
+    let a = app(
+        "@client fn vista() -> String { return \"hola\"; }\n@client fn main() { print(\"hi\"); }",
+    );
     assert!(a.client_js.contains("await main();"), "{}", a.client_js);
     assert!(a.client_js.contains("__mount(vista);"), "{}", a.client_js);
     // Expone las funciones en window.marea para los onclick del HTML.
-    assert!(a.client_js.contains("globalThis.marea = {"), "{}", a.client_js);
+    assert!(
+        a.client_js.contains("globalThis.marea = {"),
+        "{}",
+        a.client_js
+    );
     // index.html tiene el contenedor #app y carga client.js como módulo.
     assert!(a.index_html.contains("id=\"app\""), "{}", a.index_html);
-    assert!(a.index_html.contains("src=\"./client.js\""), "{}", a.index_html);
+    assert!(
+        a.index_html.contains("src=\"./client.js\""),
+        "{}",
+        a.index_html
+    );
 }
 
 #[test]
@@ -243,7 +286,11 @@ fn store_builtins_son_async_y_se_awaitan() {
     assert!(p.runtime.contains("export function save"), "{}", p.runtime);
     assert!(p.runtime.contains("export function all"), "{}", p.runtime);
     // El call site las espera.
-    assert!(p.server.contains("(await save(almacen, x))"), "{}", p.server);
+    assert!(
+        p.server.contains("(await save(almacen, x))"),
+        "{}",
+        p.server
+    );
     assert!(p.server.contains("(await all(almacen))"), "{}", p.server);
 }
 
@@ -260,7 +307,11 @@ fn store_persiste_a_disco() {
 fn indexado_usa_bounds_check() {
     let p = build("@client fn f(xs: List) { let a = xs[0]; print(a); }");
     assert!(p.client.contains("__index(xs, 0)"), "{}", p.client);
-    assert!(p.runtime.contains("export function __index"), "{}", p.runtime);
+    assert!(
+        p.runtime.contains("export function __index"),
+        "{}",
+        p.runtime
+    );
 }
 
 // --- endurecimiento de seguridad (auditoría 2026-06-18) ---
@@ -271,7 +322,8 @@ fn handler_valida_aridad_de_args() {
     // para que un argumento faltante no se cuele como undefined.
     let p = build("@server fn pub(a: String, b: Int) {}");
     assert!(
-        p.server.contains(r#"if (__args.length !== 2) __badRequest("aridad")"#),
+        p.server
+            .contains(r#"if (__args.length !== 2) __badRequest("aridad")"#),
         "{}",
         p.server
     );
@@ -283,16 +335,26 @@ fn handler_valida_aridad_de_args() {
 #[test]
 fn el_handler_valida_los_tipos_de_los_argumentos() {
     let p = build("@server fn pub(a: String, b: Int) {}");
-    assert!(p.server.contains(r#"typeof __args[0] === "string""#), "{}", p.server);
-    assert!(p.server.contains("Number.isSafeInteger(__args[1])"), "{}", p.server);
+    assert!(
+        p.server.contains(r#"typeof __args[0] === "string""#),
+        "{}",
+        p.server
+    );
+    assert!(
+        p.server.contains("Number.isSafeInteger(__args[1])"),
+        "{}",
+        p.server
+    );
 }
 
 #[test]
 fn el_validador_recorre_listas_y_registros() {
-    let p = build(
-        "type Post = { autor: String, likes: Int };\n@server fn g(ps: List<Post>) {}",
+    let p = build("type Post = { autor: String, likes: Int };\n@server fn g(ps: List<Post>) {}");
+    assert!(
+        p.server.contains("Array.isArray(__args[0])"),
+        "{}",
+        p.server
     );
-    assert!(p.server.contains("Array.isArray(__args[0])"), "{}", p.server);
     assert!(p.server.contains(r#"__e["autor"]"#), "{}", p.server);
     assert!(p.server.contains(r#"__e["likes"]"#), "{}", p.server);
 }
@@ -323,12 +385,27 @@ fn transporte_rpc_esta_endurecido() {
     let p = build("@server fn f() {}");
     assert!(p.runtime.contains("MAREA_MAX_BODY"), "falta tope de cuerpo");
     assert!(p.runtime.contains("statusCode = 413"), "falta rechazo 413");
-    assert!(p.runtime.contains("Object.create(null)"), "handlers deben ir sin prototipo");
-    assert!(p.runtime.contains("listen(MAREA_PORT, MAREA_HOST"), "debe bindear host explícito");
-    assert!(p.runtime.contains(r#"error: "error interno""#), "el error al cliente debe ser genérico");
+    assert!(
+        p.runtime.contains("Object.create(null)"),
+        "handlers deben ir sin prototipo"
+    );
+    assert!(
+        p.runtime.contains("listen(MAREA_PORT, MAREA_HOST"),
+        "debe bindear host explícito"
+    );
+    assert!(
+        p.runtime.contains(r#"error: "error interno""#),
+        "el error al cliente debe ser genérico"
+    );
     // No debe filtrar el error crudo ni hacer eco del nombre de función.
-    assert!(!p.runtime.contains("error: String(e)"), "no debe reflejar String(e)");
-    assert!(!p.runtime.contains("función desconocida: ${fn}"), "no debe hacer eco del fn");
+    assert!(
+        !p.runtime.contains("error: String(e)"),
+        "no debe reflejar String(e)"
+    );
+    assert!(
+        !p.runtime.contains("función desconocida: ${fn}"),
+        "no debe hacer eco del fn"
+    );
 }
 
 #[test]
@@ -339,8 +416,14 @@ fn backends_sql_comillan_identificadores() {
     assert!(p.runtime.contains("function __quoteId"), "{}", p.runtime);
     assert!(p.runtime.contains("function __idCol"), "{}", p.runtime);
     // sqlite/pg usan comilla doble; mysql usa backtick (constantes por backend).
-    assert!(p.runtime.contains("const q = '\"'"), "sqlite/pg deben comillar con \"");
-    assert!(p.runtime.contains("const q = \"`\""), "mysql debe comillar con backtick");
+    assert!(
+        p.runtime.contains("const q = '\"'"),
+        "sqlite/pg deben comillar con \""
+    );
+    assert!(
+        p.runtime.contains("const q = \"`\""),
+        "mysql debe comillar con backtick"
+    );
 }
 
 #[test]
@@ -348,8 +431,14 @@ fn persistencia_a_archivo_es_incremental_y_atomica() {
     // H2/L5: el backend de archivo usa un log append-only (O(1) por mutación) y
     // compacta atómicamente (temporal + rename). Sin reescritura completa por op.
     let p = build("store almacen: Int;\n@server fn g(x: Int) { save(almacen, x); }");
-    assert!(p.runtime.contains("appendFileSync"), "debe escribir incremental (append)");
-    assert!(p.runtime.contains("renameSync"), "la compactación debe ser atómica");
+    assert!(
+        p.runtime.contains("appendFileSync"),
+        "debe escribir incremental (append)"
+    );
+    assert!(
+        p.runtime.contains("renameSync"),
+        "la compactación debe ser atómica"
+    );
     assert!(p.runtime.contains(".tmp"), "debe compactar vía temporal");
 }
 
@@ -358,9 +447,16 @@ fn backends_son_incrementales_por_id() {
     // H2: la interfaz del backend es insert/update/remove por id, no saveAll;
     // las mutaciones tocan una sola fila.
     let p = build("store almacen: Int;\n@server fn g(x: Int) { save(almacen, x); }");
-    assert!(p.runtime.contains("insert(id: number, item: unknown)"), "{}", p.runtime);
+    assert!(
+        p.runtime.contains("insert(id: number, item: unknown)"),
+        "{}",
+        p.runtime
+    );
     assert!(p.runtime.contains("remove(id: number)"), "{}", p.runtime);
-    assert!(!p.runtime.contains("saveAll"), "saveAll (reescritura total) debe haber desaparecido");
+    assert!(
+        !p.runtime.contains("saveAll"),
+        "saveAll (reescritura total) debe haber desaparecido"
+    );
     // El esquema SQL gana una clave primaria interna.
     assert!(p.runtime.contains("INTEGER PRIMARY KEY"), "{}", p.runtime);
 }
@@ -370,7 +466,7 @@ fn placeholders_se_sustituyen_en_una_pasada() {
     // L3: un campo cuyo nombre coincide con un centinela del template no debe
     // corromper la sustitución del otro. Tras emitir no quedan centinelas crudos.
     let p = build("type T = { __MAREA_STORE_SCHEMA__: Int };\nstore almacen: T;\n@server fn g() { save(almacen, T { __MAREA_STORE_SCHEMA__: 1 }); }");
-    
+
     // El único '__MAREA_STORE_SCHEMA__' admisible es el nombre de columna inyectado,
     // no un placeholder del template suelto en una posición de código.
     // El nombre de columna viaja al literal del esquema sin corromper nada.
@@ -384,32 +480,58 @@ fn store_inyecta_esquema_de_columnas() {
     // La tabla toma el NOMBRE del almacén (dos almacenes del mismo tipo son
     // dos tablas), y las columnas salen de los campos del registro.
     assert!(p.server.contains("table: \"almacen\""), "{}", p.server);
-    assert!(p.server.contains("{ name: \"texto\", kind: \"text\" }"), "{}", p.server);
-    assert!(p.server.contains("{ name: \"likes\", kind: \"int\" }"), "{}", p.server);
+    assert!(
+        p.server.contains("{ name: \"texto\", kind: \"text\" }"),
+        "{}",
+        p.server
+    );
+    assert!(
+        p.server.contains("{ name: \"likes\", kind: \"int\" }"),
+        "{}",
+        p.server
+    );
 }
 
 #[test]
 fn store_escalar_usa_columna_doc() {
     let p = build("store almacen: Int;\n@server fn g(x: Int) { save(almacen, x); }");
     // Un store no-registro guarda el valor entero como una sola columna JSON.
-    assert!(p.server.contains("{ name: \"__doc\", kind: \"json\" }"), "{}", p.server);
+    assert!(
+        p.server.contains("{ name: \"__doc\", kind: \"json\" }"),
+        "{}",
+        p.server
+    );
 }
 
 #[test]
 fn sin_store_el_esquema_es_null() {
     let p = build("@client fn f() { print(\"hola\"); }");
-    assert!(!p.server.contains("__store("), "sin store no debe declararse ninguno:\n{}", p.server);
+    assert!(
+        !p.server.contains("__store("),
+        "sin store no debe declararse ninguno:\n{}",
+        p.server
+    );
 }
 
 #[test]
 fn store_tiene_backends_de_base_de_datos() {
     let p = build("store almacen: Int;\n@server fn g(x: Int) { save(almacen, x); }");
     // Los cinco backends conviven; el driver se elige con MAREA_DB.
-    for marca in ["__sqliteBackend", "__postgresBackend", "__mysqlBackend", "__mongoBackend", "MAREA_DB"] {
+    for marca in [
+        "__sqliteBackend",
+        "__postgresBackend",
+        "__mysqlBackend",
+        "__mongoBackend",
+        "MAREA_DB",
+    ] {
         assert!(p.runtime.contains(marca), "falta {marca} en runtime");
     }
     // Los drivers externos se importan de forma perezosa (no rompen si no están).
-    assert!(p.runtime.contains("await import(\"node:sqlite\")"), "{}", p.runtime);
+    assert!(
+        p.runtime.contains("await import(\"node:sqlite\")"),
+        "{}",
+        p.runtime
+    );
     assert!(p.runtime.contains("await import(\"pg\")"), "{}", p.runtime);
 }
 
@@ -418,7 +540,6 @@ fn store_file_lleva_la_firma_del_esquema() {
     let p = build("type Post = { a: Int };\nstore almacen: Post;\n@server fn g() { save(almacen, Post { a: 1 }); }");
     // El archivo por defecto incluye nombre+campos para no colisionar entre apps.
     assert!(p.server.contains("__store(\"almacen\""), "{}", p.server);
-    
 }
 
 // --- regresiones de codegen (auditoría) ---
@@ -447,13 +568,18 @@ fn match_con_comodin_unico_no_emite_else_suelto() {
 fn match_descarta_ramas_tras_el_catch_all() {
     let p = build("@client fn g(r: Int) { match r { _ => print(1), A => print(2) } }");
     assert!(!p.client.contains("else if"), "{}", p.client);
-    assert!(!p.client.contains("print(2)"), "rama inalcanzable emitida:\n{}", p.client);
+    assert!(
+        !p.client.contains("print(2)"),
+        "rama inalcanzable emitida:\n{}",
+        p.client
+    );
 }
 
 // El caso que SÍ debe encadenar sigue haciéndolo.
 #[test]
 fn match_con_variantes_sigue_encadenando() {
-    let p = build("@client fn f(r: Int) { match r { A => print(1), B => print(2), _ => print(3) } }");
+    let p =
+        build("@client fn f(r: Int) { match r { A => print(1), B => print(2), _ => print(3) } }");
     assert!(p.client.contains("else if"), "{}", p.client);
     assert!(p.client.contains("else {"), "{}", p.client);
 }
@@ -464,7 +590,11 @@ fn match_con_variantes_sigue_encadenando() {
 #[test]
 fn ensure_store_memoiza_la_promesa_de_carga() {
     let p = build("store almacen: Int;\n@server fn g(x: Int) { save(almacen, x); }");
-    assert!(p.runtime.contains("__loading"), "la carga debe memoizarse:\n{}", p.runtime);
+    assert!(
+        p.runtime.contains("__loading"),
+        "la carga debe memoizarse:\n{}",
+        p.runtime
+    );
 }
 
 // M-11: un valor de entorno mal formado daba NaN, y `size > NaN` es siempre
@@ -499,7 +629,10 @@ fn los_estaticos_solo_sirven_extensiones_en_lista_blanca() {
 #[test]
 fn el_builtin_escape_esta_en_los_dos_runtimes() {
     let p = build("@client fn f() { print(escape(\"<b>\")); }");
-    assert!(p.runtime.contains("export function escape"), "falta en runtime.ts");
+    assert!(
+        p.runtime.contains("export function escape"),
+        "falta en runtime.ts"
+    );
     assert!(p.client.contains("escape"), "{}", p.client);
 }
 
@@ -509,14 +642,22 @@ fn el_builtin_escape_esta_en_los_dos_runtimes() {
 #[test]
 fn las_funciones_compartidas_llegan_al_servidor() {
     let p = build("fn ayuda(x: Int) -> Int { return x * 2; }\n@server fn calc(n: Int) -> Int { return ayuda(n); }");
-    assert!(p.server.contains("function ayuda"), "falta el helper:\n{}", p.server);
+    assert!(
+        p.server.contains("function ayuda"),
+        "falta el helper:\n{}",
+        p.server
+    );
 }
 
 // Una @client NO debe filtrarse al bundle del servidor.
 #[test]
 fn las_funciones_client_no_llegan_al_servidor() {
     let p = build("@client fn ui() { print(\"x\"); }\n@server fn s() { print(\"y\"); }");
-    assert!(!p.server.contains("function ui"), "@client no debe ir al servidor:\n{}", p.server);
+    assert!(
+        !p.server.contains("function ui"),
+        "@client no debe ir al servidor:\n{}",
+        p.server
+    );
 }
 
 // A-2: una global no reactiva es una constante de módulo visible desde
@@ -524,8 +665,16 @@ fn las_funciones_client_no_llegan_al_servidor() {
 #[test]
 fn las_globales_no_reactivas_se_emiten_en_ambos_bundles() {
     let p = build("let saludo = \"hola\";\n@server fn dime() -> String { return saludo; }\n@client fn m() { print(saludo); }");
-    assert!(p.server.contains("const saludo"), "falta en server:\n{}", p.server);
-    assert!(p.client.contains("const saludo"), "falta en client:\n{}", p.client);
+    assert!(
+        p.server.contains("const saludo"),
+        "falta en server:\n{}",
+        p.server
+    );
+    assert!(
+        p.client.contains("const saludo"),
+        "falta en client:\n{}",
+        p.client
+    );
 }
 
 // El comando insignia (build-app) no declaraba las globales no reactivas en
@@ -571,8 +720,7 @@ fn el_artefacto_desplegable_no_se_desincroniza() {
         ("client.js", &app.client_js),
     ] {
         let ruta = format!("{raiz}/site/app/{nombre}");
-        let actual = std::fs::read_to_string(&ruta)
-            .unwrap_or_else(|_| panic!("falta {ruta}"));
+        let actual = std::fs::read_to_string(&ruta).unwrap_or_else(|_| panic!("falta {ruta}"));
         assert_eq!(
             &actual, esperado,
             "site/app/{nombre} no coincide con el codegen actual; \
@@ -600,7 +748,11 @@ fn el_validador_no_desborda_con_recursion_mutua() {
 #[test]
 fn los_builtins_de_lista_y_texto_llegan_al_runtime() {
     let p = build("fn f(a: List<Int>, b: List<Int>) -> List<Int> { return concat(a, b); }");
-    for n in ["export function concat", "export function append", "export function contains"] {
+    for n in [
+        "export function concat",
+        "export function append",
+        "export function contains",
+    ] {
         assert!(p.runtime.contains(n), "falta {n} en runtime.ts");
     }
     // Son síncronos: emitirlos con await rompería el rastreo reactivo.

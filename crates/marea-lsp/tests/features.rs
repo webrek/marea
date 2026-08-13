@@ -129,10 +129,13 @@ impl Drop for Cliente {
             Shutdown::METHOD.to_string(),
             serde_json::Value::Null,
         )));
-        let _ = self.conn.sender.send(Message::Notification(Notification::new(
-            Exit::METHOD.to_string(),
-            serde_json::Value::Null,
-        )));
+        let _ = self
+            .conn
+            .sender
+            .send(Message::Notification(Notification::new(
+                Exit::METHOD.to_string(),
+                serde_json::Value::Null,
+            )));
         if let Some(server) = self.server.take() {
             let _ = server.join();
         }
@@ -152,11 +155,16 @@ fn uri(nombre: &str) -> Uri {
 
 /// Posición (línea/carácter 0-indexada) del primer byte de `aguja` en `texto`.
 fn posicion_de(texto: &str, aguja: &str) -> Position {
-    let off = texto.find(aguja).unwrap_or_else(|| panic!("no se halló {aguja:?}"));
+    let off = texto
+        .find(aguja)
+        .unwrap_or_else(|| panic!("no se halló {aguja:?}"));
     let antes = &texto[..off];
     let line = antes.matches('\n').count() as u32;
     let col_start = antes.rfind('\n').map(|i| i + 1).unwrap_or(0);
-    let character = texto[col_start..off].chars().map(|c| c.len_utf16()).sum::<usize>() as u32;
+    let character = texto[col_start..off]
+        .chars()
+        .map(|c| c.len_utf16())
+        .sum::<usize>() as u32;
     Position { line, character }
 }
 
@@ -222,10 +230,16 @@ fn completion_incluye_keyword_y_builtin() {
         otro => panic!("se esperaba arreglo de completado, fue {otro:?}"),
     };
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
-    assert!(labels.contains(&"reactive"), "falta keyword reactive: {labels:?}");
+    assert!(
+        labels.contains(&"reactive"),
+        "falta keyword reactive: {labels:?}"
+    );
     assert!(labels.contains(&"print"), "falta builtin print: {labels:?}");
     // Nombres de nivel superior del propio módulo.
-    assert!(labels.contains(&"getUser"), "falta el nombre getUser: {labels:?}");
+    assert!(
+        labels.contains(&"getUser"),
+        "falta el nombre getUser: {labels:?}"
+    );
     // Builtin de tipo.
     assert!(labels.contains(&"Int"), "falta el tipo Int: {labels:?}");
 }
@@ -238,7 +252,10 @@ fn completion_tras_arroba_ofrece_ubicaciones() {
     let src = "@\nfn f() {}\n";
     let pos = posicion_de(src, "@");
     // El cursor va justo después del `@`: columna 1 en la línea 0.
-    let pos = Position { line: pos.line, character: pos.character + 1 };
+    let pos = Position {
+        line: pos.line,
+        character: pos.character + 1,
+    };
     cli.abrir(&u, src.to_string());
 
     let resp = cli.pedir::<Completion>(
@@ -280,7 +297,10 @@ fn definition_de_uso_salta_a_la_declaracion() {
     let antes = &src[..uso];
     let line = antes.matches('\n').count() as u32;
     let col_start = antes.rfind('\n').map(|i| i + 1).unwrap_or(0);
-    let character = src[col_start..uso].chars().map(|c| c.len_utf16()).sum::<usize>() as u32;
+    let character = src[col_start..uso]
+        .chars()
+        .map(|c| c.len_utf16())
+        .sum::<usize>() as u32;
     let pos = Position { line, character };
     cli.abrir(&u, src.clone());
 
@@ -326,7 +346,10 @@ fn hover_sobre_funcion_muestra_su_firma() {
     let antes = &src[..decl];
     let line = antes.matches('\n').count() as u32;
     let col_start = antes.rfind('\n').map(|i| i + 1).unwrap_or(0);
-    let character = src[col_start..decl].chars().map(|c| c.len_utf16()).sum::<usize>() as u32;
+    let character = src[col_start..decl]
+        .chars()
+        .map(|c| c.len_utf16())
+        .sum::<usize>() as u32;
     let pos = Position { line, character };
     cli.abrir(&u, src);
 

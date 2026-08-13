@@ -9,9 +9,7 @@
 //!   - sobre un parámetro → `param: Tipo`.
 
 use lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
-use marea_syntax::ast::{
-    Expr, FnDecl, Item, Location, Module, Param, Type, TypeDecl,
-};
+use marea_syntax::ast::{Expr, FnDecl, Item, Location, Module, Param, Type, TypeDecl};
 
 use crate::analysis::{find_node_at, Node};
 use crate::documents::Document;
@@ -44,7 +42,8 @@ fn hover_markdown(module: &Module, node: Node<'_>) -> Option<String> {
         Node::Type(Type::Name { name, .. }) => {
             // Un alias de tipo del módulo muestra su definición; si no, el tipo
             // formateado tal cual (p. ej. un builtin o un genérico).
-            declaration_markdown(module, name).or_else(|| Some(code_block(&render_type(node_type(node)?))))
+            declaration_markdown(module, name)
+                .or_else(|| Some(code_block(&render_type(node_type(node)?))))
         }
         // Sobre el nombre de un parámetro → `nombre: Tipo`.
         Node::Param(p) => Some(code_block(&format!("{}: {}", p.name, render_type(&p.ty)))),
@@ -134,11 +133,7 @@ fn render_type(ty: &Type) -> String {
             if args.is_empty() {
                 name.clone()
             } else {
-                let inner = args
-                    .iter()
-                    .map(render_type)
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let inner = args.iter().map(render_type).collect::<Vec<_>>().join(", ");
                 format!("{name}<{inner}>")
             }
         }

@@ -10,7 +10,9 @@ fn wat(src: &str) -> Result<String, String> {
 #[test]
 fn funcion_se_exporta_con_params_i32() {
     let w = wat("fn append(a: Int, b: Int) -> Int { return a + b; }").unwrap();
-    assert!(w.contains(r#"(func $append (export "append") (param $a i32) (param $b i32) (result i32)"#));
+    assert!(
+        w.contains(r#"(func $append (export "append") (param $a i32) (param $b i32) (result i32)"#)
+    );
     assert!(w.contains("(i32.add (local.get $a) (local.get $b))"));
 }
 
@@ -86,24 +88,26 @@ fn tipo_desconocido_es_error() {
 
 #[test]
 fn construir_registro_reserva_y_guarda_campos() {
-    let w = wat(
-        "type Punto = { x: Int, y: Int };\n\
-         fn p() -> Punto { let p: Punto = Punto { x: 1, y: 2 }; return p; }",
-    )
+    let w = wat("type Punto = { x: Int, y: Int };\n\
+         fn p() -> Punto { let p: Punto = Punto { x: 1, y: 2 }; return p; }")
     .unwrap();
     // Reserva el bloque de 2 campos * 4 bytes.
     assert!(w.contains("(call $__alloc (i32.const 8))"), "wat: {w}");
     // Guarda x en offset 0 e y en offset 4.
-    assert!(w.contains("(i32.store offset=0 (local.get $__rec0) (i32.const 1))"), "wat: {w}");
-    assert!(w.contains("(i32.store offset=4 (local.get $__rec0) (i32.const 2))"), "wat: {w}");
+    assert!(
+        w.contains("(i32.store offset=0 (local.get $__rec0) (i32.const 1))"),
+        "wat: {w}"
+    );
+    assert!(
+        w.contains("(i32.store offset=4 (local.get $__rec0) (i32.const 2))"),
+        "wat: {w}"
+    );
 }
 
 #[test]
 fn acceso_a_campo_es_i32_load() {
-    let w = wat(
-        "type Punto = { x: Int, y: Int };\n\
-         fn lee(p: Punto) -> Int { return p.y; }",
-    )
+    let w = wat("type Punto = { x: Int, y: Int };\n\
+         fn lee(p: Punto) -> Int { return p.y; }")
     .unwrap();
     // El campo y está en índice 1 -> offset 4.
     assert!(w.contains("(i32.load offset=4 (local.get $p))"), "wat: {w}");
@@ -113,58 +117,60 @@ fn acceso_a_campo_es_i32_load() {
 fn orden_de_declaracion_no_de_uso() {
     // El literal pone los campos invertidos (y antes que x); el layout sigue
     // el orden de DECLARACIÓN, así que x debe ir a offset 0 e y a offset 4.
-    let w = wat(
-        "type Punto = { x: Int, y: Int };\n\
-         fn p() -> Punto { return Punto { y: 2, x: 1 }; }",
-    )
+    let w = wat("type Punto = { x: Int, y: Int };\n\
+         fn p() -> Punto { return Punto { y: 2, x: 1 }; }")
     .unwrap();
-    assert!(w.contains("(i32.store offset=0 (local.get $__rec0) (i32.const 1))"), "wat: {w}");
-    assert!(w.contains("(i32.store offset=4 (local.get $__rec0) (i32.const 2))"), "wat: {w}");
+    assert!(
+        w.contains("(i32.store offset=0 (local.get $__rec0) (i32.const 1))"),
+        "wat: {w}"
+    );
+    assert!(
+        w.contains("(i32.store offset=4 (local.get $__rec0) (i32.const 2))"),
+        "wat: {w}"
+    );
 }
 
 #[test]
 fn campo_string_convive_con_runtime_de_string() {
-    let w = wat(
-        "type Persona = { nombre: String, edad: Int };\n\
-         fn nueva() -> Persona { return Persona { nombre: \"Ana\", edad: 30 }; }",
-    )
+    let w = wat("type Persona = { nombre: String, edad: Int };\n\
+         fn nueva() -> Persona { return Persona { nombre: \"Ana\", edad: 30 }; }")
     .unwrap();
     // Runtime de memoria presente.
     assert!(w.contains(r#"(memory (export "memory") 1)"#), "wat: {w}");
     // El campo nombre guarda el puntero al literal (offset 0 en data).
-    assert!(w.contains("(i32.store offset=0 (local.get $__rec0) (i32.const 0))"), "wat: {w}");
+    assert!(
+        w.contains("(i32.store offset=0 (local.get $__rec0) (i32.const 0))"),
+        "wat: {w}"
+    );
     // El literal "Ana" quedó en el data section.
     assert!(w.contains("(data (i32.const 0)"), "wat: {w}");
 }
 
 #[test]
 fn campo_inexistente_es_error() {
-    let err = wat(
-        "type Punto = { x: Int, y: Int };\n\
-         fn p() -> Punto { return Punto { x: 1, y: 2, z: 3 }; }",
-    )
+    let err = wat("type Punto = { x: Int, y: Int };\n\
+         fn p() -> Punto { return Punto { x: 1, y: 2, z: 3 }; }")
     .unwrap_err();
     assert!(err.contains("no tiene un campo 'z'"), "mensaje: {err}");
 }
 
 #[test]
 fn campo_faltante_es_error() {
-    let err = wat(
-        "type Punto = { x: Int, y: Int };\n\
-         fn p() -> Punto { return Punto { x: 1 }; }",
-    )
+    let err = wat("type Punto = { x: Int, y: Int };\n\
+         fn p() -> Punto { return Punto { x: 1 }; }")
     .unwrap_err();
     assert!(err.contains("falta el campo 'y'"), "mensaje: {err}");
 }
 
 #[test]
 fn campo_float_en_tipo_es_error() {
-    let err = wat(
-        "type Caja = { peso: Float };\n\
-         fn c() -> Caja { return Caja { peso: 1 }; }",
-    )
+    let err = wat("type Caja = { peso: Float };\n\
+         fn c() -> Caja { return Caja { peso: 1 }; }")
     .unwrap_err();
-    assert!(err.contains("Float") || err.contains("flotantes"), "mensaje: {err}");
+    assert!(
+        err.contains("Float") || err.contains("flotantes"),
+        "mensaje: {err}"
+    );
 }
 
 #[test]
@@ -187,10 +193,8 @@ fn ensambla_con_wat2wasm() {
         return;
     }
 
-    let w = wat(
-        "type Punto = { x: Int, y: Int };\n\
-         fn p() -> Int { let p: Punto = Punto { y: 2, x: 1 }; return p.x; }",
-    )
+    let w = wat("type Punto = { x: Int, y: Int };\n\
+         fn p() -> Int { let p: Punto = Punto { y: 2, x: 1 }; return p.x; }")
     .unwrap();
 
     let dir = std::env::temp_dir();
@@ -223,9 +227,15 @@ fn lista_construye_con_longitud_y_elementos() {
     // Reserva 4*(3+1) = 16 bytes.
     assert!(w.contains("(call $__alloc (i32.const 16))"), "wat: {w}");
     // Longitud en la palabra 0.
-    assert!(w.contains("(i32.store offset=0 (local.get $__rec0) (i32.const 3))"), "wat: {w}");
+    assert!(
+        w.contains("(i32.store offset=0 (local.get $__rec0) (i32.const 3))"),
+        "wat: {w}"
+    );
     // Primer elemento en la palabra 1 (offset 4).
-    assert!(w.contains("(i32.store offset=4 (local.get $__rec0) (i32.const 10))"), "wat: {w}");
+    assert!(
+        w.contains("(i32.store offset=4 (local.get $__rec0) (i32.const 10))"),
+        "wat: {w}"
+    );
 }
 
 #[test]
@@ -236,10 +246,19 @@ fn indexado_comprueba_el_rango() {
     // —xs[-1] devolvía la longitud, xs[-2] datos de la estructura anterior—, o
     // sea divulgación de memoria, y además difería del backend de TypeScript,
     // que lanza.
-    assert!(w.contains("(call $__index (local.get $xs) (i32.const 2))"), "wat: {w}");
+    assert!(
+        w.contains("(call $__index (local.get $xs) (i32.const 2))"),
+        "wat: {w}"
+    );
     assert!(w.contains("(func $__index"), "falta el helper: {w}");
-    assert!(w.contains("i32.lt_s (local.get $i) (i32.const 0)"), "sin cota inferior: {w}");
-    assert!(w.contains("unreachable"), "debe trapear fuera de rango: {w}");
+    assert!(
+        w.contains("i32.lt_s (local.get $i) (i32.const 0)"),
+        "sin cota inferior: {w}"
+    );
+    assert!(
+        w.contains("unreachable"),
+        "debe trapear fuera de rango: {w}"
+    );
 }
 
 // `&&` y `||` cortocircuitan como en TypeScript: emitirlos con i32.and/i32.or
@@ -296,7 +315,9 @@ fn len_es_load_de_la_longitud() {
 
 #[test]
 fn fn_con_nombre_reservado_es_error() {
-    let err = wat(r#"fn memory() -> Int { return 1; } fn s() -> String { return concat("a","b"); }"#).unwrap_err();
+    let err =
+        wat(r#"fn memory() -> Int { return 1; } fn s() -> String { return concat("a","b"); }"#)
+            .unwrap_err();
     assert!(err.contains("reservado"), "mensaje: {err}");
 }
 

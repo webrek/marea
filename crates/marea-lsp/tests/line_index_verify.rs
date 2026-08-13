@@ -54,7 +54,11 @@ fn fuera_del_bmp_round_trip_y_no_parte_par_suplente() {
     // Round-trip en cada límite de carácter.
     for o in [0usize, 1, 5, 6] {
         let p = index.offset_to_position(o, text);
-        assert_eq!(index.position_to_offset(p, text), o, "round-trip en offset {o}");
+        assert_eq!(
+            index.position_to_offset(p, text),
+            o,
+            "round-trip en offset {o}"
+        );
     }
 }
 
@@ -83,12 +87,12 @@ fn saltos_mixtos_solo_lf_abre_linea() {
     assert_eq!(pos(text, 0), Position::new(0, 0));
     // Tras el primer \n: inicio de línea 1.
     assert_eq!(pos(text, 2), Position::new(1, 0)); // 'b'
-    // El \r del CRLF es columna 1 de la línea 1.
+                                                   // El \r del CRLF es columna 1 de la línea 1.
     assert_eq!(pos(text, 3), Position::new(1, 1));
     // Tras el \n del CRLF: inicio de línea 2.
     assert_eq!(pos(text, 5), Position::new(2, 0)); // 'c'
-    // El \r solitario NO abre línea: 'd' sigue en la línea 2.
-    // 'c'(col 0) \r(col 1) 'd'(col 2), todos en línea 2.
+                                                   // El \r solitario NO abre línea: 'd' sigue en la línea 2.
+                                                   // 'c'(col 0) \r(col 1) 'd'(col 2), todos en línea 2.
     assert_eq!(pos(text, 6), Position::new(2, 1)); // el \r solitario
     assert_eq!(pos(text, 7), Position::new(2, 2)); // 'd'
     assert_eq!(pos(text, text.len()), Position::new(2, 3)); // fin de línea 2
@@ -138,7 +142,7 @@ fn span_hasta_fin_de_archivo_con_par_suplente() {
 #[test]
 fn media_secuencia_no_bmp_retrocede_sin_panico() {
     let text = "𝐀z"; // 𝐀(0..4) z(4)
-    // Bytes 1, 2, 3 caen dentro del par suplente → retroceden a 0 → columna 0.
+                     // Bytes 1, 2, 3 caen dentro del par suplente → retroceden a 0 → columna 0.
     for off in [1usize, 2, 3] {
         assert_eq!(pos(text, off), Position::new(0, 0), "byte interno {off}");
     }

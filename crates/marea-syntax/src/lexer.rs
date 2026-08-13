@@ -361,7 +361,11 @@ impl<'a> Lexer<'a> {
                             Span::new(abre, fin + 1),
                         ));
                     }
-                    piezas.push(TemplatePiece::Hueco { fuente, offset: ini, crudo });
+                    piezas.push(TemplatePiece::Hueco {
+                        fuente,
+                        offset: ini,
+                        crudo,
+                    });
                 }
                 Some((_, c)) => lit.push(c),
                 None => return Err(self.plantilla_sin_cerrar(start)),
@@ -371,7 +375,10 @@ impl<'a> Lexer<'a> {
             piezas.push(TemplatePiece::Lit(lit));
         }
         let end = self.peek_offset();
-        Ok(Token::new(TokenKind::Template(piezas), Span::new(start, end)))
+        Ok(Token::new(
+            TokenKind::Template(piezas),
+            Span::new(start, end),
+        ))
     }
 
     fn plantilla_sin_cerrar(&self, start: usize) -> SyntaxError {

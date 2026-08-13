@@ -85,7 +85,10 @@ fn main() -> ExitCode {
                     Ok(wat) => match std::fs::write(out, wat) {
                         Ok(()) => {
                             println!("  escrito {}", out);
-                            println!("\nEnsambla y corre con:\n  wat2wasm {out} -o module.wasm", out = out);
+                            println!(
+                                "\nEnsambla y corre con:\n  wat2wasm {out} -o module.wasm",
+                                out = out
+                            );
                             ExitCode::SUCCESS
                         }
                         Err(e) => {
@@ -216,7 +219,10 @@ fn build(module: &marea_syntax::Module, out_dir: &str) -> ExitCode {
         }
         println!("  escrito {}", path);
     }
-    println!("\nlisto. Para correr la demo end-to-end:\n  node {}/demo.ts", out_dir);
+    println!(
+        "\nlisto. Para correr la demo end-to-end:\n  node {}/demo.ts",
+        out_dir
+    );
     ExitCode::SUCCESS
 }
 
@@ -277,5 +283,7 @@ fn print_usage() {
     eprintln!("  marea build-web  <archivo.mar> [dir]  genera una app web (WASM + DOM)");
     eprintln!("  marea build-app  <archivo.mar> [dir]  app web completa (RPC + reactivo + DOM)");
     eprintln!("\nbanderas:");
-    eprintln!("  --no-check                            omite la verificación de tipos en los build*");
+    eprintln!(
+        "  --no-check                            omite la verificación de tipos en los build*"
+    );
 }

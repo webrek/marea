@@ -157,7 +157,10 @@ impl Parser {
         if self.check(kind) {
             Ok(self.advance())
         } else {
-            Err(SyntaxError::new(format!("se esperaba {}", what), self.peek().span))
+            Err(SyntaxError::new(
+                format!("se esperaba {}", what),
+                self.peek().span,
+            ))
         }
     }
 
@@ -167,7 +170,10 @@ impl Parser {
                 let span = self.advance().span;
                 Ok((name, span))
             }
-            _ => Err(SyntaxError::new(format!("se esperaba {}", what), self.peek().span)),
+            _ => Err(SyntaxError::new(
+                format!("se esperaba {}", what),
+                self.peek().span,
+            )),
         }
     }
 
@@ -197,7 +203,10 @@ impl Parser {
     fn parse_store(&mut self) -> PResult<Item> {
         let kw = self.expect(&TokenKind::Store, "'store'")?;
         let (name, name_span) = self.expect_ident("el nombre del almacén")?;
-        self.expect(&TokenKind::Colon, "':' entre el nombre y el tipo del almacén")?;
+        self.expect(
+            &TokenKind::Colon,
+            "':' entre el nombre y el tipo del almacén",
+        )?;
         let ty = self.parse_type()?;
         let semi = self.expect(&TokenKind::Semicolon, "';' al final de 'store'")?;
         Ok(Item::Store {
@@ -220,7 +229,10 @@ impl Parser {
             "edge" => Location::Edge,
             other => {
                 return Err(SyntaxError::new(
-                    format!("ubicación desconocida '@{}'; usa @server, @client o @edge", other),
+                    format!(
+                        "ubicación desconocida '@{}'; usa @server, @client o @edge",
+                        other
+                    ),
                     at.span.to(span),
                 ))
             }
@@ -283,7 +295,10 @@ impl Parser {
         let (name, _) = self.expect_ident("nombre del tipo")?;
         self.expect(&TokenKind::Eq, "'=' en la declaración de tipo")?;
         let aliased = self.parse_type()?;
-        let semi = self.expect(&TokenKind::Semicolon, "';' al final de la declaración de tipo")?;
+        let semi = self.expect(
+            &TokenKind::Semicolon,
+            "';' al final de la declaración de tipo",
+        )?;
         Ok(TypeDecl {
             name,
             aliased,
@@ -318,7 +333,11 @@ impl Parser {
         while self.eat(&TokenKind::Pipe) {
             variants.push(self.parse_type_primary()?);
         }
-        let span = variants.first().unwrap().span().to(variants.last().unwrap().span());
+        let span = variants
+            .first()
+            .unwrap()
+            .span()
+            .to(variants.last().unwrap().span());
         Ok(Type::Union { variants, span })
     }
 
@@ -458,7 +477,15 @@ impl Parser {
         let iter = self.with_no_struct_literal(|p| p.parse_expr())?;
         let body = self.parse_block()?;
         let span = kw.span.to(body.span);
-        Ok(Stmt::For { var, var_span, index, index_span, iter, body, span })
+        Ok(Stmt::For {
+            var,
+            var_span,
+            index,
+            index_span,
+            iter,
+            body,
+            span,
+        })
     }
 
     fn parse_assign(&mut self) -> PResult<Stmt> {
@@ -478,7 +505,10 @@ impl Parser {
         let (reactive, kw_span) = if self.check(&TokenKind::Reactive) {
             (true, self.advance().span)
         } else {
-            (false, self.expect(&TokenKind::Let, "'let' o 'reactive'")?.span)
+            (
+                false,
+                self.expect(&TokenKind::Let, "'let' o 'reactive'")?.span,
+            )
         };
         let mutable = self.eat(&TokenKind::Mut);
         let (name, _) = self.expect_ident("nombre de variable")?;
@@ -636,15 +666,24 @@ impl Parser {
         match tok.kind {
             TokenKind::Int(value) => {
                 self.advance();
-                Ok(Expr::Int { value, span: tok.span })
+                Ok(Expr::Int {
+                    value,
+                    span: tok.span,
+                })
             }
             TokenKind::Float(value) => {
                 self.advance();
-                Ok(Expr::Float { value, span: tok.span })
+                Ok(Expr::Float {
+                    value,
+                    span: tok.span,
+                })
             }
             TokenKind::Str(s) => {
                 self.advance();
-                Ok(Expr::Str { value: s, span: tok.span })
+                Ok(Expr::Str {
+                    value: s,
+                    span: tok.span,
+                })
             }
             TokenKind::Template(piezas) => {
                 self.advance();
@@ -652,7 +691,11 @@ impl Parser {
                 for pieza in piezas {
                     match pieza {
                         TemplatePiece::Lit(t) => parts.push(TemplatePart::Lit(t)),
-                        TemplatePiece::Hueco { fuente, offset, crudo } => {
+                        TemplatePiece::Hueco {
+                            fuente,
+                            offset,
+                            crudo,
+                        } => {
                             // El hueco se parsea aparte, desplazando sus spans
                             // al sitio real del archivo: así un error dentro de
                             // `{...}` señala su columna, no la de la plantilla.
@@ -664,11 +707,17 @@ impl Parser {
                         }
                     }
                 }
-                Ok(Expr::Template { parts, span: tok.span })
+                Ok(Expr::Template {
+                    parts,
+                    span: tok.span,
+                })
             }
             TokenKind::Bool(value) => {
                 self.advance();
-                Ok(Expr::Bool { value, span: tok.span })
+                Ok(Expr::Bool {
+                    value,
+                    span: tok.span,
+                })
             }
             TokenKind::Ident(name) => {
                 // `Ident {` es un literal de registro, salvo en posición de
@@ -681,7 +730,10 @@ impl Parser {
                     self.parse_record_literal(name, tok.span)
                 } else {
                     self.advance();
-                    Ok(Expr::Ident { name, span: tok.span })
+                    Ok(Expr::Ident {
+                        name,
+                        span: tok.span,
+                    })
                 }
             }
             TokenKind::LParen => {
@@ -815,7 +867,11 @@ impl Parser {
             // donde el flag no_struct_literal esté activo, p.ej. otro escrutinio).
             let body = self.allow_struct_literal(|p| p.parse_expr())?;
             let span = pattern.span().to(body.span());
-            arms.push(MatchArm { pattern, body, span });
+            arms.push(MatchArm {
+                pattern,
+                body,
+                span,
+            });
             if !self.eat(&TokenKind::Comma) {
                 break;
             }
@@ -838,19 +894,31 @@ impl Parser {
             }
             TokenKind::Ident(name) => {
                 self.advance();
-                Ok(Pattern::Binding { name, span: tok.span })
+                Ok(Pattern::Binding {
+                    name,
+                    span: tok.span,
+                })
             }
             TokenKind::Int(value) => {
                 self.advance();
-                Ok(Pattern::Int { value, span: tok.span })
+                Ok(Pattern::Int {
+                    value,
+                    span: tok.span,
+                })
             }
             TokenKind::Bool(value) => {
                 self.advance();
-                Ok(Pattern::Bool { value, span: tok.span })
+                Ok(Pattern::Bool {
+                    value,
+                    span: tok.span,
+                })
             }
             TokenKind::Str(s) => {
                 self.advance();
-                Ok(Pattern::Str { value: s, span: tok.span })
+                Ok(Pattern::Str {
+                    value: s,
+                    span: tok.span,
+                })
             }
             _ => Err(SyntaxError::new("se esperaba un patrón", tok.span)),
         }
@@ -897,7 +965,9 @@ fn desplazar_expr(e: &mut Expr, offset: usize) {
             mover(span, offset);
             desplazar_expr(expr, offset);
         }
-        Expr::Binary { left, right, span, .. } => {
+        Expr::Binary {
+            left, right, span, ..
+        } => {
             mover(span, offset);
             desplazar_expr(left, offset);
             desplazar_expr(right, offset);
@@ -913,7 +983,11 @@ fn desplazar_expr(e: &mut Expr, offset: usize) {
             mover(span, offset);
             desplazar_expr(object, offset);
         }
-        Expr::Index { object, index, span } => {
+        Expr::Index {
+            object,
+            index,
+            span,
+        } => {
             mover(span, offset);
             desplazar_expr(object, offset);
             desplazar_expr(index, offset);
@@ -924,7 +998,12 @@ fn desplazar_expr(e: &mut Expr, offset: usize) {
                 desplazar_expr(el, offset);
             }
         }
-        Expr::Record { fields, span, type_name_span, .. } => {
+        Expr::Record {
+            fields,
+            span,
+            type_name_span,
+            ..
+        } => {
             mover(span, offset);
             if let Some(s) = type_name_span {
                 mover(s, offset);
@@ -942,12 +1021,19 @@ fn desplazar_expr(e: &mut Expr, offset: usize) {
                 }
             }
         }
-        Expr::If { cond, then_branch, else_branch, span } => {
+        Expr::If {
+            cond,
+            then_branch,
+            else_branch,
+            span,
+        } => {
             mover(span, offset);
             desplazar_expr(cond, offset);
             let _ = (then_branch, else_branch);
         }
-        Expr::Match { scrutinee, span, .. } => {
+        Expr::Match {
+            scrutinee, span, ..
+        } => {
             mover(span, offset);
             desplazar_expr(scrutinee, offset);
         }

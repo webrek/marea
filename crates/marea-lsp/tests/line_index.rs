@@ -30,7 +30,7 @@ fn ascii_multilinea() {
 fn acentos_un_code_unit_por_caracter() {
     // 'ñ' y 'á' ocupan 2 bytes en UTF-8 pero 1 unidad de código UTF-16.
     let text = "ñá x"; // bytes: ñ(0..2) á(2..4) ' '(4) 'x'(5)
-    // Tras 'ñ' (offset de byte 2) la columna es 1.
+                       // Tras 'ñ' (offset de byte 2) la columna es 1.
     assert_eq!(pos(text, 2), Position::new(0, 1));
     // Tras 'á' (offset de byte 4) la columna es 2.
     assert_eq!(pos(text, 4), Position::new(0, 2));
@@ -42,7 +42,7 @@ fn acentos_un_code_unit_por_caracter() {
 fn emoji_dos_code_units() {
     // 🌊 = 4 bytes UTF-8, 2 unidades de código UTF-16 (par suplente).
     let text = "a🌊b"; // a(0) 🌊(1..5) b(5)
-    // El byte 5 es justo después del emoji: columna = 1 (la 'a') + 2 (el emoji).
+                       // El byte 5 es justo después del emoji: columna = 1 (la 'a') + 2 (el emoji).
     assert_eq!(pos(text, 5), Position::new(0, 3));
     // La 'a' está en la columna 0; el emoji empieza en la columna 1.
     assert_eq!(pos(text, 1), Position::new(0, 1));
@@ -104,7 +104,10 @@ fn position_to_offset_basico() {
     let index = LineIndex::new(text);
     assert_eq!(index.position_to_offset(Position::new(1, 0), text), 10);
     assert_eq!(index.position_to_offset(Position::new(0, 4), text), 4);
-    assert_eq!(index.position_to_offset(Position::new(2, 0), text), text.len());
+    assert_eq!(
+        index.position_to_offset(Position::new(2, 0), text),
+        text.len()
+    );
 }
 
 #[test]
@@ -125,7 +128,7 @@ fn position_to_offset_clamp() {
     // Línea fuera de rango: clamp a la última línea.
     let off = index.position_to_offset(Position::new(99, 0), text);
     assert_eq!(off, 4); // inicio de "def"
-    // Columna que rebasa la línea: clamp al fin de línea, no al siguiente.
+                        // Columna que rebasa la línea: clamp al fin de línea, no al siguiente.
     let off = index.position_to_offset(Position::new(0, 99), text);
     assert_eq!(off, 3); // fin de "abc", antes del `\n`
 }

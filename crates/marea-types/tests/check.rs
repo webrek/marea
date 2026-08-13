@@ -48,7 +48,10 @@ fn ejemplos_reales_tipan_sin_errores() {
         );
         vistos += 1;
     }
-    assert!(vistos >= 14, "se esperaban al menos 14 ejemplos, se vieron {vistos}");
+    assert!(
+        vistos >= 14,
+        "se esperaban al menos 14 ejemplos, se vieron {vistos}"
+    );
 }
 
 /// Los ejemplos de `examples/check_fail/` existen para FALLAR: cada uno ilustra
@@ -73,7 +76,10 @@ fn los_ejemplos_de_check_fail_fallan() {
         );
         vistos += 1;
     }
-    assert!(vistos >= 3, "se esperaban al menos 3 casos negativos, se vieron {vistos}");
+    assert!(
+        vistos >= 3,
+        "se esperaban al menos 3 casos negativos, se vieron {vistos}"
+    );
 }
 
 /// La demo desplegada en `site/` también entra en la red: es el artefacto que
@@ -155,7 +161,11 @@ fn tipo_registro_recursivo_directo_no_crashea() {
         "type Nodo = { valor: Int, siguiente: Nodo };\n\
          fn cabeza(n: Nodo) -> Int { return n.valor; }",
     );
-    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+    assert!(
+        errs.is_empty(),
+        "no debería haber errores: {:?}",
+        codes(&errs)
+    );
 }
 
 // Regresión C-1: recursión mutua entre registros. Antes desbordaba la pila en
@@ -168,7 +178,11 @@ fn tipos_registro_mutuamente_recursivos_no_crashean() {
          type B = { y: A };\n\
          fn f(a: A) -> B { return a.x; }",
     );
-    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+    assert!(
+        errs.is_empty(),
+        "no debería haber errores: {:?}",
+        codes(&errs)
+    );
 }
 
 // Regresión C-1: un `store` de tipo recursivo también entraba por la misma vía.
@@ -179,7 +193,11 @@ fn store_recursivo_no_crashea() {
          store almacen: Nodo;\n\
          @server fn poner(n: Nodo) { save(almacen, n); }",
     );
-    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+    assert!(
+        errs.is_empty(),
+        "no debería haber errores: {:?}",
+        codes(&errs)
+    );
 }
 
 // ============================ TIPOS ============================
@@ -205,7 +223,11 @@ fn e_let_type_mismatch() {
 #[test]
 fn e_return_type_mismatch() {
     let errs = check_src("fn f() -> Int { return \"x\"; }");
-    assert!(has_code(&errs, "E_RETURN_TYPE_MISMATCH"), "{:?}", codes(&errs));
+    assert!(
+        has_code(&errs, "E_RETURN_TYPE_MISMATCH"),
+        "{:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
@@ -482,10 +504,18 @@ fn acumula_multiples_errores_en_un_archivo() {
         }
     "#;
     let errs = check_src(src);
-    assert!(errs.len() >= 3, "esperaba >=3 errores, hubo {:?}", codes(&errs));
+    assert!(
+        errs.len() >= 3,
+        "esperaba >=3 errores, hubo {:?}",
+        codes(&errs)
+    );
     assert!(has_code(&errs, "E_UNRESOLVED_NAME"), "{:?}", codes(&errs));
     assert!(has_code(&errs, "E_COND_NOT_BOOL"), "{:?}", codes(&errs));
-    assert!(has_code(&errs, "E_RETURN_TYPE_MISMATCH"), "{:?}", codes(&errs));
+    assert!(
+        has_code(&errs, "E_RETURN_TYPE_MISMATCH"),
+        "{:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
@@ -503,19 +533,31 @@ fn render_muestra_codigo_linea_y_cursor() {
 #[test]
 fn lista_indexada_por_int_tipa() {
     let errs = check_src("@client fn f() { let xs = [1, 2, 3]; let a: Int = xs[0]; print(a); }");
-    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+    assert!(
+        errs.is_empty(),
+        "no debería haber errores: {:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
 fn indice_no_int_es_error() {
     let errs = check_src("@client fn f() { let xs = [1, 2, 3]; let a = xs[true]; print(a); }");
-    assert!(has_code(&errs, "E_INDEX_NOT_INT"), "códigos: {:?}", codes(&errs));
+    assert!(
+        has_code(&errs, "E_INDEX_NOT_INT"),
+        "códigos: {:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
 fn indexar_un_no_lista_es_error() {
     let errs = check_src("@client fn f() { let n = 5; let a = n[0]; print(a); }");
-    assert!(has_code(&errs, "E_INDEX_NOT_LIST"), "códigos: {:?}", codes(&errs));
+    assert!(
+        has_code(&errs, "E_INDEX_NOT_LIST"),
+        "códigos: {:?}",
+        codes(&errs)
+    );
 }
 
 // ============================ REGRESIÓN (bug hunt) ============================
@@ -524,7 +566,11 @@ fn indexar_un_no_lista_es_error() {
 fn alias_ciclico_no_paniquea() {
     // Antes: stack overflow. Ahora: reporta E_CYCLIC_TYPE sin crashear.
     let errs = check_src("type A = B;\ntype B = A;\nfn f(p: A) {}");
-    assert!(has_code(&errs, "E_CYCLIC_TYPE"), "códigos: {:?}", codes(&errs));
+    assert!(
+        has_code(&errs, "E_CYCLIC_TYPE"),
+        "códigos: {:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
@@ -536,38 +582,62 @@ fn alias_autoreferente_no_paniquea() {
 #[test]
 fn reasignar_inmutable_es_error() {
     let errs = check_src("@client fn f() { let x = 1; x = 2; print(x); }");
-    assert!(has_code(&errs, "E_ASSIGN_IMMUTABLE"), "códigos: {:?}", codes(&errs));
+    assert!(
+        has_code(&errs, "E_ASSIGN_IMMUTABLE"),
+        "códigos: {:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
 fn reasignar_mut_es_valido() {
     let errs = check_src("@client fn f() { let mut x = 1; x = 2; print(x); }");
-    assert!(!has_code(&errs, "E_ASSIGN_IMMUTABLE"), "códigos: {:?}", codes(&errs));
+    assert!(
+        !has_code(&errs, "E_ASSIGN_IMMUTABLE"),
+        "códigos: {:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
 fn edge_llamando_client_es_error() {
     let errs = check_src("@client fn c() {}\n@edge fn e() { c(); }");
-    assert!(has_code(&errs, "E_CALL_CLIENT_FROM_SERVER"), "códigos: {:?}", codes(&errs));
+    assert!(
+        has_code(&errs, "E_CALL_CLIENT_FROM_SERVER"),
+        "códigos: {:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
 fn lista_vacia_es_subtipo_de_list() {
     let errs = check_src("@client fn f() { let xs: List<Int> = []; print(xs); }");
-    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+    assert!(
+        errs.is_empty(),
+        "no debería haber errores: {:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
 fn variante_como_valor_tipa() {
     // 'errores como valores': una variante Mayúscula es valor de su unión.
     let errs = check_src("@client fn f(n: Int) -> A | B { if n > 0 { return A; } return B; }");
-    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+    assert!(
+        errs.is_empty(),
+        "no debería haber errores: {:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
 fn ident_minuscula_inexistente_sigue_siendo_error() {
     let errs = check_src("@client fn f() { print(noExiste); }");
-    assert!(has_code(&errs, "E_UNRESOLVED_NAME"), "códigos: {:?}", codes(&errs));
+    assert!(
+        has_code(&errs, "E_UNRESOLVED_NAME"),
+        "códigos: {:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
@@ -576,25 +646,41 @@ fn match_como_expresion_infiere_tipo() {
     let errs = check_src(
         "@client fn f(n: Int) -> String { return match n { 0 => \"cero\", _ => \"otro\" }; }",
     );
-    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+    assert!(
+        errs.is_empty(),
+        "no debería haber errores: {:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
 fn redefinir_builtin_es_error() {
     let errs = check_src("@client fn print(x: Int) { return; }");
-    assert!(has_code(&errs, "E_REDEFINE_BUILTIN"), "códigos: {:?}", codes(&errs));
+    assert!(
+        has_code(&errs, "E_REDEFINE_BUILTIN"),
+        "códigos: {:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
 fn len_de_lista_es_int() {
     let errs = check_src("@client fn f() { let xs = [1, 2, 3]; let n: Int = len(xs); print(n); }");
-    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+    assert!(
+        errs.is_empty(),
+        "no debería haber errores: {:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
 fn lista_heterogenea_es_error() {
     let errs = check_src(r#"fn f() -> Int { let xs = ["n", 99]; return len(xs[0]); }"#);
-    assert!(has_code(&errs, "E_LIST_HETEROGENEOUS"), "códigos: {:?}", codes(&errs));
+    assert!(
+        has_code(&errs, "E_LIST_HETEROGENEOUS"),
+        "códigos: {:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
@@ -605,7 +691,11 @@ fn store_del_servidor_tipa() {
          @server fn pub2(t: String) { save(almacen, P { t: t }); }\n\
          @server fn feed() -> List<P> { return all(almacen); }",
     );
-    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+    assert!(
+        errs.is_empty(),
+        "no debería haber errores: {:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
@@ -613,13 +703,21 @@ fn estado_fuera_de_server_es_error() {
     // 'all(almacen)'/'save(almacen, )' desde @client tocarían el store del proceso
     // equivocado: el typechecker lo rechaza.
     let errs = check_src("@client fn main() { let d = all(almacen); print(len(d)); }");
-    assert!(has_code(&errs, "E_STATE_OFF_SERVER"), "códigos: {:?}", codes(&errs));
+    assert!(
+        has_code(&errs, "E_STATE_OFF_SERVER"),
+        "códigos: {:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
 fn estado_en_server_es_valido() {
     let errs = check_src("type P = { t: String };\n@server fn s() -> List<P> { save(almacen, P { t: \"a\" }); return all(almacen); }");
-    assert!(!has_code(&errs, "E_STATE_OFF_SERVER"), "códigos: {:?}", codes(&errs));
+    assert!(
+        !has_code(&errs, "E_STATE_OFF_SERVER"),
+        "códigos: {:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
@@ -634,7 +732,11 @@ fn guardar_sin_store_declarado_es_error() {
     // Con almacenes con nombre, usar uno no declarado es un nombre sin resolver:
     // más preciso que el antiguo "no hay store".
     let errs = check_src("@server fn f() -> List<Int> { save(almacen, 1); return all(almacen); }");
-    assert!(has_code(&errs, "E_UNRESOLVED_NAME"), "códigos: {:?}", codes(&errs));
+    assert!(
+        has_code(&errs, "E_UNRESOLVED_NAME"),
+        "códigos: {:?}",
+        codes(&errs)
+    );
 }
 
 // Pasar algo que no es un almacén donde va uno.
@@ -676,7 +778,11 @@ fn dos_almacenes_con_el_mismo_nombre_es_error() {
 #[test]
 fn store_tipado_correcto_no_es_error() {
     let errs = check_src("type Post = { a: String };\nstore almacen: Post;\n@server fn pub(a: String) { save(almacen, Post { a: a }); }\n@server fn feed() -> List<Post> { return all(almacen); }");
-    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+    assert!(
+        errs.is_empty(),
+        "no debería haber errores: {:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
@@ -685,10 +791,14 @@ fn actualizar_y_borrar_tipados() {
     let ok = check_src("type P = { a: Int };\nstore almacen: P;\n@server fn f() { update(almacen, 0, P { a: 1 }); remove(almacen, 1); }");
     assert!(ok.is_empty(), "no debería haber errores: {:?}", codes(&ok));
     // Valor de tipo equivocado en actualizar.
-    let bad = check_src("type P = { a: Int };\nstore almacen: P;\n@server fn f() { update(almacen, 0, 99); }");
+    let bad = check_src(
+        "type P = { a: Int };\nstore almacen: P;\n@server fn f() { update(almacen, 0, 99); }",
+    );
     assert!(has_code(&bad, "E_ARG_TYPE"), "{:?}", codes(&bad));
     // Índice no-Int en borrar.
-    let bad2 = check_src("type P = { a: Int };\nstore almacen: P;\n@server fn f() { remove(almacen, \"x\"); }");
+    let bad2 = check_src(
+        "type P = { a: Int };\nstore almacen: P;\n@server fn f() { remove(almacen, \"x\"); }",
+    );
     assert!(has_code(&bad2, "E_ARG_TYPE"), "{:?}", codes(&bad2));
 }
 
@@ -701,12 +811,17 @@ fn actualizar_fuera_de_server_es_error() {
 #[test]
 fn atexto_es_string() {
     let errs = check_src("@client fn f() { let s: String = text(42); print(s); }");
-    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+    assert!(
+        errs.is_empty(),
+        "no debería haber errores: {:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
 fn atexto_de_no_escalar_es_error() {
-    let errs = check_src("type P = { a: Int };\n@client fn f() { let s = text(P { a: 1 }); print(s); }");
+    let errs =
+        check_src("type P = { a: Int };\n@client fn f() { let s = text(P { a: 1 }); print(s); }");
     assert!(has_code(&errs, "E_ARG_TYPE"), "códigos: {:?}", codes(&errs));
 }
 
@@ -721,23 +836,33 @@ fn reactiva_de_modulo_se_resuelve_en_funciones() {
          @client fn leer() -> Int { return n; }\n\
          @client fn subir() { n = n + 1; }",
     );
-    assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
+    assert!(
+        errs.is_empty(),
+        "no debería haber errores: {:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
 fn reactiva_de_modulo_derivada_es_inmutable() {
     // `reactive` (sin mut) de módulo es una derivada de solo lectura.
-    let errs = check_src(
-        "reactive base = 10;\n@client fn f() { base = 1; }",
+    let errs = check_src("reactive base = 10;\n@client fn f() { base = 1; }");
+    assert!(
+        has_code(&errs, "E_ASSIGN_IMMUTABLE"),
+        "códigos: {:?}",
+        codes(&errs)
     );
-    assert!(has_code(&errs, "E_ASSIGN_IMMUTABLE"), "códigos: {:?}", codes(&errs));
 }
 
 #[test]
 fn variable_inexistente_sigue_siendo_error() {
     // Sin declaración de módulo, el nombre sigue sin resolverse.
     let errs = check_src("@client fn f() -> Int { return fantasma; }");
-    assert!(has_code(&errs, "E_UNRESOLVED_NAME"), "códigos: {:?}", codes(&errs));
+    assert!(
+        has_code(&errs, "E_UNRESOLVED_NAME"),
+        "códigos: {:?}",
+        codes(&errs)
+    );
 }
 
 // A-4: un `let` de primer nivel que redeclara un parámetro generaba
@@ -752,9 +877,8 @@ fn let_que_redeclara_un_parametro_es_error() {
 // Pero el shadowing en un bloque ANIDADO sigue siendo legal, igual que en JS.
 #[test]
 fn shadowing_de_parametro_en_bloque_anidado_es_valido() {
-    let errs = check_src(
-        "@client fn f(x: Int) -> Int { if true { let x = 2; print(x); } return x; }",
-    );
+    let errs =
+        check_src("@client fn f(x: Int) -> Int { if true { let x = 2; print(x); } return x; }");
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
 
@@ -770,13 +894,19 @@ fn escapar_es_un_builtin() {
 // ahora es un error de ubicación, simétrico a E_STATE_OFF_SERVER.
 #[test]
 fn e_reactive_off_client() {
-    let errs = check_src("reactive mut contador = 0;\n@server fn leer() -> Int { return contador; }");
-    assert!(has_code(&errs, "E_REACTIVE_OFF_CLIENT"), "{:?}", codes(&errs));
+    let errs =
+        check_src("reactive mut contador = 0;\n@server fn leer() -> Int { return contador; }");
+    assert!(
+        has_code(&errs, "E_REACTIVE_OFF_CLIENT"),
+        "{:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
 fn leer_una_reactiva_desde_client_es_valido() {
-    let errs = check_src("reactive mut contador = 0;\n@client fn leer() -> Int { return contador; }");
+    let errs =
+        check_src("reactive mut contador = 0;\n@client fn leer() -> Int { return contador; }");
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
 
@@ -834,9 +964,8 @@ fn el_recurso_obliga_a_cubrir_cargando_y_fallo() {
 // el RPC fallaba con ECONNREFUSED nada más cargar.
 #[test]
 fn e_boundary_in_init_global() {
-    let errs = check_src(
-        "@server fn suma(a: Int, b: Int) -> Int { return a + b; }\nlet x = suma(1, 2);",
-    );
+    let errs =
+        check_src("@server fn suma(a: Int, b: Int) -> Int { return a + b; }\nlet x = suma(1, 2);");
     assert!(has_code(&errs, "E_BOUNDARY_IN_INIT"), "{:?}", codes(&errs));
 }
 
@@ -853,7 +982,8 @@ fn cruzar_la_frontera_en_el_cuerpo_es_valido() {
 // Una reactiva local que NO cruza la red sigue siendo válida.
 #[test]
 fn reactive_sin_cruce_de_frontera_es_valida() {
-    let errs = check_src("@client fn f() { reactive mut n = 0; reactive doble = n * 2; print(doble); }");
+    let errs =
+        check_src("@client fn f() { reactive mut n = 0; reactive doble = n * 2; print(doble); }");
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
 
@@ -881,7 +1011,10 @@ fn el_subtipado_recursivo_no_depende_de_la_profundidad() {
          fn f(a: A) -> Int { let t: { x: { x: { x: { x: Int } } } } = a; return 1; }",
     );
     assert!(!p3.is_empty(), "profundidad 3 debe rechazarse");
-    assert!(!p4.is_empty(), "profundidad 4 debe rechazarse igual que la 3");
+    assert!(
+        !p4.is_empty(),
+        "profundidad 4 debe rechazarse igual que la 3"
+    );
 }
 
 // Un registro estructural vale donde se espera una unión que lo contiene: es el
@@ -922,9 +1055,8 @@ fn una_llamada_local_en_un_init_reactive_tambien_es_recurso() {
 // al importar y no tiene dónde esperar.
 #[test]
 fn una_global_no_reactiva_sigue_sin_poder_llamar() {
-    let errs = check_src(
-        "@server fn suma(a: Int, b: Int) -> Int { return a + b; }\nlet x = suma(1, 2);",
-    );
+    let errs =
+        check_src("@server fn suma(a: Int, b: Int) -> Int { return a + b; }\nlet x = suma(1, 2);");
     assert!(has_code(&errs, "E_BOUNDARY_IN_INIT"), "{:?}", codes(&errs));
 }
 
@@ -941,17 +1073,23 @@ fn los_builtins_sincronos_si_valen_en_un_init_reactive() {
 #[test]
 fn escribir_una_reactive_desde_server_es_error() {
     let errs = check_src("reactive mut n = 0;\n@server fn poner() { n = 1; }");
-    assert!(has_code(&errs, "E_REACTIVE_OFF_CLIENT"), "{:?}", codes(&errs));
+    assert!(
+        has_code(&errs, "E_REACTIVE_OFF_CLIENT"),
+        "{:?}",
+        codes(&errs)
+    );
 }
 
 // Una función sin anotación se emite también en el servidor, donde el estado
 // reactivo no existe.
 #[test]
 fn usar_una_reactive_desde_una_fn_sin_anotacion_es_error() {
-    let errs = check_src(
-        "reactive mut posts = [];\nfn cuantos() -> Int { return len(posts); }",
+    let errs = check_src("reactive mut posts = [];\nfn cuantos() -> Int { return len(posts); }");
+    assert!(
+        has_code(&errs, "E_REACTIVE_OFF_CLIENT"),
+        "{:?}",
+        codes(&errs)
     );
-    assert!(has_code(&errs, "E_REACTIVE_OFF_CLIENT"), "{:?}", codes(&errs));
 }
 
 // Una global no puede chocar con una función ni con un identificador que el
@@ -1046,9 +1184,17 @@ fn el_texto_de_un_string_no_es_seguro() {
 #[test]
 fn html_es_subtipo_de_string_pero_no_al_reves() {
     let errs = check_src("@client fn f(s: String) -> String { return escape(s); }");
-    assert!(errs.is_empty(), "Html debe valer como String: {:?}", codes(&errs));
+    assert!(
+        errs.is_empty(),
+        "Html debe valer como String: {:?}",
+        codes(&errs)
+    );
     let errs = check_src("@client fn f(s: String) -> Html { return s; }");
-    assert!(has_code(&errs, "E_RETURN_TYPE_MISMATCH"), "{:?}", codes(&errs));
+    assert!(
+        has_code(&errs, "E_RETURN_TYPE_MISMATCH"),
+        "{:?}",
+        codes(&errs)
+    );
 }
 
 // --- agujeros del tipo Html que encontró la revisión ---
@@ -1078,7 +1224,10 @@ fn un_match_heterogeneo_no_produce_html() {
     let errs = check_src(
         "@client fn f(s: String, n: Int) { let x = match n { 1 => escape(s), _ => s }; render(x); }",
     );
-    assert!(!errs.is_empty(), "el match heterogéneo no puede lavar a Html");
+    assert!(
+        !errs.is_empty(),
+        "el match heterogéneo no puede lavar a Html"
+    );
 }
 
 // `reactive` es laxo con la inferencia, pero no puede serlo con Html.
@@ -1113,7 +1262,11 @@ fn una_vista_que_devuelve_html_es_valida() {
 #[test]
 fn html_no_vale_como_parametro_remoto() {
     let errs = check_src("@server fn publicar(c: Html) { print(c); }");
-    assert!(has_code(&errs, "E_BOUNDARY_NOT_SERIALIZABLE"), "{:?}", codes(&errs));
+    assert!(
+        has_code(&errs, "E_BOUNDARY_NOT_SERIALIZABLE"),
+        "{:?}",
+        codes(&errs)
+    );
 }
 
 // --- listas y texto: sin esto no se puede escribir una búsqueda ---
@@ -1133,8 +1286,13 @@ fn unir_conserva_el_tipo_del_elemento() {
 
 #[test]
 fn unir_listas_de_tipos_distintos_es_error() {
-    let errs = check_src("fn f(a: List<Int>, b: List<String>) -> List<Int> { return concat(a, b); }");
-    assert!(has_code(&errs, "E_LIST_HETEROGENEOUS"), "{:?}", codes(&errs));
+    let errs =
+        check_src("fn f(a: List<Int>, b: List<String>) -> List<Int> { return concat(a, b); }");
+    assert!(
+        has_code(&errs, "E_LIST_HETEROGENEOUS"),
+        "{:?}",
+        codes(&errs)
+    );
 }
 
 #[test]
@@ -1264,7 +1422,11 @@ fn una_variante_que_es_registro_no_puede_nombrarse_en_un_match() {
          @client fn f(u: User | NotFound) -> String { \
            return match u { User => u.nombre, NotFound => \"no\", _ => \"\" }; }",
     );
-    assert!(has_code(&errs, "E_VARIANTE_SIN_ETIQUETA"), "{:?}", codes(&errs));
+    assert!(
+        has_code(&errs, "E_VARIANTE_SIN_ETIQUETA"),
+        "{:?}",
+        codes(&errs)
+    );
 }
 
 // El patrón correcto —comodín para el caso del registro— sigue siendo válido.
@@ -1299,7 +1461,11 @@ fn una_plantilla_vale_como_string() {
 #[test]
 fn la_interpolacion_cruda_exige_html() {
     let mal = check_src("@client fn f(s: String) -> Html { return `x {!s} y`; }");
-    assert!(has_code(&mal, "E_INTERP_CRUDA_NO_HTML"), "{:?}", codes(&mal));
+    assert!(
+        has_code(&mal, "E_INTERP_CRUDA_NO_HTML"),
+        "{:?}",
+        codes(&mal)
+    );
     let bien = check_src(
         "fn trozo() -> Html { return \"<b>x</b>\"; }\n\
          @client fn f() -> Html { return `x {!trozo()} y`; }",

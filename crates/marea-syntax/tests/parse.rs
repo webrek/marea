@@ -55,7 +55,10 @@ fn lex_numeros_cadenas_bools() {
 #[test]
 fn lex_ignora_comentarios() {
     let ks = kinds("1 // de línea\n /* de\n bloque */ 2");
-    assert_eq!(ks, vec![TokenKind::Int(1), TokenKind::Int(2), TokenKind::Eof]);
+    assert_eq!(
+        ks,
+        vec![TokenKind::Int(1), TokenKind::Int(2), TokenKind::Eof]
+    );
 }
 
 #[test]
@@ -105,9 +108,7 @@ fn parse_fn_servidor_con_tipo_union() {
 #[test]
 fn parse_reactive_y_precedencia() {
     let m = parse("@client fn v() { reactive total = 1 + 2 * 3; }").unwrap();
-    let Item::Fn(f) = &m.items[0] else {
-        panic!()
-    };
+    let Item::Fn(f) = &m.items[0] else { panic!() };
     let Stmt::Let(let_stmt) = &f.body.stmts[0] else {
         panic!("se esperaba un let")
     };
@@ -182,7 +183,10 @@ fn parse_literal_de_registro() {
     let Stmt::Let(l) = &f.body.stmts[0] else {
         panic!("se esperaba un let")
     };
-    let Expr::Record { type_name, fields, .. } = &l.value else {
+    let Expr::Record {
+        type_name, fields, ..
+    } = &l.value
+    else {
         panic!("se esperaba un literal de registro")
     };
     assert_eq!(type_name.as_deref(), Some("Punto"));
@@ -193,7 +197,9 @@ fn parse_literal_de_registro() {
 fn parse_literal_de_lista() {
     let m = parse("@client fn f() { let xs = [1, 2, 3]; print(xs); }").unwrap();
     let Item::Fn(f) = &m.items[0] else { panic!() };
-    let Stmt::Let(l) = &f.body.stmts[0] else { panic!() };
+    let Stmt::Let(l) = &f.body.stmts[0] else {
+        panic!()
+    };
     let Expr::List { elements, .. } = &l.value else {
         panic!("se esperaba una lista")
     };
@@ -213,7 +219,9 @@ fn registro_dentro_de_parentesis_y_member() {
     // El flag se resetea dentro de '(' : el registro se parsea y luego '.x'.
     let m = parse("@client fn f() { let v = (Punto { x: 1, y: 2 }).x; print(v); }").unwrap();
     let Item::Fn(f) = &m.items[0] else { panic!() };
-    let Stmt::Let(l) = &f.body.stmts[0] else { panic!() };
+    let Stmt::Let(l) = &f.body.stmts[0] else {
+        panic!()
+    };
     assert!(matches!(&l.value, Expr::Member { .. }));
 }
 
@@ -234,7 +242,9 @@ fn campo_repetido_en_literal_es_error() {
 fn parse_indexado_de_lista() {
     let m = parse("@client fn f(xs: List) { let a = xs[0]; print(a); }").unwrap();
     let Item::Fn(f) = &m.items[0] else { panic!() };
-    let Stmt::Let(l) = &f.body.stmts[0] else { panic!() };
+    let Stmt::Let(l) = &f.body.stmts[0] else {
+        panic!()
+    };
     let Expr::Index { object, index, .. } = &l.value else {
         panic!("se esperaba un indexado")
     };
@@ -247,7 +257,9 @@ fn parse_lista_literal_indexada() {
     // '[10, 20, 30][1]' = lista literal seguida de indexado.
     let m = parse("@client fn f() { let a = [10, 20, 30][1]; print(a); }").unwrap();
     let Item::Fn(f) = &m.items[0] else { panic!() };
-    let Stmt::Let(l) = &f.body.stmts[0] else { panic!() };
+    let Stmt::Let(l) = &f.body.stmts[0] else {
+        panic!()
+    };
     let Expr::Index { object, .. } = &l.value else {
         panic!("se esperaba un indexado")
     };
@@ -256,7 +268,8 @@ fn parse_lista_literal_indexada() {
 
 #[test]
 fn parse_asignacion_y_efecto() {
-    let m = parse("@client fn f() { reactive mut n = 0; effect { print(n); } n = n + 1; }").unwrap();
+    let m =
+        parse("@client fn f() { reactive mut n = 0; effect { print(n); } n = n + 1; }").unwrap();
     let Item::Fn(f) = &m.items[0] else { panic!() };
     assert!(matches!(&f.body.stmts[0], Stmt::Let(l) if l.reactive && l.mutable));
     assert!(matches!(&f.body.stmts[1], Stmt::Effect { .. }));
@@ -281,7 +294,11 @@ fn registro_en_rama_de_match() {
 #[test]
 fn anidamiento_profundo_no_paniquea() {
     // Antes: stack overflow (SIGABRT). Ahora: SyntaxError ordinario.
-    let src = format!("fn f() -> Int {{ return {}1{}; }}", "(".repeat(2000), ")".repeat(2000));
+    let src = format!(
+        "fn f() -> Int {{ return {}1{}; }}",
+        "(".repeat(2000),
+        ")".repeat(2000)
+    );
     let err = parse(&src).unwrap_err();
     assert!(err.message.contains("anidada"), "mensaje: {}", err.message);
 }
@@ -294,14 +311,20 @@ fn recuperacion_reporta_varios_errores() {
     let (module, errors) = parse_recovering(
         "@client\nfn a() { let x = ; }\nfn b() { return 1 }\nfn c() -> Int { return 5; }",
     );
-    assert!(errors.len() >= 2, "errores: {:?}", errors.iter().map(|e| &e.message).collect::<Vec<_>>());
+    assert!(
+        errors.len() >= 2,
+        "errores: {:?}",
+        errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+    );
     // 'c' es válida y debe aparecer en el módulo parcial.
     assert!(
-        module.items.iter().any(|it| matches!(it, Item::Fn(f) if f.name == "c")),
+        module
+            .items
+            .iter()
+            .any(|it| matches!(it, Item::Fn(f) if f.name == "c")),
         "el item válido 'c' debe parsearse"
     );
 }
-
 
 #[test]
 fn recuperacion_no_descarta_item_valido() {
@@ -310,9 +333,19 @@ fn recuperacion_no_descarta_item_valido() {
     let (module, errors) = parse_recovering("fn a() { let x = 1 }\nfn b() -> Int { return 5; }");
     assert!(!errors.is_empty());
     assert!(
-        module.items.iter().any(|it| matches!(it, Item::Fn(f) if f.name == "b")),
+        module
+            .items
+            .iter()
+            .any(|it| matches!(it, Item::Fn(f) if f.name == "b")),
         "'b' válida debe parsearse, items: {:?}",
-        module.items.iter().filter_map(|it| match it { Item::Fn(f) => Some(&f.name), _ => None }).collect::<Vec<_>>()
+        module
+            .items
+            .iter()
+            .filter_map(|it| match it {
+                Item::Fn(f) => Some(&f.name),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
     );
 }
 
@@ -412,10 +445,9 @@ fn un_hueco_vacio_es_error() {
 // Las llaves y las cadenas dentro del hueco no lo cierran antes de tiempo.
 #[test]
 fn el_hueco_respeta_llaves_y_cadenas_anidadas() {
-    assert!(marea_syntax::parse(
-        "fn f() -> Html { return `x{concat(\"}\", \"!\")}y`; }"
-    ).is_ok());
+    assert!(marea_syntax::parse("fn f() -> Html { return `x{concat(\"}\", \"!\")}y`; }").is_ok());
     assert!(marea_syntax::parse(
         "type P = { a: Int };\nfn f() -> Html { return `x{P { a: 1 }.a}y`; }"
-    ).is_ok());
+    )
+    .is_ok());
 }

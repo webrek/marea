@@ -124,7 +124,10 @@ console.log("RESULTADO:" + JSON.stringify({
     );
     // Cada almacén va a su tabla y el CRUD funciona.
     assert!(s1.contains("\"n\":2"), "dos artículos: {s1}");
-    assert!(s1.contains("\"movs\":2"), "el otro almacén es independiente: {s1}");
+    assert!(
+        s1.contains("\"movs\":2"),
+        "el otro almacén es independiente: {s1}"
+    );
     // Bool ida y vuelta (SQLite no tiene booleanos: se guardan como 0/1).
     assert!(s1.contains("\"activo0\":true"), "{s1}");
     assert!(s1.contains("\"activo1\":false"), "{s1}");
@@ -147,7 +150,10 @@ console.log("RESULTADO:" + JSON.stringify({ n: cat.length, sku0: cat[0].sku, act
     );
     assert!(s2.contains("\"n\":2"), "debe recargar de la base: {s2}");
     assert!(s2.contains("\"sku0\":\"SKU-1\""), "{s2}");
-    assert!(s2.contains("\"activo1\":false"), "el Bool sobrevive al reinicio: {s2}");
+    assert!(
+        s2.contains("\"activo1\":false"),
+        "el Bool sobrevive al reinicio: {s2}"
+    );
 
     // Tercer proceso: borra por índice, que en la base es un DELETE por id.
     let s3 = correr(
@@ -161,7 +167,10 @@ console.log("RESULTADO:" + JSON.stringify({ n: cat.length, sku0: cat[0].sku }));
 "#,
     );
     assert!(s3.contains("\"n\":1"), "{s3}");
-    assert!(s3.contains("\"sku0\":\"SKU-2\""), "debe quedar el otro: {s3}");
+    assert!(
+        s3.contains("\"sku0\":\"SKU-2\""),
+        "debe quedar el otro: {s3}"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
