@@ -46,7 +46,7 @@ const MAREA_MAX_BODY = __envInt("MAREA_MAX_BODY", 1_048_576); // 1 MiB
 // El segundo parámetro es la identidad ya resuelta: la pasa el runtime, nunca
 // el cliente. Los handlers sin política la ignoran.
 type Handler = (args: unknown[], identidad?: unknown) => unknown | Promise<unknown>;
-// Tabla sin prototipo: así `fn` no puede resolver a méall heredados de
+// Tabla sin prototipo: así `fn` no puede resolver a métodos heredados de
 // Object.prototype (constructor/toString/…) y solo alcanza handlers reales.
 const __handlers: Record<string, Handler> = Object.create(null);
 

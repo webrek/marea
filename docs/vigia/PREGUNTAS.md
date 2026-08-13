@@ -83,3 +83,63 @@ el runtime, sin `node:*`). No por esta gráfica —el componente de servidor me
 sirve— sino porque hoy es lo que decide que Marea no pueda pintar nada en el
 cliente ni en el edge, que es justo la frontera que el lenguaje presume de tener
 resuelta.
+
+---
+
+## P3 — Funcionó. Un aviso sobre el criterio de aceptación y una petición de estabilidad
+
+Fecha: 2026-08-13
+
+No me estrellé con nada, así que esto es reporte, no petición de rescate. Con R2
+escribí la gráfica y **tipó sin errores a la primera**; `marea build` generó la
+firma que esperaba:
+
+```ts
+export async function graficaModelo(tiendas: string[], colores: string[],
+  serieDe: number[], dias: number[], precios: number[], ancho: number, alto: number)
+```
+
+Resultado del oráculo, contra la versión de TypeScript que hoy está en producción:
+
+- **Los valores del eje salen idénticos carácter por carácter**
+  (`$13,500.00|$14,000.00|$14,500.00|$15,000.00`), incluido el separador de miles
+  y los centavos, que escribí a mano en Marea con `/` y `%` porque no hay
+  `substring`. Que eso coincida con un `Intl.NumberFormat("es-MX")` me pareció
+  el mejor resultado del día.
+- Mismo número de líneas.
+- **Desviación máxima en coordenadas: 0.100 unidades** del viewBox de 760×288.
+
+### El aviso: "carácter por carácter" era un criterio equivocado, y era mío
+
+Lo escribí yo en el encargo y no se puede cumplir, por construcción: la versión
+de TypeScript calcula en flotante y redondea a un decimal; la de Marea trunca
+enteros sobre el viewBox multiplicado por diez. Esa décima **no es un error a
+corregir, es la resolución del método**. En pantalla son nueve centésimas de
+píxel.
+
+Criterio nuevo, y lo cambio en el encargo: **etiquetas del eje idénticas como
+texto, y geometría dentro de 0.1 unidades del viewBox.** Lo digo aquí porque si
+alguien lee sólo el documento viejo, va a perseguir un cero que no existe.
+
+### Lo que sí les pido: estabilidad, no funciones
+
+Producción va a quedar clavada a tres comportamientos que hoy son detalle de
+implementación suyo:
+
+1. `text(Int)` = `String(x)`, dígitos planos.
+2. La división entera trunca hacia cero (mis escalas dependen de eso; si algún
+   día redondea, la gráfica se mueve).
+3. Los cinco reemplazos de `escape()`, en ese orden.
+
+Si alguno va a cambiar, avísenme por aquí **antes**, aunque parezca inocuo: no me
+rompería el build, me movería el dibujo en silencio, que es peor. No necesito que
+se congelen para siempre; necesito enterarme.
+
+### Lo que me falta a mí, para que sepan por dónde voy
+
+Las etiquetas pegadas a la línea (con 4 tiendas o menos) y el estado vacío. Las
+dejé fuera de esta primera pasada a propósito, para tener antes algo que
+compilara y midiera. El reparto vertical de esas etiquetas necesita ordenar por
+posición, y sin cierres ni `sort` va a salir por conteo de rangos con dos bucles
+anidados — si eso les parece señal de que falta algo en el lenguaje, ahí tienen
+un caso concreto; a mí no me bloquea.
