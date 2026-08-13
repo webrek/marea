@@ -245,7 +245,7 @@ fn completion_incluye_keyword_y_builtin() {
 }
 
 #[test]
-fn completion_tras_arroba_ofrece_ubicaciones() {
+fn completion_tras_arroba_ofrece_las_anotaciones() {
     let cli = Cliente::nuevo();
     let u = uri("arroba.mar");
     // Documento con un `@` recién tecleado antes de una función.
@@ -277,12 +277,14 @@ fn completion_tras_arroba_ofrece_ubicaciones() {
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
     assert_eq!(
         labels.len(),
-        3,
-        "tras `@` solo van las tres ubicaciones: {labels:?}"
+        4,
+        "tras `@` solo van las anotaciones que el parser acepta: {labels:?}"
     );
     assert!(labels.contains(&"server"));
     assert!(labels.contains(&"client"));
     assert!(labels.contains(&"edge"));
+    // `@session` no es una ubicación, pero se escribe en el mismo sitio.
+    assert!(labels.contains(&"session"));
 }
 
 // ===================== definition =====================

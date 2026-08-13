@@ -82,6 +82,13 @@ impl DocumentStore {
         self.documents.get(uri)
     }
 
+    /// Recorre los documentos abiertos. Lo necesita el análisis de programa: un
+    /// archivo del grafo puede estar abierto y sin guardar, y entonces lo que
+    /// vale es el buffer, no lo que hay en el disco.
+    pub fn iter(&self) -> impl Iterator<Item = (&Uri, &Document)> {
+        self.documents.iter()
+    }
+
     /// Número de documentos abiertos.
     pub fn len(&self) -> usize {
         self.documents.len()

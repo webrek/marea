@@ -68,9 +68,14 @@ npx @vscode/vsce package
 
 | Capacidad | Detalle |
 |-----------|---------|
-| Diagnósticos | errores de sintaxis y de tipos, en vivo al escribir |
-| Símbolos | esquema de funciones y tipos del documento |
-| Autocompletado | palabras clave, builtins, tipos y símbolos del módulo |
-| Ir a definición | de un uso a su declaración (mismo archivo) |
-| Hover | firma reconstruida del AST |
-| Resaltado | gramática TextMate para `.mar` |
+| Diagnósticos | errores de sintaxis, de resolución de módulos y de tipos, en vivo al escribir |
+| Programa completo | si el archivo tiene `import`, se resuelve el grafo y se verifica entero; cada error se publica en SU archivo, aunque no esté abierto |
+| Símbolos | esquema de funciones, tipos, `let` de módulo y almacenes |
+| Autocompletado | palabras clave, builtins, símbolos del módulo, lo que traen los `import` y las anotaciones (`@server`/`@client`/`@edge`/`@session`) con su política |
+| Ir a definición | de un uso a su declaración: en el mismo ámbito, en el mismo archivo o al otro lado de un `import` |
+| Hover | firma reconstruida del AST, con la política del handler; nombres locales (incluidos los de un cierre) con su tipo; nombres importados con el archivo del que vienen |
+| Resaltado | gramática TextMate para `.mar`: `import`/`from`, `store`, `for`/`in`, `@session` y las plantillas con sus huecos `{...}`/`{!...}` |
+
+Lo que se ve en el editor sale del texto que hay en pantalla, no del que hay en
+el disco: arreglar un módulo importado limpia los errores del que lo importa sin
+guardar nada.

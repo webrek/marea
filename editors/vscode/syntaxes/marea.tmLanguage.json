@@ -4,14 +4,17 @@
   "scopeName": "source.marea",
   "patterns": [
     { "include": "#comments" },
-    { "include": "#location" },
+    { "include": "#import" },
+    { "include": "#annotation" },
     { "include": "#keywords" },
     { "include": "#types" },
     { "include": "#constants" },
+    { "include": "#templates" },
     { "include": "#strings" },
     { "include": "#numbers" },
     { "include": "#fn-decl" },
-    { "include": "#fn-call" }
+    { "include": "#fn-call" },
+    { "include": "#type-name" }
   ],
   "repository": {
     "comments": {
@@ -24,21 +27,64 @@
         }
       ]
     },
-    "location": {
+    "import": {
+      "comment": "'import { A, B } from \"./x.mar\";'. Va en su propia regla para que 'from' solo se coloree ahí: fuera del import es un identificador cualquiera.",
+      "begin": "\\b(import)\\b",
+      "beginCaptures": { "1": { "name": "keyword.control.import.marea" } },
+      "end": ";",
+      "patterns": [
+        { "name": "keyword.control.import.marea", "match": "\\b(from)\\b" },
+        { "include": "#strings" },
+        { "include": "#type-name" }
+      ]
+    },
+    "annotation": {
+      "comment": "'@server', '@client', '@edge' dicen dónde corre; '@session' marca la función que traduce un token en una identidad. La política entre paréntesis se colorea con las reglas de tipos.",
       "name": "storage.modifier.location.marea",
-      "match": "@(server|client|edge)\\b"
+      "match": "@(server|client|edge|session)\\b"
     },
     "keywords": {
       "name": "keyword.control.marea",
-      "match": "\\b(fn|let|mut|reactive|type|if|else|match|return|effect|store)\\b"
+      "match": "\\b(fn|let|mut|reactive|type|if|else|match|return|effect|store|for|in)\\b"
     },
     "types": {
       "name": "support.type.marea",
-      "match": "\\b(Int|Float|Bool|String|Unit|Record|List)\\b"
+      "match": "\\b(Int|Float|Bool|String|Unit|Html|Record|List|Public)\\b"
     },
     "constants": {
       "name": "constant.language.marea",
       "match": "\\b(true|false)\\b"
+    },
+    "templates": {
+      "comment": "Plantilla de texto: `hola {nombre}`. El hueco '{x}' se escapa solo y '{!x}' inserta marcado ya seguro; los dos llevan código dentro, así que se resaltan como tal.",
+      "name": "string.quoted.other.template.marea",
+      "begin": "`",
+      "end": "`",
+      "patterns": [
+        {
+          "name": "constant.character.escape.marea",
+          "match": "\\\\(n|t|`|\\{|\\\\)"
+        },
+        {
+          "name": "meta.template.expression.marea",
+          "begin": "\\{!?",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.template-expression.begin.marea" }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.template-expression.end.marea" }
+          },
+          "patterns": [
+            { "include": "#strings" },
+            { "include": "#constants" },
+            { "include": "#numbers" },
+            { "include": "#types" },
+            { "include": "#fn-call" },
+            { "include": "#type-name" }
+          ]
+        }
+      ]
     },
     "strings": {
       "name": "string.quoted.double.marea",
@@ -67,6 +113,11 @@
     "fn-call": {
       "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
       "name": "entity.name.function.call.marea"
+    },
+    "type-name": {
+      "comment": "Los tipos declarados en el programa (Usuario, Producto) no están en ninguna lista: se reconocen por la mayúscula inicial, que es la convención del lenguaje.",
+      "name": "entity.name.type.marea",
+      "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
     }
   }
 }

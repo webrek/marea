@@ -260,6 +260,7 @@ fn symbol_to_document_symbol_mapea_clases() {
             SymbolClass::Fn => SymbolKind::FUNCTION,
             SymbolClass::Type => SymbolKind::INTERFACE,
             SymbolClass::Let => SymbolKind::VARIABLE,
+            SymbolClass::Store => SymbolKind::PROPERTY,
         };
         assert_eq!(ds.kind, esperado);
     }
