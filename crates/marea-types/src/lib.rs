@@ -824,9 +824,9 @@ impl Checker {
         if sig.ret_nombres.is_empty() {
             return None;
         }
-        let mut vs = vec!["Cargando".to_string()];
+        let mut vs = vec!["Loading".to_string()];
         vs.extend(sig.ret_nombres.iter().cloned());
-        vs.push("Fallo".to_string());
+        vs.push("Failed".to_string());
         Some(Ty::Union(vs))
     }
 
@@ -1053,10 +1053,10 @@ impl Checker {
         // posiciones de índice Int, posiciones de valor, ¿devuelve List<T>?).
         let (expected, idx_args, elem_args, returns_list): (usize, &[usize], &[usize], bool) =
             match name {
-                "todos" => (1, &[], &[], true),
-                "guardar" => (2, &[], &[1], false),
-                "borrar" => (2, &[1], &[], false),
-                "actualizar" => (3, &[1], &[2], false),
+                "all" => (1, &[], &[], true),
+                "save" => (2, &[], &[1], false),
+                "remove" => (2, &[1], &[], false),
+                "update" => (3, &[1], &[2], false),
                 _ => (0, &[], &[], false),
             };
 
@@ -1135,14 +1135,14 @@ impl Checker {
         // Los builtins de ESTADO (`guardar`/`todos`) se chequean aparte: contra
         // el tipo del store y sólo dentro de @server/@edge.
         if let Expr::Ident { name, .. } = callee {
-            if matches!(name.as_str(), "guardar" | "todos" | "actualizar" | "borrar") {
+            if matches!(name.as_str(), "save" | "all" | "update" | "remove") {
                 return self.check_state_builtin(name, args, span);
             }
             // La red saliente vive en el servidor, igual que el estado: desde el
             // navegador la llamada la haría el cliente (otro origen, otras
             // credenciales, y CORS decidiendo por ti), que no es lo que el
             // programa dice. Además la lista blanca de destinos es del servidor.
-            if matches!(name.as_str(), "pedir" | "pedirPost") {
+            if matches!(name.as_str(), "fetch" | "post") {
                 if !matches!(
                     self.current_location,
                     Some(Location::Server) | Some(Location::Edge)
@@ -1157,11 +1157,11 @@ impl Checker {
                     ));
                 }
             }
-            if name == "aTexto" {
+            if name == "text" {
                 // aTexto sólo tiene sentido sobre escalares; un Record/List daría
                 // '[object Object]'/'1,2,3' (basura mostrada al usuario).
                 let arg_tys: Vec<Ty> = args.iter().map(|a| self.check_expr(a)).collect();
-                if self.arity("aTexto", &arg_tys, 1, span) {
+                if self.arity("text", &arg_tys, 1, span) {
                     let t = &arg_tys[0];
                     if !t.is_scalar() && !matches!(t, Ty::Unknown) {
                         self.error(TypeError::new(
@@ -1183,14 +1183,14 @@ impl Checker {
                     _ => Ty::String,
                 };
             }
-            // `unir` conserva el tipo del elemento: el verificador no tiene
-            // genéricos, así que la firma se calcula aquí a partir de los
-            // argumentos en vez de fijarla en la tabla.
-            if name == "unir" {
+            // `concat` sirve para texto Y para listas: son la misma idea sobre
+            // dos estructuras. Sobre listas conserva el tipo del elemento —el
+            // verificador no tiene genéricos, así que la firma se calcula aquí
+            // desde los argumentos— y unir listas incompatibles es un error.
+            if name == "concat" && args.len() == 2 && matches!(
+                self.check_expr(&args[0]), Ty::List(_)
+            ) {
                 let ts: Vec<Ty> = args.iter().map(|a| self.check_expr(a)).collect();
-                if !self.arity("unir", &ts, 2, span) {
-                    return Ty::List(Box::new(Ty::Unknown));
-                }
                 let mut elems = Vec::new();
                 for (i, t) in ts.iter().enumerate() {
                     match t {
@@ -1199,7 +1199,7 @@ impl Checker {
                         otro => {
                             self.error(TypeError::new(
                                 "E_ARG_TYPE",
-                                format!("unir espera listas, no '{}'", otro.display()),
+                                format!("concat espera listas o texto, no '{}'", otro.display()),
                                 args[i].span(),
                             ));
                             elems.push(Ty::Unknown);
@@ -1218,7 +1218,7 @@ impl Checker {
                 self.error(TypeError::new(
                     "E_LIST_HETEROGENEOUS",
                     format!(
-                        "no se pueden unir 'List<{}>' y 'List<{}>'",
+                        "no se pueden concatenar 'List<{}>' y 'List<{}>'",
                         a.display(),
                         b.display()
                     ),
@@ -1227,9 +1227,9 @@ impl Checker {
                 return Ty::List(Box::new(Ty::Unknown));
             }
             // `agregar(xs, x)`: el elemento debe encajar con el de la lista.
-            if name == "agregar" {
+            if name == "append" {
                 let ts: Vec<Ty> = args.iter().map(|a| self.check_expr(a)).collect();
-                if !self.arity("agregar", &ts, 2, span) {
+                if !self.arity("append", &ts, 2, span) {
                     return Ty::List(Box::new(Ty::Unknown));
                 }
                 let elem = match &ts[0] {
@@ -1238,7 +1238,7 @@ impl Checker {
                     otro => {
                         self.error(TypeError::new(
                             "E_ARG_TYPE",
-                            format!("agregar espera una lista, no '{}'", otro.display()),
+                            format!("append espera una lista, no '{}'", otro.display()),
                             args[0].span(),
                         ));
                         Ty::Unknown
@@ -1251,7 +1251,7 @@ impl Checker {
                     self.error(TypeError::new(
                         "E_LIST_HETEROGENEOUS",
                         format!(
-                            "se agrega '{}' a una 'List<{}>'",
+                            "se añade '{}' a una 'List<{}>'",
                             ts[1].display(),
                             elem.display()
                         ),
@@ -2146,9 +2146,9 @@ impl Checker {
 fn es_builtin_sincrono(name: &str) -> bool {
     matches!(
         name,
-        "print" | "concat" | "render" | "len" | "aTexto" | "escapar" | "html"
-            | "unir" | "agregar" | "largo" | "contiene" | "minusculas"
-            | "jsonTexto" | "jsonNumero" | "jsonDecimal" | "jsonLargo"
+        "print" | "concat" | "render" | "len" | "text" | "escape" | "html"
+            | "concat" | "append" | "len" | "contains" | "lower"
+            | "jsonText" | "jsonInt" | "jsonFloat" | "jsonLen"
     )
 }
 

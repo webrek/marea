@@ -6,7 +6,7 @@
 
 use crate::error::SyntaxError;
 use crate::span::Span;
-use crate::token::{Token, TokenKind};
+use crate::token::{TemplatePiece, Token, TokenKind};
 
 pub struct Lexer<'a> {
     src: &'a str,
@@ -123,6 +123,9 @@ impl<'a> Lexer<'a> {
         }
         if c.is_ascii_digit() {
             return self.lex_number(start);
+        }
+        if c == '`' {
+            return self.lex_template(start);
         }
         if c == '"' {
             return self.lex_string(start);
@@ -294,6 +297,83 @@ impl<'a> Lexer<'a> {
                 .map_err(|_| SyntaxError::new("entero fuera de rango para i64", span))?;
             Ok(Token::new(TokenKind::Int(value), span))
         }
+    }
+
+    /// Plantilla de texto: `` `hola {nombre}` ``. Se lexea entera y se guarda el
+    /// FUENTE de cada hueco; el parser lo vuelve a parsear con su desplazamiento
+    /// real, así que un error dentro de `{...}` apunta a su sitio del archivo.
+    fn lex_template(&mut self, start: usize) -> Result<Token, SyntaxError> {
+        self.bump(); // comilla invertida de apertura
+        let mut piezas: Vec<TemplatePiece> = Vec::new();
+        let mut lit = String::new();
+        loop {
+            match self.bump() {
+                Some((_, '`')) => break,
+                Some((off, '\\')) => match self.bump() {
+                    Some((_, 'n')) => lit.push('\n'),
+                    Some((_, 't')) => lit.push('\t'),
+                    Some((_, '`')) => lit.push('`'),
+                    Some((_, '{')) => lit.push('{'),
+                    Some((_, '\\')) => lit.push('\\'),
+                    Some((end, otro)) => {
+                        return Err(SyntaxError::new(
+                            format!("secuencia de escape inválida '\\{otro}'"),
+                            Span::new(off, end + otro.len_utf8()),
+                        ))
+                    }
+                    None => return Err(self.plantilla_sin_cerrar(start)),
+                },
+                Some((abre, '{')) => {
+                    if !lit.is_empty() {
+                        piezas.push(TemplatePiece::Lit(std::mem::take(&mut lit)));
+                    }
+                    // `{!expr}` inserta tal cual; `{expr}` escapa.
+                    let crudo = matches!(self.peek_char(), Some('!'));
+                    if crudo {
+                        self.bump();
+                    }
+                    let ini = abre + 1 + usize::from(crudo);
+                    let mut hondo = 0usize;
+                    let mut en_cadena = false;
+                    let fin;
+                    loop {
+                        match self.bump() {
+                            Some((o, '}')) if hondo == 0 && !en_cadena => {
+                                fin = o;
+                                break;
+                            }
+                            Some((_, '}')) if !en_cadena => hondo -= 1,
+                            Some((_, '{')) if !en_cadena => hondo += 1,
+                            Some((_, '"')) => en_cadena = !en_cadena,
+                            Some((_, '\\')) if en_cadena => {
+                                self.bump();
+                            }
+                            Some(_) => {}
+                            None => return Err(self.plantilla_sin_cerrar(start)),
+                        }
+                    }
+                    let fuente = self.src[ini..fin].to_string();
+                    if fuente.trim().is_empty() {
+                        return Err(SyntaxError::new(
+                            "hueco vacío en la plantilla",
+                            Span::new(abre, fin + 1),
+                        ));
+                    }
+                    piezas.push(TemplatePiece::Hueco { fuente, offset: ini, crudo });
+                }
+                Some((_, c)) => lit.push(c),
+                None => return Err(self.plantilla_sin_cerrar(start)),
+            }
+        }
+        if !lit.is_empty() {
+            piezas.push(TemplatePiece::Lit(lit));
+        }
+        let end = self.peek_offset();
+        Ok(Token::new(TokenKind::Template(piezas), Span::new(start, end)))
+    }
+
+    fn plantilla_sin_cerrar(&self, start: usize) -> SyntaxError {
+        SyntaxError::new("plantilla sin cerrar", Span::new(start, self.src.len()))
     }
 
     fn lex_string(&mut self, start: usize) -> Result<Token, SyntaxError> {

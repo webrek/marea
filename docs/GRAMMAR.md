@@ -90,7 +90,7 @@ pattern     = "_" | IDENT | INT | BOOL | STRING ;
   siguiente al identificador: solo un `=` suelto abre una asignación.
 - **`store nombre: T;`**: declara un almacén del servidor con nombre. Un módulo
   puede declarar varios; el nombre se pasa como primer argumento y tipa los
-  builtins de CRUD (`guardar`, `todos`, `actualizar`, `borrar`). Es un item, y no
+  builtins de CRUD (`save`, `all`, `update`, `remove`). Es un item, y no
   admite atributo de ubicación.
 - **Tipos unión**: `User | NotFound` es la base de "errores como valores". El
   `match` es la forma natural de consumirlos.

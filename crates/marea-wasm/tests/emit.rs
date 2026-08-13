@@ -9,8 +9,8 @@ fn wat(src: &str) -> Result<String, String> {
 
 #[test]
 fn funcion_se_exporta_con_params_i32() {
-    let w = wat("fn add(a: Int, b: Int) -> Int { return a + b; }").unwrap();
-    assert!(w.contains(r#"(func $add (export "add") (param $a i32) (param $b i32) (result i32)"#));
+    let w = wat("fn append(a: Int, b: Int) -> Int { return a + b; }").unwrap();
+    assert!(w.contains(r#"(func $append (export "append") (param $a i32) (param $b i32) (result i32)"#));
     assert!(w.contains("(i32.add (local.get $a) (local.get $b))"));
 }
 
@@ -63,7 +63,7 @@ fn cadenas_van_a_memoria_lineal() {
 #[test]
 fn sin_cadenas_no_se_emite_memoria() {
     // El slice numérico no debe arrastrar el runtime de memoria.
-    let w = wat("fn add(a: Int, b: Int) -> Int { return a + b; }").unwrap();
+    let w = wat("fn append(a: Int, b: Int) -> Int { return a + b; }").unwrap();
     assert!(!w.contains("(memory"));
     assert!(!w.contains("$concat"));
 }
@@ -302,6 +302,6 @@ fn fn_con_nombre_reservado_es_error() {
 
 #[test]
 fn estado_servidor_no_existe_en_wasm() {
-    let err = wat("fn f() -> Int { return len(todos()); }").unwrap_err();
+    let err = wat("fn f() -> Int { return len(all()); }").unwrap_err();
     assert!(err.contains("runtime de TypeScript"), "mensaje: {err}");
 }

@@ -44,7 +44,7 @@ export function puerto(): number {
 const MAREA_MAX_BODY = __envInt("MAREA_MAX_BODY", 1_048_576); // 1 MiB
 
 type Handler = (args: unknown[]) => unknown | Promise<unknown>;
-// Tabla sin prototipo: así `fn` no puede resolver a métodos heredados de
+// Tabla sin prototipo: así `fn` no puede resolver a méall heredados de
 // Object.prototype (constructor/toString/…) y solo alcanza handlers reales.
 const __handlers: Record<string, Handler> = Object.create(null);
 
@@ -54,10 +54,10 @@ export function __register(name: string, fn: Handler): void {
 
 /// Error de validación del límite: lo provoca una petición mal formada, no un
 /// fallo del servidor, así que se responde 400 y no 500.
-export class __ErrorDeLimite extends Error {}
+export class __BoundaryError extends Error {}
 
-export function __malFormado(detalle: string): never {
-  throw new __ErrorDeLimite(detalle);
+export function __badRequest(detalle: string): never {
+  throw new __BoundaryError(detalle);
 }
 
 let __server: http.Server | null = null;
@@ -86,7 +86,7 @@ function __serveStatic(req: http.IncomingMessage, res: http.ServerResponse): boo
   // Lista blanca de extensiones servibles. Sin ella, la raíz estática (que es
   // el propio directorio de salida) expone `server.ts` —la lista completa de
   // handlers, anulando la anti-enumeración del endpoint— y el `.log` del store
-  // de archivo, es decir todos los datos persistidos.
+  // de archivo, es decir all los datos persistidos.
   const dot = path.lastIndexOf(".");
   const ext = dot === -1 ? "" : path.slice(dot);
   const mime = __MIME[ext];
@@ -121,7 +121,7 @@ export function startServer(): Promise<void> {
       // Exigir JSON no es cosmético: sin esta comprobación un formulario
       // cross-origin con enctype="text/plain" califica como "simple request",
       // se salta el preflight de CORS y ejecuta el handler. La respuesta le
-      // queda opaca al atacante, pero el efecto lateral (guardar/borrar) ya
+      // queda opaca al atacante, pero el efecto lateral (save/remove) ya
       // ocurrió. Ambos clientes generados mandan este content-type.
       const __ct = (req.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
       if (__ct !== "application/json") {
@@ -205,7 +205,7 @@ export function startServer(): Promise<void> {
           res.setHeader("content-type", "application/json");
           res.end(JSON.stringify({ ok: result }));
         } catch (e) {
-          if (e instanceof __ErrorDeLimite) {
+          if (e instanceof __BoundaryError) {
             // Petición mal formada: es culpa del cliente, no del servidor. No se
             // hace eco del detalle para no dar un oráculo de las firmas.
             res.statusCode = 400;
@@ -316,7 +316,7 @@ export function __signal<T>(initial: T): Cell<T> {
   const subs = new Set<Reaction>();
   return {
     get(): T {
-      if (__currentSub) subs.add(__currentSub);
+      if (__currentSub) subs.append(__currentSub);
       return value;
     },
     set(v: T): void {
@@ -342,7 +342,7 @@ export function __effect(fn: () => void | Promise<void>): void {
       }
     },
     invalidate() {
-      __pending.add(reaction);
+      __pending.append(reaction);
     },
   };
   reaction.execute();
@@ -352,7 +352,7 @@ export function __effect(fn: () => void | Promise<void>): void {
 // la llamada asíncrona y se pone al resultado cuando llega, o a `Fallo` si
 // revienta. Como es un signal, cualquier vista que lo lea se re-pinta sola en
 // cada transición: no hay que orquestar nada a mano.
-export function __recurso(f: () => Promise<unknown>): Cell<unknown> {
+export function __resource(f: () => Promise<unknown>): Cell<unknown> {
   const s = __signal<unknown>({ $tag: "Cargando" });
   Promise.resolve()
     .then(f)
@@ -391,7 +391,7 @@ export function __memo<T>(fn: () => T): Cell<T> {
   return {
     get(): T {
       if (dirty) recompute();
-      if (__currentSub) subs.add(__currentSub);
+      if (__currentSub) subs.append(__currentSub);
       return value;
     },
     // Un memo es derivado: no se asigna directamente.
@@ -403,16 +403,21 @@ export function __memo<T>(fn: () => T): Cell<T> {
 export function print(x: unknown): void {
   console.log(x);
 }
-export function concat(a: string, b: string): string {
-  return a + b;
+// `concat` y `len` sirven para texto Y para listas: son la misma idea sobre dos
+// estructuras, y tener `unir`/`largo` aparte solo duplicaba la superficie.
+export function concat(a: unknown, b: unknown): unknown {
+  if (Array.isArray(a) && Array.isArray(b)) return a.concat(b);
+  return String(a) + String(b);
 }
 export function render(x: unknown): void {
   console.log("[render]", x);
 }
-export function len(xs: unknown[]): number {
-  return xs.length;
+export function len(x: unknown): number {
+  if (Array.isArray(x)) return x.length;
+  // Se cuentan puntos de código, no unidades UTF-16: "🌊" mide 1, no 2.
+  return Array.from(String(x)).length;
 }
-export function aTexto(x: unknown): string {
+export function text(x: unknown): string {
   // Una variante se imprime por su nombre; si no, saldría "[object Object]".
   if (x !== null && typeof x === "object") {
     const t = (x as Record<string, unknown>).$tag;
@@ -422,25 +427,25 @@ export function aTexto(x: unknown): string {
 }
 // Escapa un texto para incrustarlo en HTML. El lenguaje construye marcado
 // concatenando cadenas y 'render' lo inyecta por innerHTML, así que sin esto un
-// dato persistido vía RPC se ejecuta como marcado en todos los clientes.
+// dato persistido vía RPC se ejecuta como marcado en all los clientes.
 // División entera. En JS `7/0` es Infinity y `0/0` es NaN: valores que no son
 // enteros y que se colarían dentro de un Int mintiendo sobre su tipo. El backend
 // WASM trapea, así que aquí también se corta —el mismo programa no puede dar
 // Infinity en un blanco y morir en el otro—.
 export function __div(a: number, b: number): number {
   if (b === 0) {
-    throw new __ErrorDeLimite("división entre cero");
+    throw new __BoundaryError("división entre cero");
   }
   return Math.trunc(a / b);
 }
 export function __rem(a: number, b: number): number {
   if (b === 0) {
-    throw new __ErrorDeLimite("módulo entre cero");
+    throw new __BoundaryError("módulo entre cero");
   }
   return a % b;
 }
 
-export function escapar(x: unknown): string {
+export function escape(x: unknown): string {
   return String(x)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -458,27 +463,23 @@ export function html(s: string): string {
 // un error claro en vez de devolver 'undefined' (que reventaría más tarde).
 // --- listas: construir en runtime (el lenguaje no tiene bucles ni cierres, así
 // que sin esto una función no puede devolver un subconjunto filtrado) ---
-export function unir(a: unknown[], b: unknown[]): unknown[] {
-  return a.concat(b);
-}
-export function agregar(xs: unknown[], x: unknown): unknown[] {
+
+export function append(xs: unknown[], x: unknown): unknown[] {
   return xs.concat([x]);
 }
 // --- texto ---
-export function largo(s: string): number {
-  return Array.from(String(s)).length;
-}
-export function contiene(s: string, sub: string): boolean {
+
+export function contains(s: string, sub: string): boolean {
   return String(s).includes(String(sub));
 }
-export function minusculas(s: string): string {
+export function lower(s: string): string {
   return String(s).toLowerCase();
 }
 export function __index(xs: unknown[], i: number): unknown {
   if (i < 0 || i >= xs.length) {
     // Si el índice vino de la red es una petición mal formada (400), no un
     // fallo del servidor: si no, el cliente induce 500 y ruido de log a placer.
-    throw new __ErrorDeLimite(`índice fuera de rango: ${i} (longitud ${xs.length})`);
+    throw new __BoundaryError(`índice fuera de rango: ${i} (longitud ${xs.length})`);
   }
   return xs[i];
 }
@@ -546,10 +547,10 @@ function __urlPermitida(u: string): URL {
   try {
     url = new URL(u);
   } catch {
-    __malFormado("url inválida");
+    __badRequest("url inválida");
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    __malFormado("esquema no permitido");
+    __badRequest("esquema no permitido");
   }
   const lista = (process.env.MAREA_HTTP_HOSTS ?? "")
     .split(",")
@@ -557,14 +558,14 @@ function __urlPermitida(u: string): URL {
     .filter((h) => h !== "");
   if (lista.length > 0) {
     if (!lista.includes(url.hostname.toLowerCase())) {
-      __malFormado("host no permitido");
+      __badRequest("host no permitido");
     }
     return url;
   }
   // Sin lista blanca se acepta cualquier host PÚBLICO. Los privados se bloquean
   // siempre: son justo el objetivo del SSRF.
   if (__hostBloqueado(url.hostname)) {
-    __malFormado("host no permitido");
+    __badRequest("host no permitido");
   }
   return url;
 }
@@ -596,10 +597,10 @@ async function __http(u: string, metodo: string, cuerpo: string | null): Promise
   }
 }
 
-export function pedir(url: string): Promise<string> {
+export function fetch(url: string): Promise<string> {
   return __http(url, "GET", null);
 }
-export function pedirPost(url: string, cuerpo: string): Promise<string> {
+export function post(url: string, cuerpo: string): Promise<string> {
   return __http(url, "POST", cuerpo);
 }
 
@@ -632,23 +633,23 @@ function __jsonEn(texto: string, ruta: string): unknown {
   return v;
 }
 
-export function jsonTexto(texto: string, ruta: string): string {
+export function jsonText(texto: string, ruta: string): string {
   const v = __jsonEn(texto, ruta);
   if (v === undefined || v === null) return "";
   if (typeof v === "object") return JSON.stringify(v);
   return String(v);
 }
-export function jsonNumero(texto: string, ruta: string): number {
+export function jsonInt(texto: string, ruta: string): number {
   const v = __jsonEn(texto, ruta);
   const n = Number(v);
   return Number.isFinite(n) ? Math.trunc(n) : 0;
 }
-export function jsonDecimal(texto: string, ruta: string): number {
+export function jsonFloat(texto: string, ruta: string): number {
   const v = __jsonEn(texto, ruta);
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 }
-export function jsonLargo(texto: string, ruta: string): number {
+export function jsonLen(texto: string, ruta: string): number {
   const v = __jsonEn(texto, ruta);
   if (Array.isArray(v)) return v.length;
   if (v !== null && typeof v === "object") return Object.keys(v).length;
@@ -659,26 +660,26 @@ export function jsonLargo(texto: string, ruta: string): number {
 // ALMACENES CON NOMBRE
 //
 // `store productos: Producto;` declara un almacén; el nombre se pasa como primer
-// argumento a los builtins de estado (`todos(productos)`), así que un módulo
+// argumento a los builtins de estado (`all(productos)`), así que un módulo
 // puede tener varios. Cada almacén tiene su propio backend, su propia tabla o
 // archivo y su propio contador de ids: la factoría cierra sobre el esquema en
 // vez de leer una constante global, que era lo que ataba el runtime a uno solo.
 // --------------------------------------------------------------------------
 
-export interface __Almacen {
+export interface __Store {
   nombre: string;
-  guardar(x: unknown): Promise<void>;
-  todos(): Promise<unknown[]>;
-  actualizar(i: number, x: unknown): Promise<void>;
-  borrar(i: number): Promise<void>;
+  save(x: unknown): Promise<void>;
+  all(): Promise<unknown[]>;
+  update(i: number, x: unknown): Promise<void>;
+  remove(i: number): Promise<void>;
 }
 
-const __almacenes: Record<string, __Almacen> = Object.create(null);
+const __stores: Record<string, __Store> = Object.create(null);
 
-export function __almacen(__nombre: string, E: __Schema): __Almacen {
+export function __store(__nombre: string, E: __Schema): __Store {
   // Idempotente: dos declaraciones del mismo nombre comparten instancia (el
   // bundle de servidor se importa una vez, pero la demo importa dos módulos).
-  const previo = __almacenes[__nombre];
+  const previo = __stores[__nombre];
   if (previo !== undefined) return previo;
 
   // Cuando el store no guarda registros (p.ej. `store Int;` o `store String;`) el
@@ -1048,27 +1049,27 @@ export function __almacen(__nombre: string, E: __Schema): __Almacen {
   }
 
 
-  const a: __Almacen = {
+  const a: __Store = {
     nombre: __nombre,
-    guardar: _guardar,
-    todos: _todos,
-    actualizar: _actualizar,
-    borrar: _borrar,
+    save: _guardar,
+    all: _todos,
+    update: _actualizar,
+    remove: _borrar,
   };
-  __almacenes[__nombre] = a;
+  __stores[__nombre] = a;
   return a;
 }
 
 // Los builtins del lenguaje toman el almacén como primer argumento.
-export function guardar(a: __Almacen, x: unknown): Promise<void> {
-  return a.guardar(x);
+export function save(a: __Store, x: unknown): Promise<void> {
+  return a.save(x);
 }
-export function todos(a: __Almacen): Promise<unknown[]> {
-  return a.todos();
+export function all(a: __Store): Promise<unknown[]> {
+  return a.all();
 }
-export function actualizar(a: __Almacen, i: number, x: unknown): Promise<void> {
-  return a.actualizar(i, x);
+export function update(a: __Store, i: number, x: unknown): Promise<void> {
+  return a.update(i, x);
 }
-export function borrar(a: __Almacen, i: number): Promise<void> {
-  return a.borrar(i);
+export function remove(a: __Store, i: number): Promise<void> {
+  return a.remove(i);
 }

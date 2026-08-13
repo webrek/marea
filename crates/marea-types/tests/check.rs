@@ -177,7 +177,7 @@ fn store_recursivo_no_crashea() {
     let errs = check_src(
         "type Nodo = { v: Int, sig: Nodo };\n\
          store almacen: Nodo;\n\
-         @server fn add(n: Nodo) { guardar(almacen, n); }",
+         @server fn poner(n: Nodo) { save(almacen, n); }",
     );
     assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
 }
@@ -602,30 +602,30 @@ fn store_del_servidor_tipa() {
     let errs = check_src(
         "type P = { t: String };\n\
          store almacen: P;\n\
-         @server fn pub2(t: String) { guardar(almacen, P { t: t }); }\n\
-         @server fn feed() -> List<P> { return todos(almacen); }",
+         @server fn pub2(t: String) { save(almacen, P { t: t }); }\n\
+         @server fn feed() -> List<P> { return all(almacen); }",
     );
     assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
 }
 
 #[test]
 fn estado_fuera_de_server_es_error() {
-    // 'todos(almacen)'/'guardar(almacen, )' desde @client tocarían el store del proceso
+    // 'all(almacen)'/'save(almacen, )' desde @client tocarían el store del proceso
     // equivocado: el typechecker lo rechaza.
-    let errs = check_src("@client fn main() { let d = todos(almacen); print(len(d)); }");
+    let errs = check_src("@client fn main() { let d = all(almacen); print(len(d)); }");
     assert!(has_code(&errs, "E_STATE_OFF_SERVER"), "códigos: {:?}", codes(&errs));
 }
 
 #[test]
 fn estado_en_server_es_valido() {
-    let errs = check_src("type P = { t: String };\n@server fn s() -> List<P> { guardar(almacen, P { t: \"a\" }); return todos(almacen); }");
+    let errs = check_src("type P = { t: String };\n@server fn s() -> List<P> { save(almacen, P { t: \"a\" }); return all(almacen); }");
     assert!(!has_code(&errs, "E_STATE_OFF_SERVER"), "códigos: {:?}", codes(&errs));
 }
 
 #[test]
 fn store_tipado_cierra_el_lavado_de_tipos() {
     // guardar un Int cuando el store es Post -> error (antes 'lavaba' tipos).
-    let errs = check_src("type Post = { a: String };\nstore almacen: Post;\n@server fn m() -> List<Post> { guardar(almacen, 99); return todos(almacen); }");
+    let errs = check_src("type Post = { a: String };\nstore almacen: Post;\n@server fn m() -> List<Post> { save(almacen, 99); return all(almacen); }");
     assert!(has_code(&errs, "E_ARG_TYPE"), "códigos: {:?}", codes(&errs));
 }
 
@@ -633,14 +633,14 @@ fn store_tipado_cierra_el_lavado_de_tipos() {
 fn guardar_sin_store_declarado_es_error() {
     // Con almacenes con nombre, usar uno no declarado es un nombre sin resolver:
     // más preciso que el antiguo "no hay store".
-    let errs = check_src("@server fn f() -> List<Int> { guardar(almacen, 1); return todos(almacen); }");
+    let errs = check_src("@server fn f() -> List<Int> { save(almacen, 1); return all(almacen); }");
     assert!(has_code(&errs, "E_UNRESOLVED_NAME"), "códigos: {:?}", codes(&errs));
 }
 
 // Pasar algo que no es un almacén donde va uno.
 #[test]
 fn el_primer_argumento_debe_ser_un_almacen() {
-    let errs = check_src("@server fn f(n: Int) { guardar(n, 1); }");
+    let errs = check_src("@server fn f(n: Int) { save(n, 1); }");
     assert!(has_code(&errs, "E_NO_STORE"), "códigos: {:?}", codes(&errs));
 }
 
@@ -650,8 +650,8 @@ fn varios_almacenes_conviven() {
     let errs = check_src(
         "type P = { a: Int };\ntype O = { b: String };\n\
          store productos: P;\nstore ordenes: O;\n\
-         @server fn f() { guardar(productos, P { a: 1 }); guardar(ordenes, O { b: \"x\" }); }\n\
-         @server fn g() -> List<O> { return todos(ordenes); }",
+         @server fn f() { save(productos, P { a: 1 }); save(ordenes, O { b: \"x\" }); }\n\
+         @server fn g() -> List<O> { return all(ordenes); }",
     );
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
@@ -662,7 +662,7 @@ fn no_se_puede_guardar_en_el_almacen_equivocado() {
     let errs = check_src(
         "type P = { a: Int };\ntype O = { b: String };\n\
          store productos: P;\nstore ordenes: O;\n\
-         @server fn f() { guardar(ordenes, P { a: 1 }); }",
+         @server fn f() { save(ordenes, P { a: 1 }); }",
     );
     assert!(has_code(&errs, "E_ARG_TYPE"), "{:?}", codes(&errs));
 }
@@ -675,38 +675,38 @@ fn dos_almacenes_con_el_mismo_nombre_es_error() {
 
 #[test]
 fn store_tipado_correcto_no_es_error() {
-    let errs = check_src("type Post = { a: String };\nstore almacen: Post;\n@server fn pub(a: String) { guardar(almacen, Post { a: a }); }\n@server fn feed() -> List<Post> { return todos(almacen); }");
+    let errs = check_src("type Post = { a: String };\nstore almacen: Post;\n@server fn pub(a: String) { save(almacen, Post { a: a }); }\n@server fn feed() -> List<Post> { return all(almacen); }");
     assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
 }
 
 #[test]
 fn actualizar_y_borrar_tipados() {
-    // actualizar(i, x): i Int, x del tipo del store; borrar(almacen, i): i Int.
-    let ok = check_src("type P = { a: Int };\nstore almacen: P;\n@server fn f() { actualizar(almacen, 0, P { a: 1 }); borrar(almacen, 1); }");
+    // update(i, x): i Int, x del tipo del store; remove(almacen, i): i Int.
+    let ok = check_src("type P = { a: Int };\nstore almacen: P;\n@server fn f() { update(almacen, 0, P { a: 1 }); remove(almacen, 1); }");
     assert!(ok.is_empty(), "no debería haber errores: {:?}", codes(&ok));
     // Valor de tipo equivocado en actualizar.
-    let bad = check_src("type P = { a: Int };\nstore almacen: P;\n@server fn f() { actualizar(almacen, 0, 99); }");
+    let bad = check_src("type P = { a: Int };\nstore almacen: P;\n@server fn f() { update(almacen, 0, 99); }");
     assert!(has_code(&bad, "E_ARG_TYPE"), "{:?}", codes(&bad));
     // Índice no-Int en borrar.
-    let bad2 = check_src("type P = { a: Int };\nstore almacen: P;\n@server fn f() { borrar(almacen, \"x\"); }");
+    let bad2 = check_src("type P = { a: Int };\nstore almacen: P;\n@server fn f() { remove(almacen, \"x\"); }");
     assert!(has_code(&bad2, "E_ARG_TYPE"), "{:?}", codes(&bad2));
 }
 
 #[test]
 fn actualizar_fuera_de_server_es_error() {
-    let errs = check_src("type P = { a: Int };\nstore almacen: P;\n@client fn f() { actualizar(almacen, 0, P { a: 1 }); }");
+    let errs = check_src("type P = { a: Int };\nstore almacen: P;\n@client fn f() { update(almacen, 0, P { a: 1 }); }");
     assert!(has_code(&errs, "E_STATE_OFF_SERVER"), "{:?}", codes(&errs));
 }
 
 #[test]
 fn atexto_es_string() {
-    let errs = check_src("@client fn f() { let s: String = aTexto(42); print(s); }");
+    let errs = check_src("@client fn f() { let s: String = text(42); print(s); }");
     assert!(errs.is_empty(), "no debería haber errores: {:?}", codes(&errs));
 }
 
 #[test]
 fn atexto_de_no_escalar_es_error() {
-    let errs = check_src("type P = { a: Int };\n@client fn f() { let s = aTexto(P { a: 1 }); print(s); }");
+    let errs = check_src("type P = { a: Int };\n@client fn f() { let s = text(P { a: 1 }); print(s); }");
     assert!(has_code(&errs, "E_ARG_TYPE"), "códigos: {:?}", codes(&errs));
 }
 
@@ -761,7 +761,7 @@ fn shadowing_de_parametro_en_bloque_anidado_es_valido() {
 // El builtin de escapado de HTML existe y tipa como String.
 #[test]
 fn escapar_es_un_builtin() {
-    let errs = check_src("@client fn f(s: String) -> String { return escapar(s); }");
+    let errs = check_src("@client fn f(s: String) -> String { return escape(s); }");
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
 
@@ -793,7 +793,7 @@ fn una_global_no_reactiva_si_es_visible_desde_server() {
 // del verificador en vez de código generado inválido.
 // `reactive x = llamadaRemota()` es ahora un RECURSO: la composición de las dos
 // fronteras. Antes se compilaba a `__memo(() => (await f()))` —un await en una
-// arrow no-async— y se acabó prohibiendo; ahora arranca en `Cargando` y se
+// arrow no-async— y se acabó prohibiendo; ahora arranca en `Loading` y se
 // resuelve solo, y el tipo obliga a cubrir los tres estados.
 #[test]
 fn un_reactive_con_llamada_es_un_recurso() {
@@ -803,19 +803,19 @@ fn un_reactive_con_llamada_es_un_recurso() {
          @client fn perfil(id: Int) -> Html {\n\
            reactive u = getUser(id);\n\
            return match u {\n\
-             Cargando => \"cargando\",\n\
-             Fallo => \"error\",\n\
+             Loading => \"cargando\",\n\
+             Failed => \"error\",\n\
              NotFound => \"no existe\",\n\
-             otro => escapar(otro.nombre),\n\
+             otro => escape(otro.nombre),\n\
            };\n\
          }",
     );
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
 
-// Y el tipo del recurso obliga de verdad: si no se cubren `Cargando` y `Fallo`,
-// lo que queda en el comodín sigue siendo una unión opaca —`Cargando | User |
-// Fallo`— y no se le puede leer un campo. La garantía no es un aviso: es que el
+// Y el tipo del recurso obliga de verdad: si no se cubren `Loading` y `Failed`,
+// lo que queda en el comodín sigue siendo una unión opaca —`Loading | User |
+// Failed`— y no se le puede leer un campo. La garantía no es un aviso: es que el
 // programa incompleto no compila.
 #[test]
 fn el_recurso_obliga_a_cubrir_cargando_y_fallo() {
@@ -824,7 +824,7 @@ fn el_recurso_obliga_a_cubrir_cargando_y_fallo() {
          @server fn getUser(id: Int) -> User | NotFound { return NotFound; }\n\
          @client fn perfil(id: Int) -> Html {\n\
            reactive u = getUser(id);\n\
-           return match u { NotFound => \"no\", otro => escapar(otro.nombre) };\n\
+           return match u { NotFound => \"no\", otro => escape(otro.nombre) };\n\
          }",
     );
     assert!(has_code(&errs, "E_FIELD_ON_UNION"), "{:?}", codes(&errs));
@@ -892,7 +892,7 @@ fn un_registro_es_subtipo_de_la_union_que_lo_contiene() {
         "type User = { nombre: String };\n\
          store almacen: User;\n\
          @server fn buscar(i: Int) -> User | NotFound {\n\
-             let us = todos(almacen);\n\
+             let us = all(almacen);\n\
              if i < len(us) { return us[i]; }\n\
              return NotFound;\n\
          }",
@@ -912,7 +912,7 @@ fn una_llamada_local_en_un_init_reactive_tambien_es_recurso() {
          @client fn main() -> Int {\n\
            reactive mut n = 0;\n\
            reactive t = doble(n);\n\
-           return match t { Cargando => 0, Fallo => 0, otro => otro };\n\
+           return match t { Loading => 0, Failed => 0, otro => otro };\n\
          }",
     );
     assert!(errs.is_empty(), "{:?}", codes(&errs));
@@ -932,7 +932,7 @@ fn una_global_no_reactiva_sigue_sin_poder_llamar() {
 #[test]
 fn los_builtins_sincronos_si_valen_en_un_init_reactive() {
     let errs = check_src(
-        "@client fn main() { reactive mut n = 0; reactive t = concat(\"n=\", aTexto(n)); print(t); }",
+        "@client fn main() { reactive mut n = 0; reactive t = concat(\"n=\", text(n)); print(t); }",
     );
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
@@ -1005,7 +1005,7 @@ fn un_dato_sin_escapar_no_llega_al_dom() {
 fn el_mismo_dato_escapado_si_llega() {
     let errs = check_src(
         "type Post = { texto: String };\n\
-         @client fn vista(p: Post) { render(concat(\"<li>\", escapar(p.texto))); }",
+         @client fn vista(p: Post) { render(concat(\"<li>\", escape(p.texto))); }",
     );
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
@@ -1028,24 +1028,24 @@ fn html_marca_una_cadena_como_segura() {
 }
 
 // Un número no puede contener marcado: su texto es seguro y el idioma
-// `concat(literal, aTexto(n))` sigue funcionando sin conversiones.
+// `concat(literal, text(n))` sigue funcionando sin conversiones.
 #[test]
 fn el_texto_de_un_numero_es_seguro() {
-    let errs = check_src("@client fn f(n: Int) { render(concat(\"n=\", aTexto(n))); }");
+    let errs = check_src("@client fn f(n: Int) { render(concat(\"n=\", text(n))); }");
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
 
 // Pero el de un String no: puede traer marcado.
 #[test]
 fn el_texto_de_un_string_no_es_seguro() {
-    let errs = check_src("@client fn f(s: String) { render(concat(\"x=\", aTexto(s))); }");
+    let errs = check_src("@client fn f(s: String) { render(concat(\"x=\", text(s))); }");
     assert!(has_code(&errs, "E_ARG_TYPE"), "{:?}", codes(&errs));
 }
 
 // Html vale donde se espera texto; lo contrario no, que es la garantía.
 #[test]
 fn html_es_subtipo_de_string_pero_no_al_reves() {
-    let errs = check_src("@client fn f(s: String) -> String { return escapar(s); }");
+    let errs = check_src("@client fn f(s: String) -> String { return escape(s); }");
     assert!(errs.is_empty(), "Html debe valer como String: {:?}", codes(&errs));
     let errs = check_src("@client fn f(s: String) -> Html { return s; }");
     assert!(has_code(&errs, "E_RETURN_TYPE_MISMATCH"), "{:?}", codes(&errs));
@@ -1066,7 +1066,7 @@ fn unknown_no_se_cuela_en_html() {
 fn un_campo_de_tipo_abierto_no_es_html() {
     let errs = check_src(
         "store almacen: Record;\n\
-         @server fn primero() -> Record { return todos(almacen)[0]; }\n\
+         @server fn primero() -> Record { return all(almacen)[0]; }\n\
          @client fn f() { let p = primero(); let x: Html = p.t; render(x); }",
     );
     assert!(!errs.is_empty(), "un campo abierto no puede ser Html");
@@ -1076,7 +1076,7 @@ fn un_campo_de_tipo_abierto_no_es_html() {
 #[test]
 fn un_match_heterogeneo_no_produce_html() {
     let errs = check_src(
-        "@client fn f(s: String, n: Int) { let x = match n { 1 => escapar(s), _ => s }; render(x); }",
+        "@client fn f(s: String, n: Int) { let x = match n { 1 => escape(s), _ => s }; render(x); }",
     );
     assert!(!errs.is_empty(), "el match heterogéneo no puede lavar a Html");
 }
@@ -1095,7 +1095,7 @@ fn la_vista_montada_debe_devolver_html() {
     let errs = check_src(
         "type P = { t: String };\n\
          store almacen: P;\n\
-         @server fn feed() -> List<P> { return todos(almacen); }\n\
+         @server fn feed() -> List<P> { return all(almacen); }\n\
          reactive mut posts = [];\n\
          @client fn vista() -> String { let ps = posts; return concat(\"<ul>\", ps[0].t); }",
     );
@@ -1126,28 +1126,28 @@ fn html_no_vale_como_parametro_remoto() {
 fn unir_conserva_el_tipo_del_elemento() {
     let errs = check_src(
         "type P = { t: String };\n\
-         fn f(a: List<P>, b: List<P>) -> List<P> { return unir(a, b); }",
+         fn f(a: List<P>, b: List<P>) -> List<P> { return concat(a, b); }",
     );
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
 
 #[test]
 fn unir_listas_de_tipos_distintos_es_error() {
-    let errs = check_src("fn f(a: List<Int>, b: List<String>) -> List<Int> { return unir(a, b); }");
+    let errs = check_src("fn f(a: List<Int>, b: List<String>) -> List<Int> { return concat(a, b); }");
     assert!(has_code(&errs, "E_LIST_HETEROGENEOUS"), "{:?}", codes(&errs));
 }
 
 #[test]
 fn agregar_exige_que_el_elemento_encaje() {
-    let ok = check_src("fn f(xs: List<Int>, x: Int) -> List<Int> { return agregar(xs, x); }");
+    let ok = check_src("fn f(xs: List<Int>, x: Int) -> List<Int> { return append(xs, x); }");
     assert!(ok.is_empty(), "{:?}", codes(&ok));
-    let mal = check_src("fn f(xs: List<Int>, s: String) -> List<Int> { return agregar(xs, s); }");
+    let mal = check_src("fn f(xs: List<Int>, s: String) -> List<Int> { return append(xs, s); }");
     assert!(has_code(&mal, "E_LIST_HETEROGENEOUS"), "{:?}", codes(&mal));
 }
 
 #[test]
 fn unir_sobre_algo_que_no_es_lista_es_error() {
-    let errs = check_src("fn f(a: Int, b: List<Int>) -> List<Int> { return unir(a, b); }");
+    let errs = check_src("fn f(a: Int, b: List<Int>) -> List<Int> { return concat(a, b); }");
     assert!(has_code(&errs, "E_ARG_TYPE"), "{:?}", codes(&errs));
 }
 
@@ -1157,8 +1157,8 @@ fn unir_sobre_algo_que_no_es_lista_es_error() {
 fn los_builtins_de_texto_tipan() {
     let errs = check_src(
         "fn f(t: String, q: String) -> Bool { \
-           if largo(q) < 1 { return true; } \
-           return contiene(minusculas(t), minusculas(q)); \
+           if len(q) < 1 { return true; } \
+           return contains(lower(t), lower(q)); \
          }",
     );
     assert!(errs.is_empty(), "{:?}", codes(&errs));
@@ -1185,7 +1185,7 @@ fn referenciar_un_almacen_desde_una_fn_sin_anotacion_es_error() {
 #[test]
 fn usar_el_almacen_desde_server_es_valido() {
     let errs = check_src(
-        "type P = { a: Int };\nstore cosas: P;\n@server fn f() -> Int { return len(todos(cosas)); }",
+        "type P = { a: Int };\nstore cosas: P;\n@server fn f() -> Int { return len(all(cosas)); }",
     );
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
@@ -1227,15 +1227,15 @@ fn los_campos_con_palabras_reservadas_de_sql_son_validos() {
 // el programa dice; y la lista blanca de destinos vive en el servidor.
 #[test]
 fn pedir_fuera_de_server_es_error() {
-    let errs = check_src("@client fn f() -> String { return pedir(\"https://ejemplo.com\"); }");
+    let errs = check_src("@client fn f() -> String { return fetch(\"https://ejemplo.com\"); }");
     assert!(has_code(&errs, "E_RED_OFF_SERVER"), "{:?}", codes(&errs));
-    let errs = check_src("fn f() -> String { return pedirPost(\"https://x.com\", \"{}\"); }");
+    let errs = check_src("fn f() -> String { return post(\"https://x.com\", \"{}\"); }");
     assert!(has_code(&errs, "E_RED_OFF_SERVER"), "{:?}", codes(&errs));
 }
 
 #[test]
 fn pedir_desde_server_es_valido() {
-    let errs = check_src("@server fn f() -> String { return pedir(\"https://ejemplo.com\"); }");
+    let errs = check_src("@server fn f() -> String { return fetch(\"https://ejemplo.com\"); }");
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
 
@@ -1245,8 +1245,8 @@ fn pedir_desde_server_es_valido() {
 fn leer_json_vale_en_el_cliente() {
     let errs = check_src(
         "@client fn f(c: String) -> Int { \
-           if jsonTexto(c, \"a.b\") != \"\" { return jsonNumero(c, \"n\"); } \
-           return jsonLargo(c, \"lista\"); \
+           if jsonText(c, \"a.b\") != \"\" { return jsonInt(c, \"n\"); } \
+           return jsonLen(c, \"lista\"); \
          }",
     );
     assert!(errs.is_empty(), "{:?}", codes(&errs));

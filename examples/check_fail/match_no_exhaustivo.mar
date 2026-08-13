@@ -10,7 +10,7 @@ store usuarios: User;
 
 @server
 fn buscar(id: Int) -> User | NotFound {
-    let usuarios = todos(usuarios);
+    let usuarios = all(usuarios);
     if id < len(usuarios) {
         return usuarios[id];
     }

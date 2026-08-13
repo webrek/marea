@@ -30,7 +30,7 @@ fn las_defensas_contra_ssrf_bloquean() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("crear dir");
 
-    let module = marea_syntax::parse("@server fn f(u: String) -> String { return pedir(u); }")
+    let module = marea_syntax::parse("@server fn f(u: String) -> String { return fetch(u); }")
         .expect("parsea");
     let app = marea_codegen::emit(&module);
     std::fs::write(format!("{dir}/runtime.ts"), app.runtime).expect("escribir");
@@ -53,12 +53,12 @@ const casos = [
 ];
 let bloqueados = 0;
 for (const u of casos) {{
-  try {{ await rt.pedir(u); }} catch {{ bloqueados++; }}
+  try {{ await rt.fetch(u); }} catch {{ bloqueados++; }}
 }}
 // Con lista blanca, un host público que no esté en ella también se rechaza.
 process.env.MAREA_HTTP_HOSTS = "api.ejemplo.com";
 let listaOk = 0;
-try {{ await rt.pedir("https://api.github.com/"); }} catch {{ listaOk = 1; }}
+try {{ await rt.fetch("https://api.github.com/"); }} catch {{ listaOk = 1; }}
 console.log("RESULTADO:" + JSON.stringify({{ bloqueados, total: casos.length, listaOk }}));
 "#
     );

@@ -19,19 +19,19 @@ store articulos: Articulo;
 store movimientos: Movimiento;
 
 @server fn alta(sku: String, nombre: String, precio: Int, etiquetas: List<String>) {
-    guardar(articulos, Articulo { sku: sku, nombre: nombre, precio: precio, activo: true, etiquetas: etiquetas });
-    guardar(movimientos, Movimiento { sku: sku, cantidad: 1 });
+    save(articulos, Articulo { sku: sku, nombre: nombre, precio: precio, activo: true, etiquetas: etiquetas });
+    save(movimientos, Movimiento { sku: sku, cantidad: 1 });
 }
-@server fn catalogo() -> List<Articulo> { return todos(articulos); }
-@server fn bitacora() -> List<Movimiento> { return todos(movimientos); }
+@server fn catalogo() -> List<Articulo> { return all(articulos); }
+@server fn bitacora() -> List<Movimiento> { return all(movimientos); }
 @server fn desactivar(i: Int) {
-    let xs = todos(articulos);
+    let xs = all(articulos);
     if i < len(xs) {
         let a = xs[i];
-        actualizar(articulos, i, Articulo { sku: a.sku, nombre: a.nombre, precio: a.precio, activo: false, etiquetas: a.etiquetas });
+        update(articulos, i, Articulo { sku: a.sku, nombre: a.nombre, precio: a.precio, activo: false, etiquetas: a.etiquetas });
     }
 }
-@server fn eliminar(i: Int) { borrar(articulos, i); }
+@server fn eliminar(i: Int) { remove(articulos, i); }
 "#;
 
 fn hay_node() -> bool {

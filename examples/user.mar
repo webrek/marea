@@ -11,7 +11,7 @@ store usuarios: User;
 
 @server
 fn getUser(id: UserId) -> User | NotFound {
-    let usuarios = todos(usuarios);
+    let usuarios = all(usuarios);
     if id < len(usuarios) {
         return usuarios[id];
     }
@@ -29,6 +29,6 @@ fn perfil(id: UserId) {
     // un 'match', que estrecha cada rama a su variante.
     match usuario {
         NotFound => render("Usuario no encontrado"),
-        _ => render(escapar(usuario.nombre)),
+        _ => render(escape(usuario.nombre)),
     }
 }

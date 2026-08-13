@@ -13,8 +13,8 @@ use std::process::{Command, Stdio};
 const FUENTE: &str = r#"
 type Post = { autor: String, likes: Int };
 store posts: Post;
-@server fn publicar(autor: String, likes: Int) { guardar(posts, Post { autor: autor, likes: likes }); }
-@server fn feed() -> List<Post> { return todos(posts); }
+@server fn publicar(autor: String, likes: Int) { save(posts, Post { autor: autor, likes: likes }); }
+@server fn feed() -> List<Post> { return all(posts); }
 @client fn vista() -> Html { return "<p>x</p>"; }
 "#;
 

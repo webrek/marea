@@ -36,8 +36,10 @@ pub struct AppProject {
 }
 
 /// Builtins provistos por el runtime; no se transpilan ni se registran.
-const BUILTINS: &str = "{ __almacen, __register, __malFormado, __rpc, print, concat, render, len, aTexto, escapar, html, __div, __rem, unir, agregar, largo, contiene, minusculas, pedir, pedirPost, jsonTexto, jsonNumero, jsonDecimal, jsonLargo, __index, \
-     guardar, todos, actualizar, borrar, __marea_is, __signal, __memo, __recurso, __effect }";
+const BUILTINS: &str = "{ __store, __register, __badRequest, __rpc, print, concat, render, len, \
+     text, escape, html, __div, __rem, append, contains, lower, fetch, post, jsonText, \
+     jsonInt, jsonFloat, jsonLen, __index, save, all, update, remove, __marea_is, \
+     __signal, __memo, __resource, __effect }";
 
 /// Los alias de `type` del módulo, para resolver los tipos declarados al emitir
 /// los validadores del límite de red.
@@ -233,7 +235,7 @@ fn emit_client_js(
             s.push_str(&format!("const {} = __signal({init});\n", l.name));
         } else {
             if es_recurso(&l.value) {
-                s.push_str(&format!("const {} = __recurso(async () => {init});\n", l.name));
+                s.push_str(&format!("const {} = __resource(async () => {init});\n", l.name));
             } else {
                 s.push_str(&format!("const {} = __memo(() => {init});\n", l.name));
             }
@@ -622,7 +624,7 @@ fn emit_server(
     // Un almacén por `store nombre: T;`. Vive solo aquí: el verificador ya
     // impide usar el estado del servidor fuera de @server.
     for (nombre, esquema) in stores {
-        s.push_str(&format!("const {nombre} = __almacen({}, {esquema});\n", js_string(nombre)));
+        s.push_str(&format!("const {nombre} = __store({}, {esquema});\n", js_string(nombre)));
     }
     if !stores.is_empty() {
         s.push('\n');
@@ -657,12 +659,12 @@ fn emit_server(
                 continue;
             }
             checks.push_str(&format!(
-                " if (!({v})) __malFormado(\"argumento {}\");",
+                " if (!({v})) __badRequest(\"argumento {}\");",
                 i + 1
             ));
         }
         s.push_str(&format!(
-            "__register(\"{}\", (__args) => {{ if (__args.length !== {n}) __malFormado(\"aridad\");{checks} return {}({}); }});\n\n",
+            "__register(\"{}\", (__args) => {{ if (__args.length !== {n}) __badRequest(\"aridad\");{checks} return {}({}); }});\n\n",
             f.name,
             f.name,
             pass.join(", ")
@@ -805,9 +807,9 @@ fn es_recurso(e: &Expr) -> bool {
 fn is_sync_builtin_name(name: &str) -> bool {
     matches!(
         name,
-        "print" | "concat" | "render" | "len" | "aTexto" | "escapar" | "html"
-            | "unir" | "agregar" | "largo" | "contiene" | "minusculas"
-            | "jsonTexto" | "jsonNumero" | "jsonDecimal" | "jsonLargo"
+        "print" | "concat" | "render" | "len" | "text" | "escape" | "html"
+            | "concat" | "append" | "len" | "contains" | "lower"
+            | "jsonText" | "jsonInt" | "jsonFloat" | "jsonLen"
     )
 }
 
@@ -825,7 +827,7 @@ fn emit_stmt(stmt: &Stmt, indent: usize, reactive: &HashSet<String>) -> String {
             if l.mutable {
                 format!("{p}const {} = __signal({init});", l.name)
             } else if es_recurso(&l.value) {
-                format!("{p}const {} = __recurso(async () => {init});", l.name)
+                format!("{p}const {} = __resource(async () => {init});", l.name)
             } else {
                 format!("{p}const {} = __memo(() => {init});", l.name)
             }
@@ -1039,9 +1041,9 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
             let is_sync_builtin = matches!(
                 callee.as_ref(),
                 Expr::Ident { name, .. }
-                    if matches!(name.as_str(), "print" | "concat" | "render" | "len" | "aTexto" | "escapar" | "html"
-                    | "unir" | "agregar" | "largo" | "contiene" | "minusculas"
-                    | "jsonTexto" | "jsonNumero" | "jsonDecimal" | "jsonLargo")
+                    if matches!(name.as_str(), "print" | "concat" | "render" | "len" | "text" | "escape" | "html"
+                    | "concat" | "append" | "len" | "contains" | "lower"
+                    | "jsonText" | "jsonInt" | "jsonFloat" | "jsonLen")
             );
             if is_sync_builtin {
                 format!("{}({})", callee_ts, a.join(", "))

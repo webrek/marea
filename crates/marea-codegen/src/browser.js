@@ -49,7 +49,7 @@ export function __signal(initial) {
   const subs = new Set();
   return {
     get() {
-      if (__currentSub) subs.add(__currentSub);
+      if (__currentSub) subs.append(__currentSub);
       return value;
     },
     set(v) {
@@ -73,14 +73,14 @@ export function __effect(fn) {
       }
     },
     invalidate() {
-      __pending.add(reaction);
+      __pending.append(reaction);
     },
   };
   reaction.execute();
 }
 
 // Gemelo de runtime.ts: un recurso arranca en Cargando y se resuelve solo.
-export function __recurso(f) {
+export function __resource(f) {
   const s = __signal({ $tag: "Cargando" });
   Promise.resolve()
     .then(f)
@@ -108,7 +108,7 @@ export function __memo(fn) {
   };
   return {
     get() {
-      if (__currentSub) subs.add(__currentSub);
+      if (__currentSub) subs.append(__currentSub);
       if (dirty) {
         const prev = __currentSub;
         __currentSub = reaction;
@@ -131,13 +131,16 @@ export function __memo(fn) {
 export function print(x) {
   console.log(x);
 }
+// Gemelos de runtime.ts: concat y len valen para texto y para listas.
 export function concat(a, b) {
-  return a + b;
+  if (Array.isArray(a) && Array.isArray(b)) return a.concat(b);
+  return String(a) + String(b);
 }
-export function len(xs) {
-  return xs.length;
+export function len(x) {
+  if (Array.isArray(x)) return x.length;
+  return Array.from(String(x)).length;
 }
-export function aTexto(x) {
+export function text(x) {
   if (x !== null && typeof x === "object" && typeof x.$tag === "string") return x.$tag;
   return String(x);
 }
@@ -153,7 +156,7 @@ export function __rem(a, b) {
   return a % b;
 }
 
-export function escapar(x) {
+export function escape(x) {
   return String(x)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -169,20 +172,16 @@ export function html(s) {
 }
 // --- listas: construir en runtime (el lenguaje no tiene bucles ni cierres, así
 // que sin esto una función no puede devolver un subconjunto filtrado) ---
-export function unir(a, b) {
-  return a.concat(b);
-}
-export function agregar(xs, x) {
+
+export function append(xs, x) {
   return xs.concat([x]);
 }
 // --- texto ---
-export function largo(s) {
-  return Array.from(String(s)).length;
-}
-export function contiene(s, sub) {
+
+export function contains(s, sub) {
   return String(s).includes(String(sub));
 }
-export function minusculas(s) {
+export function lower(s) {
   return String(s).toLowerCase();
 }
 export function __index(xs, i) {

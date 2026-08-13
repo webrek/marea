@@ -44,7 +44,7 @@ store resenas: Resena;
 @server
 fn publicar(titulo: String, categoria: String, precio: Int, descuento: Int,
             stock: Int, vendedor: String, reputacion: Int, envioGratis: Bool) {
-    guardar(productos, Producto {
+    save(productos, Producto {
         titulo: titulo, categoria: categoria, precio: precio,
         descuento: descuento, stock: stock, vendedor: vendedor,
         reputacion: reputacion, envioGratis: envioGratis, vendidos: 0
@@ -53,18 +53,18 @@ fn publicar(titulo: String, categoria: String, precio: Int, descuento: Int,
 
 @server
 fn catalogo() -> List<Producto> {
-    return todos(productos);
+    return all(productos);
 }
 
 // Búsqueda por texto + categoría + tope de precio, devuelta como DATOS.
 @server
 fn buscar(q: String, cat: String, tope: Int, soloGratis: Bool, i: Int) -> List<Producto> {
-    let ps = todos(productos);
+    let ps = all(productos);
     if i < len(ps) {
         let p = ps[i];
         let resto = buscar(q, cat, tope, soloGratis, i + 1);
         if coincide(p, q, cat, tope, soloGratis) {
-            return unir([p], resto);
+            return concat([p], resto);
         }
         return resto;
     }
@@ -73,7 +73,7 @@ fn buscar(q: String, cat: String, tope: Int, soloGratis: Bool, i: Int) -> List<P
 
 fn coincide(p: Producto, q: String, cat: String, tope: Int, soloGratis: Bool) -> Bool {
     if q != "" {
-        if !contiene(minusculas(p.titulo), minusculas(q)) { return false; }
+        if !contains(lower(p.titulo), lower(q)) { return false; }
     }
     if cat != "" {
         if p.categoria != cat { return false; }
@@ -97,20 +97,20 @@ fn precioFinal(p: Producto) -> Int {
 // Compra: valida stock y cantidad, descuenta y registra la orden en SU almacén.
 @server
 fn comprar(idx: Int, quien: String, cantidad: Int) -> Int {
-    let ps = todos(productos);
+    let ps = all(productos);
     if idx < 0 { return 0; }
     if idx < len(ps) {
         let p = ps[idx];
         if cantidad > 0 {
             if p.stock >= cantidad {
                 let total = precioFinal(p) * cantidad;
-                actualizar(productos, idx, Producto {
+                update(productos, idx, Producto {
                     titulo: p.titulo, categoria: p.categoria, precio: p.precio,
                     descuento: p.descuento, stock: p.stock - cantidad,
                     vendedor: p.vendedor, reputacion: p.reputacion,
                     envioGratis: p.envioGratis, vendidos: p.vendidos + cantidad
                 });
-                guardar(ordenes, Orden {
+                save(ordenes, Orden {
                     titulo: p.titulo, comprador: quien,
                     cantidad: cantidad, total: total, refIdx: idx
                 });
@@ -123,14 +123,14 @@ fn comprar(idx: Int, quien: String, cantidad: Int) -> Int {
 
 @server
 fn ventas() -> List<Orden> {
-    return todos(ordenes);
+    return all(ordenes);
 }
 
 @server
 fn calificar(idx: Int, quien: String, estrellas: Int, texto: String) {
     if estrellas > 0 {
         if estrellas < 6 {
-            guardar(resenas, Resena {
+            save(resenas, Resena {
                 quien: quien, texto: texto, estrellas: estrellas, refIdx: idx
             });
         }
@@ -140,7 +140,7 @@ fn calificar(idx: Int, quien: String, estrellas: Int, texto: String) {
 // Promedio de estrellas de un producto: recorre SOLO el almacén de reseñas.
 @server
 fn calificacion(idx: Int) -> Int {
-    let rs = todos(resenas);
+    let rs = all(resenas);
     return promedio(rs, 0, idx, 0, 0);
 }
 
@@ -158,16 +158,16 @@ fn promedio(rs: List<Resena>, i: Int, idx: Int, suma: Int, cuenta: Int) -> Int {
 
 @server
 fn preguntar(idx: Int, quien: String, texto: String) {
-    guardar(preguntas, Pregunta { quien: quien, texto: texto, refIdx: idx });
+    save(preguntas, Pregunta { quien: quien, texto: texto, refIdx: idx });
 }
 
 @server
 fn preguntasDe(idx: Int, i: Int) -> List<Pregunta> {
-    let qs = todos(preguntas);
+    let qs = all(preguntas);
     if i < len(qs) {
         let q = qs[i];
         let resto = preguntasDe(idx, i + 1);
-        if q.refIdx == idx { return unir([q], resto); }
+        if q.refIdx == idx { return concat([q], resto); }
         return resto;
     }
     return [];
@@ -190,18 +190,18 @@ reactive mut aviso = "";
 // --------------------------------------------------------------------------
 
 fn dos(n: Int) -> Html {
-    if n < 10 { return concat("0", aTexto(n)); }
-    return aTexto(n);
+    if n < 10 { return concat("0", text(n)); }
+    return text(n);
 }
 
 fn tres(n: Int) -> Html {
-    if n < 10 { return concat("00", aTexto(n)); }
-    if n < 100 { return concat("0", aTexto(n)); }
-    return aTexto(n);
+    if n < 10 { return concat("00", text(n)); }
+    if n < 100 { return concat("0", text(n)); }
+    return text(n);
 }
 
 fn miles(n: Int) -> Html {
-    if n < 1000 { return aTexto(n); }
+    if n < 1000 { return text(n); }
     return concat(miles(n / 1000), concat(",", tres(n % 1000)));
 }
 
@@ -227,8 +227,8 @@ fn insignia(p: Producto) -> Html {
 
 fn etiquetaStock(s: Int) -> Html {
     if s < 1 { return "<span class=\"agotado\">Sin stock</span>"; }
-    if s < 5 { return concat("<span class=\"pocas\">¡Últimas ", concat(aTexto(s), " disponibles!</span>")); }
-    return concat("<span class=\"hay\">", concat(aTexto(s), " disponibles</span>"));
+    if s < 5 { return concat("<span class=\"pocas\">¡Últimas ", concat(text(s), " disponibles!</span>")); }
+    return concat("<span class=\"hay\">", concat(text(s), " disponibles</span>"));
 }
 
 fn precioBloque(p: Producto) -> Html {
@@ -237,7 +237,7 @@ fn precioBloque(p: Producto) -> Html {
             concat("<p class=\"antes\">", concat(dinero(p.precio), "</p>")),
             concat(
                 concat("<p class=\"precio\">", dinero(precioFinal(p))),
-                concat("<span class=\"off\">", concat(aTexto(p.descuento), "% OFF</span></p>"))
+                concat("<span class=\"off\">", concat(text(p.descuento), "% OFF</span></p>"))
             )
         );
     }
@@ -247,18 +247,18 @@ fn precioBloque(p: Producto) -> Html {
 fn tarjeta(p: Producto, idx: Int) -> Html {
     return concat(
         concat(
-            concat("<li class=\"card\"><h3>", concat(escapar(p.titulo), "</h3>")),
+            concat("<li class=\"card\"><h3>", concat(escape(p.titulo), "</h3>")),
             precioBloque(p)
         ),
         concat(
             concat(
-                concat("<p class=\"vend\">", concat(escapar(p.vendedor), " ")),
+                concat("<p class=\"vend\">", concat(escape(p.vendedor), " ")),
                 concat(estrellitas(p.reputacion), concat(" ", insignia(p)))
             ),
             concat(
                 concat("</p><p class=\"st\">", concat(etiquetaStock(p.stock), "</p>")),
                 concat(
-                    concat("<button onclick=\"marea.agregarAlCarrito(", aTexto(idx)),
+                    concat("<button onclick=\"marea.agregarAlCarrito(", text(idx)),
                     ")\">Agregar al carrito</button></li>"
                 )
             )
@@ -279,10 +279,10 @@ fn vista() -> Html {
     let n = len(xs);
     return concat(
         concat(
-            concat("<p class=\"aviso\">", concat(escapar(aviso), "</p>")),
+            concat("<p class=\"aviso\">", concat(escape(aviso), "</p>")),
             concat(
-                concat("<p class=\"cuenta\">", aTexto(n)),
-                concat(" resultados · carrito: ", concat(aTexto(carritoCant),
+                concat("<p class=\"cuenta\">", text(n)),
+                concat(" resultados · carrito: ", concat(text(carritoCant),
                     concat(" (", concat(dinero(carritoTotal), ")</p>"))))
             )
         ),
@@ -315,7 +315,7 @@ fn agregarAlCarrito(i: Int) {
         if p.stock > 0 {
             carritoCant = carritoCant + 1;
             carritoTotal = carritoTotal + precioFinal(p);
-            aviso = concat("Agregado: ", escapar(p.titulo));
+            aviso = concat("Agregado: ", escape(p.titulo));
         } else {
             aviso = "Ese producto está sin stock";
         }

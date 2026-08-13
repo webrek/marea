@@ -1,11 +1,11 @@
 // Generado por Marea — lado servidor.
-import { __almacen, __register, __malFormado, __rpc, print, concat, render, len, aTexto, escapar, html, __div, __rem, unir, agregar, largo, contiene, minusculas, pedir, pedirPost, jsonTexto, jsonNumero, jsonDecimal, jsonLargo, __index, guardar, todos, actualizar, borrar, __marea_is, __signal, __memo, __recurso, __effect } from "./runtime.ts";
+import { __store, __register, __badRequest, __rpc, print, concat, render, len, text, escape, html, __div, __rem, append, contains, lower, fetch, post, jsonText, jsonInt, jsonFloat, jsonLen, __index, save, all, update, remove, __marea_is, __signal, __memo, __resource, __effect } from "./runtime.ts";
 
-const publicaciones = __almacen("publicaciones", { table: "publicaciones", columns: [{ name: "autor", kind: "text" }, { name: "texto", kind: "text" }, { name: "likes", kind: "int" }] });
+const publicaciones = __store("publicaciones", { table: "publicaciones", columns: [{ name: "autor", kind: "text" }, { name: "texto", kind: "text" }, { name: "likes", kind: "int" }] });
 
 // fn fila(p: Post, i: Int) -> Html
 async function fila(p: Post, i: number) {
-  return concat(concat(concat("<li class=\"post\"><span class=\"autor\">@", escapar(p.autor)), concat("</span> ", escapar(p.texto))), concat(concat(concat(" <button class=\"like\" onclick=\"marea.darLike(", aTexto(i)), concat(")\">♥ ", aTexto(p.likes))), "</button></li>"));
+  return concat(concat(concat("<li class=\"post\"><span class=\"autor\">@", escape(p.autor)), concat("</span> ", escape(p.texto))), concat(concat(concat(" <button class=\"like\" onclick=\"marea.darLike(", text(i)), concat(")\">♥ ", text(p.likes))), "</button></li>"));
 }
 
 // fn filas(ps: List<Post>, i: Int) -> Html
@@ -18,23 +18,23 @@ async function filas(ps: Post[], i: number) {
 
 // @server fn publicar(autor: String, texto: String)
 async function publicar(autor: string, texto: string) {
-  (await guardar(publicaciones, { autor: autor, texto: texto, likes: 0 }));
+  (await save(publicaciones, { autor: autor, texto: texto, likes: 0 }));
 }
 
-__register("publicar", (__args) => { if (__args.length !== 2) __malFormado("aridad"); if (!(typeof __args[0] === "string")) __malFormado("argumento 1"); if (!(typeof __args[1] === "string")) __malFormado("argumento 2"); return publicar(__args[0], __args[1]); });
+__register("publicar", (__args) => { if (__args.length !== 2) __badRequest("aridad"); if (!(typeof __args[0] === "string")) __badRequest("argumento 1"); if (!(typeof __args[1] === "string")) __badRequest("argumento 2"); return publicar(__args[0], __args[1]); });
 
 // @server fn like(i: Int)
 async function like(i: number) {
-  const p = __index((await todos(publicaciones)), i);
-  (await actualizar(publicaciones, i, { autor: p.autor, texto: p.texto, likes: (p.likes + 1) }));
+  const p = __index((await all(publicaciones)), i);
+  (await update(publicaciones, i, { autor: p.autor, texto: p.texto, likes: (p.likes + 1) }));
 }
 
-__register("like", (__args) => { if (__args.length !== 1) __malFormado("aridad"); if (!(Number.isSafeInteger(__args[0]))) __malFormado("argumento 1"); return like(__args[0]); });
+__register("like", (__args) => { if (__args.length !== 1) __badRequest("aridad"); if (!(Number.isSafeInteger(__args[0]))) __badRequest("argumento 1"); return like(__args[0]); });
 
 // @server fn feed() -> List<Post>
 async function feed() {
-  return (await todos(publicaciones));
+  return (await all(publicaciones));
 }
 
-__register("feed", (__args) => { if (__args.length !== 0) __malFormado("aridad"); return feed(); });
+__register("feed", (__args) => { if (__args.length !== 0) __badRequest("aridad"); return feed(); });
 

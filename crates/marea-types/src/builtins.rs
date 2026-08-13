@@ -32,12 +32,12 @@ pub fn lookup(name: &str) -> Option<Ty> {
         }),
         // Longitud de una lista.
         "len" => Some(Ty::Fn {
-            params: vec![Ty::List(Box::new(Ty::Unknown))],
+            params: vec![Ty::Unknown],
             ret: Box::new(Ty::Int),
             location: None,
         }),
         // Convierte cualquier valor a su representación textual.
-        "aTexto" => Some(Ty::Fn {
+        "text" => Some(Ty::Fn {
             params: vec![Ty::Unknown],
             ret: Box::new(Ty::String),
             location: None,
@@ -46,7 +46,7 @@ pub fn lookup(name: &str) -> Option<Ty> {
         // HTML se construye concatenando y `render` lo inyecta tal cual: sin
         // esto, cualquier dato que haya cruzado el RPC (que no valida tipos)
         // se ejecuta como marcado en el navegador de todos los visitantes.
-        "escapar" => Some(Ty::Fn {
+        "escape" => Some(Ty::Fn {
             params: vec![Ty::Unknown],
             ret: Box::new(Ty::Html),
             location: None,
@@ -59,69 +59,56 @@ pub fn lookup(name: &str) -> Option<Ty> {
             location: None,
         }),
         // Estado del servidor: 'guardar(x)' añade al store; 'todos()' lo lee.
-        "guardar" => Some(Ty::Fn {
+        "save" => Some(Ty::Fn {
             params: vec![Ty::Unknown],
             ret: Box::new(Ty::Unit),
             location: None,
         }),
-        "todos" => Some(Ty::Fn {
+        "all" => Some(Ty::Fn {
             params: vec![],
             ret: Box::new(Ty::List(Box::new(Ty::Unknown))),
             location: None,
         }),
-        "actualizar" => Some(Ty::Fn {
+        "update" => Some(Ty::Fn {
             params: vec![Ty::Int, Ty::Unknown],
             ret: Box::new(Ty::Unit),
             location: None,
         }),
-        "borrar" => Some(Ty::Fn {
+        "remove" => Some(Ty::Fn {
             params: vec![Ty::Int],
             ret: Box::new(Ty::Unit),
             location: None,
         }),
         // --- listas ---
-        // `unir`/`agregar` se tipan aparte en `check_call` para conservar el
-        // tipo del elemento (el verificador no tiene genéricos). Estas firmas
-        // son la de reserva.
-        "unir" => Some(Ty::Fn {
-            params: vec![
-                Ty::List(Box::new(Ty::Unknown)),
-                Ty::List(Box::new(Ty::Unknown)),
-            ],
-            ret: Box::new(Ty::List(Box::new(Ty::Unknown))),
-            location: None,
-        }),
-        "agregar" => Some(Ty::Fn {
+        // `concat` y `append` se tipan aparte en `check_call` para conservar el
+        // tipo del elemento (el verificador no tiene genéricos). Esta firma es
+        // la de reserva.
+        "append" => Some(Ty::Fn {
             params: vec![Ty::List(Box::new(Ty::Unknown)), Ty::Unknown],
             ret: Box::new(Ty::List(Box::new(Ty::Unknown))),
             location: None,
         }),
         // --- texto ---
-        "largo" => Some(Ty::Fn {
-            params: vec![Ty::String],
-            ret: Box::new(Ty::Int),
-            location: None,
-        }),
-        "contiene" => Some(Ty::Fn {
+        "contains" => Some(Ty::Fn {
             params: vec![Ty::String, Ty::String],
             ret: Box::new(Ty::Bool),
             location: None,
         }),
-        "minusculas" => Some(Ty::Fn {
+        "lower" => Some(Ty::Fn {
             params: vec![Ty::String],
             ret: Box::new(Ty::String),
             location: None,
         }),
         // --- red saliente (solo @server) ---
-        // `pedir(url)` hace un GET y devuelve el cuerpo; `pedirPost(url, cuerpo)`
+        // `fetch(url)` hace un GET y devuelve el cuerpo; `post(url, cuerpo)`
         // manda JSON. Son el puente a servicios externos: sin ellos el lenguaje
         // solo sabe hablar con su propio store y su propio cliente.
-        "pedir" => Some(Ty::Fn {
+        "fetch" => Some(Ty::Fn {
             params: vec![Ty::String],
             ret: Box::new(Ty::String),
             location: None,
         }),
-        "pedirPost" => Some(Ty::Fn {
+        "post" => Some(Ty::Fn {
             params: vec![Ty::String, Ty::String],
             ret: Box::new(Ty::String),
             location: None,
@@ -129,22 +116,22 @@ pub fn lookup(name: &str) -> Option<Ty> {
         // --- lectura de JSON ---
         // El lenguaje no tiene tipos dinámicos, así que una respuesta se lee por
         // ruta: `jsonTexto(cuerpo, "current.time")`, `jsonNumero(c, "a.0.b")`.
-        "jsonTexto" => Some(Ty::Fn {
+        "jsonText" => Some(Ty::Fn {
             params: vec![Ty::String, Ty::String],
             ret: Box::new(Ty::String),
             location: None,
         }),
-        "jsonNumero" => Some(Ty::Fn {
+        "jsonInt" => Some(Ty::Fn {
             params: vec![Ty::String, Ty::String],
             ret: Box::new(Ty::Int),
             location: None,
         }),
-        "jsonDecimal" => Some(Ty::Fn {
+        "jsonFloat" => Some(Ty::Fn {
             params: vec![Ty::String, Ty::String],
             ret: Box::new(Ty::Float),
             location: None,
         }),
-        "jsonLargo" => Some(Ty::Fn {
+        "jsonLen" => Some(Ty::Fn {
             params: vec![Ty::String, Ty::String],
             ret: Box::new(Ty::Int),
             location: None,
@@ -179,24 +166,24 @@ pub const VALUE_NAMES: &[&str] = &[
     "concat",
     "render",
     "len",
-    "aTexto",
-    "escapar",
+    "text",
+    "escape",
     "html",
-    "guardar",
-    "todos",
-    "actualizar",
-    "borrar",
-    "unir",
-    "agregar",
-    "largo",
-    "contiene",
-    "minusculas",
-    "pedir",
-    "pedirPost",
-    "jsonTexto",
-    "jsonNumero",
-    "jsonDecimal",
-    "jsonLargo",
+    "save",
+    "all",
+    "update",
+    "remove",
+    "concat",
+    "append",
+    "len",
+    "contains",
+    "lower",
+    "fetch",
+    "post",
+    "jsonText",
+    "jsonInt",
+    "jsonFloat",
+    "jsonLen",
     "NotFound",
 ];
 

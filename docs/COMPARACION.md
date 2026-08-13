@@ -61,17 +61,17 @@ store Post;                                   // ← persistencia: una línea
 
 @server
 fn publicar(autor: String, texto: String) {
-    guardar(Post { autor: autor, texto: texto, likes: 0 });
+    save(Post { autor: autor, texto: texto, likes: 0 });
 }
 
 @server
 fn like(i: Int) {
-    let p = todos()[i];
-    actualizar(i, Post { autor: p.autor, texto: p.texto, likes: p.likes + 1 });
+    let p = all()[i];
+    update(i, Post { autor: p.autor, texto: p.texto, likes: p.likes + 1 });
 }
 
 @server
-fn feed() -> List<Post> { return todos(); }
+fn feed() -> List<Post> { return all(); }
 
 @client
 fn main() {

@@ -203,7 +203,7 @@ fn app_reactiva_de_modulo_es_signal() {
 
 #[test]
 fn app_cliente_es_js_sin_tipos_ni_imports_node() {
-    let a = app("@server fn feed() -> List<Int> { return todos(almacen); }\n@client fn main() { feed(); }");
+    let a = app("@server fn feed() -> List<Int> { return all(almacen); }\n@client fn main() { feed(); }");
     // El cliente de navegador NO importa Node ni lleva anotaciones de tipo.
     assert!(!a.client_js.contains("node:http"), "{}", a.client_js);
     assert!(!a.client_js.contains(": number"), "{}", a.client_js);
@@ -227,7 +227,7 @@ fn app_arranca_main_y_monta_vista() {
 
 #[test]
 fn app_servidor_sirve_estaticos() {
-    let a = app("@server fn feed() -> List<Int> { return todos(almacen); }");
+    let a = app("@server fn feed() -> List<Int> { return all(almacen); }");
     // El runtime Node sirve estáticos (la app vive en el mismo origen que el RPC).
     assert!(a.runtime.contains("__serveStatic"), "{}", a.runtime);
     assert!(a.runtime.contains("MAREA_WEB_ROOT"), "{}", a.runtime);
@@ -238,18 +238,18 @@ fn app_servidor_sirve_estaticos() {
 
 #[test]
 fn store_builtins_son_async_y_se_awaitan() {
-    let p = build("@server fn g(x: Int) { guardar(almacen, x); } @server fn t() -> List<Int> { return todos(almacen); }");
+    let p = build("@server fn g(x: Int) { save(almacen, x); } @server fn t() -> List<Int> { return all(almacen); }");
     // Con backends de BD, las operaciones del store son asíncronas (I/O).
-    assert!(p.runtime.contains("export function guardar"), "{}", p.runtime);
-    assert!(p.runtime.contains("export function todos"), "{}", p.runtime);
+    assert!(p.runtime.contains("export function save"), "{}", p.runtime);
+    assert!(p.runtime.contains("export function all"), "{}", p.runtime);
     // El call site las espera.
-    assert!(p.server.contains("(await guardar(almacen, x))"), "{}", p.server);
-    assert!(p.server.contains("(await todos(almacen))"), "{}", p.server);
+    assert!(p.server.contains("(await save(almacen, x))"), "{}", p.server);
+    assert!(p.server.contains("(await all(almacen))"), "{}", p.server);
 }
 
 #[test]
 fn store_persiste_a_disco() {
-    let p = build("@server fn g(x: Int) { guardar(almacen, x); }");
+    let p = build("@server fn g(x: Int) { save(almacen, x); }");
     // El runtime carga el store del archivo y lo reescribe en cada guardar.
     assert!(p.runtime.contains("readFileSync"), "{}", p.runtime);
     assert!(p.runtime.contains("writeFileSync"), "{}", p.runtime);
@@ -271,7 +271,7 @@ fn handler_valida_aridad_de_args() {
     // para que un argumento faltante no se cuele como undefined.
     let p = build("@server fn pub(a: String, b: Int) {}");
     assert!(
-        p.server.contains(r#"if (__args.length !== 2) __malFormado("aridad")"#),
+        p.server.contains(r#"if (__args.length !== 2) __badRequest("aridad")"#),
         "{}",
         p.server
     );
@@ -302,7 +302,7 @@ fn el_validador_recorre_listas_y_registros() {
 #[test]
 fn los_errores_de_limite_responden_400() {
     let p = build("@server fn g(a: Int) {}");
-    assert!(p.runtime.contains("__ErrorDeLimite"), "{}", p.runtime);
+    assert!(p.runtime.contains("__BoundaryError"), "{}", p.runtime);
     assert!(p.runtime.contains("res.statusCode = 400;"), "{}", p.runtime);
 }
 
@@ -335,7 +335,7 @@ fn transporte_rpc_esta_endurecido() {
 fn backends_sql_comillan_identificadores() {
     // L2: tabla/columnas se comillan por dialecto, así un campo con nombre de
     // palabra reservada (from, order…) no rompe el SQL generado.
-    let p = build("type Fila = { from: String, order: Int };\nstore almacen: Fila;\n@server fn g() { guardar(almacen, Fila { from: \"a\", order: 1 }); }");
+    let p = build("type Fila = { from: String, order: Int };\nstore almacen: Fila;\n@server fn g() { save(almacen, Fila { from: \"a\", order: 1 }); }");
     assert!(p.runtime.contains("function __quoteId"), "{}", p.runtime);
     assert!(p.runtime.contains("function __idCol"), "{}", p.runtime);
     // sqlite/pg usan comilla doble; mysql usa backtick (constantes por backend).
@@ -347,7 +347,7 @@ fn backends_sql_comillan_identificadores() {
 fn persistencia_a_archivo_es_incremental_y_atomica() {
     // H2/L5: el backend de archivo usa un log append-only (O(1) por mutación) y
     // compacta atómicamente (temporal + rename). Sin reescritura completa por op.
-    let p = build("store almacen: Int;\n@server fn g(x: Int) { guardar(almacen, x); }");
+    let p = build("store almacen: Int;\n@server fn g(x: Int) { save(almacen, x); }");
     assert!(p.runtime.contains("appendFileSync"), "debe escribir incremental (append)");
     assert!(p.runtime.contains("renameSync"), "la compactación debe ser atómica");
     assert!(p.runtime.contains(".tmp"), "debe compactar vía temporal");
@@ -357,7 +357,7 @@ fn persistencia_a_archivo_es_incremental_y_atomica() {
 fn backends_son_incrementales_por_id() {
     // H2: la interfaz del backend es insert/update/remove por id, no saveAll;
     // las mutaciones tocan una sola fila.
-    let p = build("store almacen: Int;\n@server fn g(x: Int) { guardar(almacen, x); }");
+    let p = build("store almacen: Int;\n@server fn g(x: Int) { save(almacen, x); }");
     assert!(p.runtime.contains("insert(id: number, item: unknown)"), "{}", p.runtime);
     assert!(p.runtime.contains("remove(id: number)"), "{}", p.runtime);
     assert!(!p.runtime.contains("saveAll"), "saveAll (reescritura total) debe haber desaparecido");
@@ -369,7 +369,7 @@ fn backends_son_incrementales_por_id() {
 fn placeholders_se_sustituyen_en_una_pasada() {
     // L3: un campo cuyo nombre coincide con un centinela del template no debe
     // corromper la sustitución del otro. Tras emitir no quedan centinelas crudos.
-    let p = build("type T = { __MAREA_STORE_SCHEMA__: Int };\nstore almacen: T;\n@server fn g() { guardar(almacen, T { __MAREA_STORE_SCHEMA__: 1 }); }");
+    let p = build("type T = { __MAREA_STORE_SCHEMA__: Int };\nstore almacen: T;\n@server fn g() { save(almacen, T { __MAREA_STORE_SCHEMA__: 1 }); }");
     
     // El único '__MAREA_STORE_SCHEMA__' admisible es el nombre de columna inyectado,
     // no un placeholder del template suelto en una posición de código.
@@ -379,7 +379,7 @@ fn placeholders_se_sustituyen_en_una_pasada() {
 
 #[test]
 fn store_inyecta_esquema_de_columnas() {
-    let p = build("type Post = { texto: String, likes: Int };\nstore almacen: Post;\n@server fn g() { guardar(almacen, Post { texto: \"a\", likes: 0 }); }");
+    let p = build("type Post = { texto: String, likes: Int };\nstore almacen: Post;\n@server fn g() { save(almacen, Post { texto: \"a\", likes: 0 }); }");
     // El esquema inyectado describe tabla + columnas tipadas para los backends SQL.
     // La tabla toma el NOMBRE del almacén (dos almacenes del mismo tipo son
     // dos tablas), y las columnas salen de los campos del registro.
@@ -390,7 +390,7 @@ fn store_inyecta_esquema_de_columnas() {
 
 #[test]
 fn store_escalar_usa_columna_doc() {
-    let p = build("store almacen: Int;\n@server fn g(x: Int) { guardar(almacen, x); }");
+    let p = build("store almacen: Int;\n@server fn g(x: Int) { save(almacen, x); }");
     // Un store no-registro guarda el valor entero como una sola columna JSON.
     assert!(p.server.contains("{ name: \"__doc\", kind: \"json\" }"), "{}", p.server);
 }
@@ -398,12 +398,12 @@ fn store_escalar_usa_columna_doc() {
 #[test]
 fn sin_store_el_esquema_es_null() {
     let p = build("@client fn f() { print(\"hola\"); }");
-    assert!(!p.server.contains("__almacen("), "sin store no debe declararse ninguno:\n{}", p.server);
+    assert!(!p.server.contains("__store("), "sin store no debe declararse ninguno:\n{}", p.server);
 }
 
 #[test]
 fn store_tiene_backends_de_base_de_datos() {
-    let p = build("store almacen: Int;\n@server fn g(x: Int) { guardar(almacen, x); }");
+    let p = build("store almacen: Int;\n@server fn g(x: Int) { save(almacen, x); }");
     // Los cinco backends conviven; el driver se elige con MAREA_DB.
     for marca in ["__sqliteBackend", "__postgresBackend", "__mysqlBackend", "__mongoBackend", "MAREA_DB"] {
         assert!(p.runtime.contains(marca), "falta {marca} en runtime");
@@ -415,9 +415,9 @@ fn store_tiene_backends_de_base_de_datos() {
 
 #[test]
 fn store_file_lleva_la_firma_del_esquema() {
-    let p = build("type Post = { a: Int };\nstore almacen: Post;\n@server fn g() { guardar(almacen, Post { a: 1 }); }");
+    let p = build("type Post = { a: Int };\nstore almacen: Post;\n@server fn g() { save(almacen, Post { a: 1 }); }");
     // El archivo por defecto incluye nombre+campos para no colisionar entre apps.
-    assert!(p.server.contains("__almacen(\"almacen\""), "{}", p.server);
+    assert!(p.server.contains("__store(\"almacen\""), "{}", p.server);
     
 }
 
@@ -463,7 +463,7 @@ fn match_con_variantes_sigue_encadenando() {
 // silenciosa de escrituras en el backend de archivo).
 #[test]
 fn ensure_store_memoiza_la_promesa_de_carga() {
-    let p = build("store almacen: Int;\n@server fn g(x: Int) { guardar(almacen, x); }");
+    let p = build("store almacen: Int;\n@server fn g(x: Int) { save(almacen, x); }");
     assert!(p.runtime.contains("__loading"), "la carga debe memoizarse:\n{}", p.runtime);
 }
 
@@ -497,10 +497,10 @@ fn los_estaticos_solo_sirven_extensiones_en_lista_blanca() {
 
 // C-2c: el builtin de escapado debe llegar a ambos runtimes.
 #[test]
-fn el_builtin_escapar_esta_en_los_dos_runtimes() {
-    let p = build("@client fn f() { print(escapar(\"<b>\")); }");
-    assert!(p.runtime.contains("export function escapar"), "falta en runtime.ts");
-    assert!(p.client.contains("escapar"), "{}", p.client);
+fn el_builtin_escape_esta_en_los_dos_runtimes() {
+    let p = build("@client fn f() { print(escape(\"<b>\")); }");
+    assert!(p.runtime.contains("export function escape"), "falta en runtime.ts");
+    assert!(p.client.contains("escape"), "{}", p.client);
 }
 
 // A-3: una función sin anotación es local desde cualquier lado, así que debe
@@ -533,7 +533,7 @@ fn las_globales_no_reactivas_se_emiten_en_ambos_bundles() {
 #[test]
 fn build_app_declara_las_globales_en_el_cliente() {
     let m = marea_syntax::parse(
-        "let titulo = \"Marea\";\n@client fn vista() -> String { return escapar(titulo); }",
+        "let titulo = \"Marea\";\n@client fn vista() -> String { return escape(titulo); }",
     )
     .expect("parsea");
     let app = marea_codegen::emit_app(&m);
@@ -544,7 +544,7 @@ fn build_app_declara_las_globales_en_el_cliente() {
 // reactivas en silencio.
 #[test]
 fn escapar_no_se_emite_con_await() {
-    let p = build("@client fn f(s: String) -> String { return escapar(s); }");
+    let p = build("@client fn f(s: String) -> String { return escape(s); }");
     assert!(!p.client.contains("await escapar"), "{}", p.client);
 }
 
@@ -587,8 +587,8 @@ fn el_artefacto_desplegable_no_se_desincroniza() {
 // verificador; aquí se cierra en el generador.
 #[test]
 fn el_validador_no_desborda_con_tipos_recursivos() {
-    let p = build("type Nodo = { v: Int, sig: Nodo };\n@server fn add(n: Nodo) { print(n.v); }");
-    assert!(p.server.contains("__register(\"add\""), "{}", p.server);
+    let p = build("type Nodo = { v: Int, sig: Nodo };\n@server fn append(n: Nodo) { print(n.v); }");
+    assert!(p.server.contains("__register(\"append\""), "{}", p.server);
 }
 
 #[test]
@@ -599,10 +599,10 @@ fn el_validador_no_desborda_con_recursion_mutua() {
 
 #[test]
 fn los_builtins_de_lista_y_texto_llegan_al_runtime() {
-    let p = build("fn f(a: List<Int>, b: List<Int>) -> List<Int> { return unir(a, b); }");
-    for n in ["export function unir", "export function agregar", "export function contiene"] {
+    let p = build("fn f(a: List<Int>, b: List<Int>) -> List<Int> { return concat(a, b); }");
+    for n in ["export function concat", "export function append", "export function contains"] {
         assert!(p.runtime.contains(n), "falta {n} en runtime.ts");
     }
     // Son síncronos: emitirlos con await rompería el rastreo reactivo.
-    assert!(!p.client.contains("await unir"), "{}", p.client);
+    assert!(!p.client.contains("await append"), "{}", p.client);
 }

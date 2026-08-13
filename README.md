@@ -22,7 +22,7 @@ store usuarios: User;
 
 @server
 fn getUser(id: UserId) -> User | NotFound {
-    let us = todos(usuarios);
+    let us = all(usuarios);
     if id < len(us) {
         return us[id];
     }
@@ -33,20 +33,20 @@ fn getUser(id: UserId) -> User | NotFound {
 fn perfil(id: UserId) -> Html {
     reactive usuario = getUser(id);   // se llama como si fuera local
     return match usuario {            // el tipo obliga a cubrir los cuatro casos
-        Cargando => "<p>Cargando…</p>",
-        Fallo    => "<p>Error de red</p>",
+        Loading => "<p>Loading…</p>",
+        Failed    => "<p>Error de red</p>",
         NotFound => "<p>No existe</p>",
-        otro     => concat("<h1>", concat(escapar(otro.nombre), "</h1>")),
+        otro     => concat("<h1>", concat(escape(otro.nombre), "</h1>")),
     };
 }
 ```
 
 **Las dos fronteras se componen.** `reactive usuario = getUser(id)` es un
-**recurso**: cruzar la red es asíncrono, así que el valor arranca en `Cargando`,
-pasa al resultado cuando llega y a `Fallo` si la llamada revienta. Y el tipo lo
-dice —`Cargando | User | NotFound | Fallo`—, de modo que el compilador **no te
+**recurso**: cruzar la red es asíncrono, así que el valor arranca en `Loading`,
+pasa al resultado cuando llega y a `Failed` si la llamada revienta. Y el tipo lo
+dice —`Loading | User | NotFound | Failed`—, de modo que el compilador **no te
 deja leer el dato sin haber cubierto los cuatro casos**: mientras no cubras
-`Cargando` y `Fallo`, lo que queda es una unión opaca.
+`Loading` y `Failed`, lo que queda es una unión opaca.
 
 Como el recurso es un signal, la vista se re-pinta sola en cada transición: no
 hay estado de carga que orquestar a mano. Un recurso también puede vivir a nivel
@@ -93,16 +93,16 @@ Lo que ya funciona:
 
 ### Hablar con servicios externos
 
-Una app real consume APIs de terceros. `pedir(url)` hace un GET y devuelve el
-cuerpo; `pedirPost(url, cuerpo)` manda JSON. Como el lenguaje no tiene valores
-dinámicos, la respuesta se lee **por ruta**: `jsonTexto`, `jsonNumero`,
-`jsonDecimal` y `jsonLargo`.
+Una app real consume APIs de terceros. `fetch(url)` hace un GET y devuelve el
+cuerpo; `post(url, cuerpo)` manda JSON. Como el lenguaje no tiene valores
+dinámicos, la respuesta se lee **por ruta**: `jsonText`, `jsonInt`,
+`jsonFloat` y `jsonLen`.
 
 ```marea
 @server
 fn consultar(lat: String, lon: String) -> Int {
-    let cuerpo = pedir(concat("https://api.open-meteo.com/v1/forecast?latitude=", lat));
-    return jsonNumero(cuerpo, "current.temperature_2m");
+    let cuerpo = fetch(concat("https://api.open-meteo.com/v1/forecast?latitude=", lat));
+    return jsonInt(cuerpo, "current.temperature_2m");
 }
 ```
 
@@ -126,20 +126,20 @@ rechazan (podrían saltarse la lista blanca); y hay tope de tiempo
 
 Sin construir listas en tiempo de ejecución no se puede escribir una búsqueda:
 el lenguaje no tiene bucles ni cierres, así que una función no podía devolver un
-subconjunto filtrado —sólo pintarlo—. `unir(a, b)` concatena dos listas y
-`agregar(xs, x)` añade un elemento; ambas conservan el tipo del elemento (el
+subconjunto filtrado —sólo pintarlo—. `concat(a, b)` concatena dos listas y
+`append(xs, x)` añade un elemento; ambas conservan el tipo del elemento (el
 verificador no tiene genéricos, así que su firma se calcula desde los
-argumentos). Para el texto: `largo(s)`, `contiene(s, sub)` y `minusculas(s)`.
+argumentos). Para el texto: `len(s)`, `contains(s, sub)` y `lower(s)`.
 
 ```marea
 @server
 fn buscar(q: String, i: Int) -> List<Producto> {
-    let ps = todos();
+    let ps = all();
     if i < len(ps) {
         let p = ps[i];
         let resto = buscar(q, i + 1);
-        if contiene(minusculas(p.titulo), minusculas(q)) {
-            return unir([p], resto);   // el filtrado como DATOS, no como HTML
+        if contains(lower(p.titulo), lower(q)) {
+            return concat([p], resto);   // el filtrado como DATOS, no como HTML
         }
         return resto;
     }
@@ -150,18 +150,18 @@ fn buscar(q: String, i: Int) -> List<Producto> {
 ### El escapado no es opcional: el tipo `Html`
 
 El sumidero del DOM (`render`) solo acepta `Html`, y a `Html` solo se llega por
-tres caminos: `escapar(x)`, un literal del propio fuente (lo escribiste tú, es
+tres caminos: `escape(x)`, un literal del propio fuente (lo escribiste tú, es
 de confianza por construcción) o `html(s)`, la confianza explícita que se ve en
 una revisión de código. Un `String` que venga del store o de la red **no** es
 `Html`, así que incrustarlo sin escapar no compila:
 
 ```marea
 render(concat("<li>", p.texto))            // error: se esperaba 'Html'
-render(concat("<li>", escapar(p.texto)))   // ✅
+render(concat("<li>", escape(p.texto)))   // ✅
 ```
 
 `Html` es subtipo de `String` (el marcado seguro vale donde va texto) pero no al
-revés — ahí está la garantía. `aTexto` de un número o un booleano ya es `Html`,
+revés — ahí está la garantía. `text` de un número o un booleano ya es `Html`,
 porque no pueden contener marcado; el de un `String`, no. En tiempo de ejecución
 `Html` es una cadena: la distinción es puramente estática y no cuesta nada.
 
@@ -174,7 +174,7 @@ lado del cable la reconstruye quien mande el JSON.
 Los dos sumideros del DOM están cubiertos: `render`, y el retorno de `vista` —la
 función que `marea build-app` monta en la página—, que debe declararse `-> Html`.
 
-**Lo que `escapar` no cubre:** escapa `& < > " '`, que basta en contexto de
+**Lo que `escape` no cubre:** escapa `& < > " '`, que basta en contexto de
 texto y de atributo entrecomillado. **No** basta dentro de un atributo sin
 comillas ni en un `href="javascript:..."`. Si construyes esos contextos, el tipo
 `Html` no te salva: revísalos a mano.
@@ -329,8 +329,8 @@ cargo clippy --all-targets
 ## Persistencia: almacenes con nombre y backends intercambiables
 
 El estado del servidor se declara con `store nombre: T;` y se opera con cuatro
-builtins (CRUD) que reciben el almacén como primer argumento: `guardar(a, x)`,
-`todos(a)`, `actualizar(a, i, x)` y `borrar(a, i)`. **Un módulo puede declarar
+builtins (CRUD) que reciben el almacén como primer argumento: `save(a, x)`,
+`all(a)`, `update(a, i, x)` y `remove(a, i)`. **Un módulo puede declarar
 todos los almacenes que necesite** —cada uno con su tipo, su tabla y su
 archivo—, que es lo que separa una app real de una demo. El código `.mar` no
 sabe **dónde** vive ese estado: el backend se elige al correr, con variables de
@@ -343,12 +343,12 @@ type Orden = { comprador: String, total: Int };
 store productos: Producto;
 store ordenes: Orden;
 
-@server fn publicar(t: String, p: Int) { guardar(productos, Producto { titulo: t, precio: p }); }
-@server fn catalogo() -> List<Producto> { return todos(productos); }
-@server fn ventas() -> List<Orden> { return todos(ordenes); }
+@server fn publicar(t: String, p: Int) { save(productos, Producto { titulo: t, precio: p }); }
+@server fn catalogo() -> List<Producto> { return all(productos); }
+@server fn ventas() -> List<Orden> { return all(ordenes); }
 ```
 
-Guardar en el almacén equivocado es un error de tipos: `guardar(ordenes, p)` con
+Guardar en el almacén equivocado es un error de tipos: `save(ordenes, p)` con
 un `Producto` no compila. `examples/tienda.mar` usa cuatro (`productos`,
 `ordenes`, `preguntas`, `resenas`).
 
@@ -415,7 +415,7 @@ fetch a mano.
 reactive mut posts = [];                  // estado de app (signal de módulo)
 
 @server fn like(i: Int) { /* … persiste … */ }
-@server fn feed() -> List<Post> { return todos(); }
+@server fn feed() -> List<Post> { return all(); }
 
 @client fn vista() -> String { /* lee 'posts' y devuelve HTML */ }
 @client fn darLike(i: Int) { like(i); posts = feed(); }  // RPC → reactivo → DOM
