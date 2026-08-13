@@ -18,14 +18,14 @@ jobs:
   verificar:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Toolchain de Rust
         run: rustup toolchain install stable --profile minimal --component clippy
 
       # `node:sqlite` (el backend de persistencia que se prueba end-to-end) y el
       # type stripping nativo de los `.ts` generados piden Node >= 22.18.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
 
