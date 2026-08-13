@@ -423,3 +423,75 @@ ahora y no dentro de mil líneas.
 Mi lectura, por si sirve: el 1, 2, 3 y 6 son claramente lenguaje. El 7 es una
 decisión de diseño suya. El 4 y el 5 son un framework encima del lenguaje, y
 puede que ese framework deba ser otro proyecto y no Marea.
+
+---
+
+## P8 — Victor decide: adelante, que Marea se vuelva el framework
+
+Fecha: 2026-08-13
+
+Le pasé a Victor el inventario de P7 y la bifurcación (lenguaje contra
+framework). **Su decisión: que Marea sea también el framework.** Los once puntos
+entran, incluidos enrutado, metadatos y acceso a datos. No es mi propuesta; es la
+suya, y es su lenguaje.
+
+Lo que sigue es lo único que puedo aportar yo: el orden en que me desbloquea cada
+pieza, para qué la voy a usar exactamente, y cómo verificaremos que sirve. Si su
+criterio de diseño pide otro orden, manda el suyo — pero éste está medido contra
+un sitio real.
+
+### Orden propuesto, por lo que desbloquea
+
+**1. Runtime puro de cliente + cierres, juntos.** No son dos tareas
+independientes: un manejador de evento *es* una función que se pasa a otra. El
+runtime puro sin cierres no me deja escribir un `onclick`, y los cierres sin
+runtime puro no llegan al navegador. Juntos me desbloquean los seis componentes
+que hoy no puedo tocar, incluida **la barra de navegación del sitio**.
+*Verificación:* migro `Nav` y `AlertForm`, y el filtro de precio deja de ser la
+foto que es hoy.
+
+**2. `import`.** Voy por 56 funciones en un archivo. No me bloquea, me asfixia; y
+además impide repartir el trabajo entre dos sesiones, porque las dos escribirían
+el mismo archivo. *Verificación:* parto `sitio.mar` en gráficas, interfaz y
+páginas, y el `--check` de la guardia de deriva sigue verde.
+
+**3. Modelo de eventos.** Diez tipos distintos en uso: `onClick`, `onSubmit`,
+`onChange`, `onKeyDown`, `onKeyUp`, `onBlur`, y los cuatro de puntero
+(`onPointerMove`/`Down`/`Up`/`Leave`) que sostienen la gráfica interactiva.
+*Verificación:* la cruz y el globo de la gráfica dejan de necesitar la capa de
+React que hoy va encima.
+
+**4. Enrutado.** Cinco rutas, dos con parámetro (`/modelo/:id`, `/p/:id`,
+`/categoria/:slug`), más un 404 y un POST (`/api/alerts`) — que sospecho que es
+gratis con `@server`, y sería el primer sitio donde su tesis de la frontera de
+red se luce de verdad.
+
+**5. Metadatos y SEO.** Título, descripción, canónica, Open Graph, JSON-LD,
+`sitemap` y `robots`, por página. **Va antes de apagar Next, no después.** Vigía
+existe para Google; un día sin metadatos es tráfico que no vuelve.
+*Verificación:* las cinco páginas emiten exactamente las mismas etiquetas que
+hoy, comparadas con el mismo método que uso para el marcado.
+
+**6. Datos ajenos.** El más grande y el que puede cambiarles el diseño: leer
+tablas que Marea no creó. Las de Vigía las escribe el motor en Go. Mientras esto
+no exista, la web en Marea **no puede leer sus propios datos** y Next se queda
+por obligación, aunque todo lo demás esté listo.
+
+### Lo que hago yo mientras
+
+Sigo migrando marcado de servidor, que no depende de nada de esto: el cuerpo de
+la ficha `/p/`, la cabecera de categoría y los resultados de búsqueda. Cuando
+llegue cada pieza de arriba, la estreno y les reporto qué se rompió al usarla de
+verdad, que es para lo que sirve tener un consumidor hostil.
+
+### Una advertencia que prefiero dar ahora
+
+Esto es construir un framework web. Lo que llevamos hoy —todo el marcado del
+sitio en un día— es la parte agradable, y engaña: dibujar es lo fácil. Enrutado,
+metadatos, eventos y datos es el resto del iceberg, y cada uno tiene su cola de
+casos raros (redirecciones, 404, canónicas, arranque en frío, conexiones).
+
+No lo digo para frenar nada — la decisión está tomada y me parece coherente con
+la tesis del lenguaje. Lo digo para que el plan se haga con ese tamaño en mente,
+y para que ninguna de las dos sesiones venda un "ya casi está" cuando lo que
+falte sea el iceberg.
