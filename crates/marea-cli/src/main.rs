@@ -66,6 +66,10 @@ fn main() -> ExitCode {
             }
         },
         "deps" => deps(path),
+        // Un archivo con `import` ya no es un programa completo: hay que
+        // resolver el grafo y chequear todos sus módulos, porque un error puede
+        // estar en un archivo que no es el que nombraste.
+        "check" if tiene_imports(&src) => check_programa(path),
         "check" => match frontend(&src, false) {
             Ok(_) => {
                 println!("  {} tipa sin errores", path);
@@ -322,4 +326,69 @@ fn print_usage() {
     eprintln!(
         "  --no-check                            omite la verificación de tipos en los build*"
     );
+}
+
+/// ¿El fuente declara algún `import`? Se mira sobre los TOKENS y no con una
+/// búsqueda de texto: "import" dentro de una cadena o de un comentario no
+/// convierte un archivo en un programa de varios módulos.
+fn tiene_imports(src: &str) -> bool {
+    !marea_syntax::parse_recovering(src).0.imports.is_empty()
+}
+
+/// `marea check` sobre un programa de varios módulos: resuelve el grafo desde el
+/// archivo de entrada y chequea todos, atribuyendo cada error a su archivo.
+fn check_programa(path: &str) -> ExitCode {
+    let programa = match marea_syntax::program::resolve_program(std::path::Path::new(path)) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("{}", e.render());
+            return ExitCode::FAILURE;
+        }
+    };
+    // Los errores de sintaxis de CUALQUIER módulo van primero: sin ellos el
+    // chequeo de tipos de ese archivo estaría mirando un AST incompleto.
+    let mut sintaxis = 0usize;
+    for m in &programa.modulos {
+        for e in marea_syntax::parse_recovering(&m.fuente).1 {
+            eprintln!("{}:", m.nombre);
+            eprintln!("{}\n", e.render(&m.fuente));
+            sintaxis += 1;
+        }
+    }
+    if sintaxis > 0 {
+        eprintln!(
+            "{} error{} de sintaxis",
+            sintaxis,
+            if sintaxis == 1 { "" } else { "es" }
+        );
+        return ExitCode::FAILURE;
+    }
+
+    let errores = marea_types::check_program(&programa);
+    if errores.is_empty() {
+        println!(
+            "  {} módulos tipan sin errores ({})",
+            programa.modulos.len(),
+            programa
+                .modulos
+                .iter()
+                .map(|m| m.nombre.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        return ExitCode::SUCCESS;
+    }
+    for pe in &errores {
+        let m = &programa.modulos[pe.modulo];
+        eprintln!("{}:", m.nombre);
+        eprintln!("{}\n", pe.error.render(&m.fuente));
+    }
+    eprintln!(
+        "{} error{} de tipos en {} módulo{}",
+        errores.len(),
+        if errores.len() == 1 { "" } else { "es" },
+        programa.modulos.len(),
+        if programa.modulos.len() == 1 { "" } else { "s" }
+    );
+    ExitCode::FAILURE
 }

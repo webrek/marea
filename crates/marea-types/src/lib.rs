@@ -19,12 +19,14 @@ mod collect;
 mod error;
 mod expr;
 mod frontera;
+mod programa;
 mod stmt;
 mod subtipado;
 mod ty;
 mod uniones;
 
 pub use error::TypeError;
+pub use programa::{check_program, check_program_with_boundaries, ProgramTypeError};
 pub use ty::Ty;
 
 use marea_syntax::ast::{

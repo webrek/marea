@@ -28,7 +28,7 @@ fn ficha(p: Producto) -> Html {
 
 @client
 fn vista(u: Usuario) -> Html {
-    let mut filas = "";
+    let mut filas = ``;
     for p in productos {
         filas = concat(filas, ficha(p));
     }
