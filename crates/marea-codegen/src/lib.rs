@@ -11,12 +11,103 @@
 use marea_syntax::ast::*;
 use marea_syntax::builtins::es_sincrono;
 use std::collections::HashSet;
+use std::sync::LazyLock;
 
-/// El runtime TypeScript embebido (transporte RPC + builtins).
-pub const RUNTIME_TS: &str = include_str!("runtime.ts");
+/// El NÚCLEO COMPARTIDO: la única implementación del núcleo reactivo y de los
+/// builtins puros. Se inserta en los dos runtimes, así que hay un solo texto que
+/// arreglar cuando algo está mal. Ver la cabecera de `nucleo.js`.
+const NUCLEO_JS: &str = include_str!("nucleo.js");
 
-/// El runtime de NAVEGADOR embebido (cliente RPC + reactivo + DOM, sin Node).
-pub const BROWSER_RT: &str = include_str!("browser.js");
+/// Las plantillas tal cual viven en el repo: con el bloque `@marea:nucleo-*` sin
+/// sustituir. No se exponen; lo que se emite es siempre la versión compuesta.
+const RUNTIME_PLANTILLA: &str = include_str!("runtime.ts");
+const BROWSER_PLANTILLA: &str = include_str!("browser.js");
+
+/// El runtime TypeScript embebido (transporte RPC + builtins), ya con el núcleo
+/// compartido dentro y sus anotaciones destapadas: es TypeScript de verdad.
+pub fn runtime_ts() -> &'static str {
+    static COMPUESTO: LazyLock<String> =
+        LazyLock::new(|| con_nucleo(RUNTIME_PLANTILLA, &destapar_tipos(NUCLEO_JS)));
+    &COMPUESTO
+}
+
+/// El runtime de NAVEGADOR embebido (cliente RPC + reactivo + DOM, sin Node), ya
+/// con el núcleo compartido dentro y SIN anotaciones: JavaScript plano.
+pub fn browser_rt() -> &'static str {
+    static COMPUESTO: LazyLock<String> =
+        LazyLock::new(|| con_nucleo(BROWSER_PLANTILLA, &quitar_tipos(NUCLEO_JS)));
+    &COMPUESTO
+}
+
+/// Marca de apertura de una anotación de tipo dentro del núcleo compartido.
+const MARCA: &str = "/*ts";
+
+/// Recorre el núcleo separando lo que va dentro de `/*ts ... */` de lo que no, y
+/// deja que quien llame decida qué hacer con cada trozo. Es la ÚNICA regla que
+/// traduce entre los dos blancos, y por eso vive en un solo sitio: el contenido
+/// de la marca es TypeScript literal, no hay conversión que pueda equivocarse.
+///
+/// Una marca sin cerrar sería un error de edición del núcleo que produciría
+/// TypeScript inválido en silencio, así que revienta aquí, al construir.
+fn recorrer_nucleo(js: &str, mut con_tipo: impl FnMut(&mut String, &str)) -> String {
+    let mut out = String::with_capacity(js.len());
+    let mut resto = js;
+    while let Some(i) = resto.find(MARCA) {
+        out.push_str(&resto[..i]);
+        let tras = &resto[i + MARCA.len()..];
+        let j = tras
+            .find("*/")
+            .expect("nucleo.js: una marca '/*ts' se quedó sin cerrar");
+        con_tipo(&mut out, &tras[..j]);
+        resto = &tras[j + 2..];
+    }
+    out.push_str(resto);
+    out
+}
+
+/// El núcleo con sus anotaciones DESTAPADAS: `s/*ts: string*/` pasa a
+/// `s: string`. Es lo que se inserta en runtime.ts, que es TypeScript y pasa por
+/// `tsc --strict`.
+fn destapar_tipos(js: &str) -> String {
+    recorrer_nucleo(js, |out, tipo| out.push_str(tipo))
+}
+
+/// El núcleo con sus anotaciones BORRADAS: `s/*ts: string*/` pasa a `s`. Es lo
+/// que se inserta en client.js, que el navegador ejecuta tal cual — y así el
+/// archivo que llega al navegador no lleva ni rastro de tipos.
+fn quitar_tipos(js: &str) -> String {
+    recorrer_nucleo(js, |_out, _tipo| {})
+}
+
+/// Sustituye el bloque `@marea:nucleo-inicio/fin` de una plantilla por el núcleo
+/// ya adaptado. Los marcadores hablan con el codegen, así que no se copian.
+fn con_nucleo(plantilla: &str, nucleo: &str) -> String {
+    let mut out = String::with_capacity(plantilla.len() + nucleo.len());
+    let mut dentro = false;
+    let mut sustituido = false;
+    for linea in plantilla.lines() {
+        if dentro {
+            if linea.starts_with("// @marea:nucleo-fin") {
+                dentro = false;
+            }
+            continue;
+        }
+        if linea.starts_with("// @marea:nucleo-inicio") {
+            dentro = true;
+            sustituido = true;
+            out.push_str(nucleo.trim_end_matches('\n'));
+            out.push('\n');
+            continue;
+        }
+        out.push_str(linea);
+        out.push('\n');
+    }
+    assert!(
+        sustituido,
+        "la plantilla perdió su bloque '@marea:nucleo-inicio': el núcleo compartido no se insertó"
+    );
+    out
+}
 
 /// Los cuatro archivos TypeScript que produce el transpilador.
 pub struct Project {
@@ -116,12 +207,13 @@ fn runtime_de(module: &Module) -> String {
     if es_puro(module) {
         recortar.push("servidor");
     }
+    let completo = runtime_ts();
     if recortar.is_empty() {
-        return RUNTIME_TS.to_string();
+        return completo.to_string();
     }
-    let mut out = String::with_capacity(RUNTIME_TS.len());
+    let mut out = String::with_capacity(completo.len());
     let mut dentro = false;
-    for linea in RUNTIME_TS.lines() {
+    for linea in completo.lines() {
         // Un marcador nunca se copia a la salida, se recorte su región o no:
         // habla con el codegen, no con quien lee el archivo generado.
         let es_marcador = linea.starts_with("// @marea:");
@@ -413,7 +505,7 @@ fn emit_client_js(
 ) -> String {
     let mut s = String::new();
     s.push_str("// Generado por Marea — cliente de navegador (no editar).\n");
-    s.push_str(BROWSER_RT);
+    s.push_str(browser_rt());
     s.push_str("\n// --- programa ---\n");
 
     // Constantes de módulo (globales no reactivas). Van antes que el estado

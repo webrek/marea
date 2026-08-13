@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Pasa por `tsc` el TypeScript que Marea escribe a mano y el que genera.
+# Pasa por `tsc` el TypeScript que Marea escribe a mano y el que genera, y por
+# `tsc --checkJs` el JavaScript que sirve al navegador.
 #
 # POR QUÉ EXISTE. `runtime.ts` son ~1200 líneas de TypeScript que se copian tal
 # cual a cada proyecto generado, y nunca habían pasado por el compilador de
@@ -31,19 +32,33 @@ fi
 comun=(--noEmit --target ES2022 --module ESNext --moduleResolution bundler
        --lib ES2022,DOM --typeRoots "$aqui/node_modules/@types")
 
+# `--allowJs` para que resuelva el `import` de `nucleo.js`, que es el núcleo
+# compartido por los dos runtimes. Sin `--checkJs` no se comprueba ahí dentro:
+# de eso se encarga el paso siguiente (como JavaScript) y el de la salida (como
+# TypeScript, con las anotaciones ya destapadas).
 echo "==> runtime.ts (estricto)"
-"$tsc" "${comun[@]}" --strict --types node "$aqui/ambient.d.ts" "$src/runtime.ts"
+"$tsc" "${comun[@]}" --strict --allowJs --types node "$aqui/ambient.d.ts" "$src/runtime.ts"
 
-# `browser.js` es JavaScript sin anotar, así que `strict` daría 36 avisos de
-# `implicitly any` que son ruido, no defectos. Sin él, `checkJs` sigue viendo lo
-# que importa: llamar a un método que el objeto no tiene. Con el bug de `.append`
-# reintroducido, esto lo caza en los tres sitios y no dice nada más.
-echo "==> browser.js (checkJs, sin exigir anotaciones)"
-"$tsc" "${comun[@]}" --allowJs --checkJs --noImplicitAny false "$src/browser.js"
+# `browser.js` y `nucleo.js` son JavaScript sin anotar, así que `strict` daría 36
+# avisos de `implicitly any` que son ruido, no defectos. Sin él, `checkJs` sigue
+# viendo lo que importa: llamar a un método que el objeto no tiene. Con el bug de
+# `.append` reintroducido, esto lo caza y no dice nada más.
+#
+# Que `nucleo.js` pase por aquí es la mitad que importa: es el texto que se sirve
+# al navegador tal cual, y lo comprueba COMO JAVASCRIPT, que es como se ejecuta.
+# La otra mitad —que sus anotaciones `/*ts ... */` digan la verdad— la comprueba
+# el paso de la salida, donde ese mismo texto llega ya destapado a `runtime.ts` y
+# pasa por `--strict` entero.
+echo "==> browser.js + nucleo.js (checkJs, sin exigir anotaciones)"
+"$tsc" "${comun[@]}" --allowJs --checkJs --noImplicitAny false \
+  "$src/browser.js" "$src/nucleo.js"
 
 # Y la SALIDA, que es lo que acaba en el proyecto de otro. Se comprueban dos
 # ejemplos que entre los dos cubren los dos caminos del codegen: con `store` (el
 # runtime entero) y sin él (el recortado, que es el que se puede empaquetar).
+# Aquí el `runtime.ts` generado ya lleva el núcleo compartido DENTRO, con sus
+# anotaciones destapadas, y `tsc` lo comprueba como parte del programa: es donde
+# se cae si una de esas anotaciones miente.
 echo "==> la salida generada"
 marea="$raiz/target/release/marea"
 if [ ! -x "$marea" ]; then

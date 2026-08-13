@@ -134,21 +134,6 @@ function __tokenDe(req: http.IncomingMessage): string {
   return "";
 }
 
-// @marea:servidor-fin
-
-/// Error de validación del límite: lo provoca una petición mal formada, no un
-/// fallo del servidor, así que se responde 400 y no 500.
-export class __BoundaryError extends Error {}
-
-export function __badRequest(detalle: string): never {
-  throw new __BoundaryError(detalle);
-}
-
-// @marea:servidor-inicio — el codegen recorta hasta @marea:servidor-fin cuando
-// el módulo no cruza la frontera de red ni declara almacenes. Aquí dentro está
-// todo lo que ata este runtime a Node: `node:http`, `node:fs` y `process.env`.
-// Un módulo que sólo calcula y devuelve marcado no necesita nada de esto, y
-// arrastrarlo le impide vivir en un componente de cliente o en el edge.
 let __server: http.Server | null = null;
 
 // Sirve archivos estáticos de la app web (index.html, client.js) desde la raíz
@@ -368,235 +353,23 @@ export async function __rpc(fn: string, args: unknown[]): Promise<unknown> {
 
 // @marea:servidor-fin
 
-// Comparación de variantes para 'match' (best-effort hasta tener uniones reales).
-export function __marea_is(value: unknown, tag: string): boolean {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    (value as Record<string, unknown>).$tag === tag
-  );
-}
-
-// --- núcleo reactivo (signals de grano fino, sin glitches) ---
+// @marea:nucleo-inicio — el codegen sustituye este bloque por el contenido de
+// `nucleo.js`: la ÚNICA implementación del núcleo reactivo y de los builtins
+// puros. Los dos runtimes —éste y el del navegador— reciben exactamente el mismo
+// texto, con las anotaciones `/*ts ... */` destapadas aquí (esto es TypeScript y
+// pasa por `--strict`) y borradas allí (aquello es JavaScript que el navegador
+// ejecuta tal cual). Se INSERTA en vez de importarse porque la salida tiene un
+// juego de archivos fijo, y el navegador no debe resolver un módulo más.
 //
-// 'reactive mut' es un signal (fuente); 'reactive' es un memo (derivado perezoso);
-// 'effect { ... }' se re-ejecuta cuando cambia algo que leyó. El rastreo de
-// dependencias es automático: leer un signal/memo dentro de una reacción la
-// suscribe. Al asignar un signal: se invalidan (marcan sucias) las reacciones
-// dependientes y LUEGO se drenan los effects pendientes una sola vez, leyendo
-// valores frescos — así no hay glitches (estados intermedios incoherentes). Un
-// ciclo reactivo (un effect que reescribe lo que lee) se detecta y aborta con
-// un error claro en vez de colgarse.
+// Mientras se lee este archivo SIN generar, el import de abajo da lo mismo que
+// la inserción: así `tsc` comprueba la plantilla igual que la salida y ninguna
+// de las dos se queda sin vigilar.
+export * from "./nucleo.js";
+import { __BoundaryError } from "./nucleo.js";
+// @marea:nucleo-fin
 
-interface Reaction {
-  invalidate(): void;
-}
-
-interface EffectReaction extends Reaction {
-  execute(): void;
-}
-
-let __currentSub: Reaction | null = null;
-const __pending = new Set<EffectReaction>();
-let __flushing = false;
-
-function __flush(): void {
-  if (__flushing) return;
-  __flushing = true;
-  let guard = 0;
-  try {
-    while (__pending.size > 0) {
-      if (++guard > 1000) {
-        __pending.clear();
-        throw new Error(
-          "ciclo reactivo detectado: un effect reescribe una reactiva que lee"
-        );
-      }
-      const r = __pending.values().next().value as EffectReaction;
-      __pending.delete(r);
-      r.execute();
-    }
-  } finally {
-    __flushing = false;
-  }
-}
-
-export interface Cell<T> {
-  get(): T;
-  set(v: T): void;
-}
-
-export function __signal<T>(initial: T): Cell<T> {
-  let value = initial;
-  const subs = new Set<Reaction>();
-  return {
-    get(): T {
-      if (__currentSub) subs.add(__currentSub);
-      return value;
-    },
-    set(v: T): void {
-      if (v === value) return;
-      value = v;
-      for (const r of [...subs]) r.invalidate();
-      __flush();
-    },
-  };
-}
-
-export function __effect(fn: () => void | Promise<void>): void {
-  const reaction: EffectReaction = {
-    execute() {
-      const prev = __currentSub;
-      __currentSub = reaction;
-      // La suscripción ocurre en la porción síncrona del cuerpo (por eso los
-      // builtins NO se awaitan: un await partiría el rastreo).
-      try {
-        void fn();
-      } finally {
-        __currentSub = prev;
-      }
-    },
-    invalidate() {
-      __pending.add(reaction);
-    },
-  };
-  reaction.execute();
-}
-
-// Un RECURSO: la composición de las dos fronteras. Arranca en `Cargando`, lanza
-// la llamada asíncrona y se pone al resultado cuando llega, o a `Fallo` si
-// revienta. Como es un signal, cualquier vista que lo lea se re-pinta sola en
-// cada transición: no hay que orquestar nada a mano.
-export function __resource(f: () => Promise<unknown>): Cell<unknown> {
-  const s = __signal<unknown>({ $tag: "Cargando" });
-  Promise.resolve()
-    .then(f)
-    .then(
-      (v) => s.set(v),
-      (e) => {
-        console.error("[marea] recurso falló:", e);
-        s.set({ $tag: "Fallo" });
-      },
-    );
-  return s;
-}
-
-export function __memo<T>(fn: () => T): Cell<T> {
-  const subs = new Set<Reaction>();
-  let value: T;
-  let dirty = true;
-  const reaction: Reaction = {
-    invalidate() {
-      if (!dirty) {
-        dirty = true;
-        for (const r of [...subs]) r.invalidate();
-      }
-    },
-  };
-  const recompute = () => {
-    const prev = __currentSub;
-    __currentSub = reaction;
-    try {
-      value = fn();
-      dirty = false;
-    } finally {
-      __currentSub = prev;
-    }
-  };
-  return {
-    get(): T {
-      if (dirty) recompute();
-      if (__currentSub) subs.add(__currentSub);
-      return value;
-    },
-    // Un memo es derivado: no se asigna directamente.
-    set(_v: T): void {},
-  };
-}
-
-// --- builtins del lenguaje ---
-export function print(x: unknown): void {
-  console.log(x);
-}
-// `concat` y `len` sirven para texto Y para listas: son la misma idea sobre dos
-// estructuras, y tener `unir`/`largo` aparte solo duplicaba la superficie.
-export function concat(a: unknown, b: unknown): unknown {
-  if (Array.isArray(a) && Array.isArray(b)) return a.concat(b);
-  return String(a) + String(b);
-}
-export function render(x: unknown): void {
-  console.log("[render]", x);
-}
-export function len(x: unknown): number {
-  if (Array.isArray(x)) return x.length;
-  // Se cuentan puntos de código, no unidades UTF-16: "🌊" mide 1, no 2.
-  return Array.from(String(x)).length;
-}
-export function text(x: unknown): string {
-  // Una variante se imprime por su nombre; si no, saldría "[object Object]".
-  if (x !== null && typeof x === "object") {
-    const t = (x as Record<string, unknown>).$tag;
-    if (typeof t === "string") return t;
-  }
-  return String(x);
-}
-// Escapa un texto para incrustarlo en HTML. El lenguaje construye marcado
-// concatenando cadenas y 'render' lo inyecta por innerHTML, así que sin esto un
-// dato persistido vía RPC se ejecuta como marcado en todos los clientes.
-// División entera. En JS `7/0` es Infinity y `0/0` es NaN: valores que no son
-// enteros y que se colarían dentro de un Int mintiendo sobre su tipo. El backend
-// WASM trapea, así que aquí también se corta —el mismo programa no puede dar
-// Infinity en un blanco y morir en el otro—.
-export function __div(a: number, b: number): number {
-  if (b === 0) {
-    throw new __BoundaryError("división entre cero");
-  }
-  return Math.trunc(a / b);
-}
-export function __rem(a: number, b: number): number {
-  if (b === 0) {
-    throw new __BoundaryError("módulo entre cero");
-  }
-  return a % b;
-}
-
-export function escape(x: unknown): string {
-  return String(x)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-// Marca una cadena como marcado ya seguro. En runtime es la identidad:
-// la garantía es estática (el tipo Html), esto solo la hace explícita
-// en el fuente para que se vea en una revisión.
-export function html(s: string): string {
-  return s;
-}
-// Indexado de lista con verificación de rango: un índice fuera de rango lanza
-// un error claro en vez de devolver 'undefined' (que reventaría más tarde).
-// --- listas: construir en runtime (el lenguaje no tiene bucles ni cierres, así
-// que sin esto una función no puede devolver un subconjunto filtrado) ---
-
-export function append(xs: unknown[], x: unknown): unknown[] {
-  return xs.concat([x]);
-}
-// --- texto ---
-
-export function contains(s: string, sub: string): boolean {
-  return String(s).includes(String(sub));
-}
-export function lower(s: string): string {
-  return String(s).toLowerCase();
-}
-export function __index<T>(xs: T[], i: number): T {
-  if (i < 0 || i >= xs.length) {
-    // Si el índice vino de la red es una petición mal formada (400), no un
-    // fallo del servidor: si no, el cliente induce 500 y ruido de log a placer.
-    throw new __BoundaryError(`índice fuera de rango: ${i} (longitud ${xs.length})`);
-  }
-  return xs[i];
+export function __badRequest(detalle: string): never {
+  throw new __BoundaryError(detalle);
 }
 
 // @marea:store-inicio — el codegen recorta hasta @marea:store-fin cuando el

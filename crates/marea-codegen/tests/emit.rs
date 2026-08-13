@@ -774,3 +774,78 @@ fn los_builtins_de_lista_y_texto_llegan_al_runtime() {
     // Son síncronos: emitirlos con await rompería el rastreo reactivo.
     assert!(!p.client.contains("await append"), "{}", p.client);
 }
+
+// ================== Un solo núcleo para los dos runtimes ==================
+
+/// Lo que los dos runtimes comparten. Estuvo duplicado, con implementaciones
+/// separadas que había que sincronizar a mano, y el precio fue real: el
+/// `.append()` sobre un `Set` —un Set de JS tiene `.add`— estaba en los SEIS
+/// sitios, tres por runtime, y rompía el núcleo reactivo entero.
+///
+/// `__rpc` está en los dos archivos y NO está en esta lista: comparte el nombre
+/// pero no la función. Uno habla con un servidor por URL absoluta con el `fetch`
+/// del entorno capturado; el otro va al mismo origen desde el navegador. Son dos
+/// transportes, y juntarlos sería inventar una abstracción para tapar que el
+/// nombre coincide.
+const COMPARTIDAS: [&str; 18] = [
+    "__div",
+    "__effect",
+    "__index",
+    "__marea_is",
+    "__memo",
+    "__rem",
+    "__resource",
+    "__signal",
+    "append",
+    "concat",
+    "contains",
+    "escape",
+    "html",
+    "len",
+    "lower",
+    "print",
+    "render",
+    "text",
+];
+
+/// Las diecinueve salen del MISMO texto (`nucleo.js`), así que aparecen una vez
+/// en cada runtime y ninguna se queda fuera. Esto es lo que impide volver a
+/// partirlas: añadir una a un runtime y olvidarla en el otro se pone rojo aquí.
+#[test]
+fn el_nucleo_compartido_esta_una_sola_vez_en_cada_runtime() {
+    let p = build("fn f(xs: List<Int>) -> Html { return `<p>x</p>`; }");
+    let a = app("@client fn vista() -> String { return \"x\"; }");
+    for (quien, texto) in [("runtime.ts", &p.runtime), ("client.js", &a.client_js)] {
+        for n in COMPARTIDAS {
+            let veces = texto.matches(&format!("export function {n}")).count();
+            assert_eq!(
+                veces, 1,
+                "'{n}' aparece {veces} veces en {quien}, y tiene que aparecer 1"
+            );
+        }
+    }
+}
+
+/// Y lo que va al navegador sigue siendo JavaScript plano. Las anotaciones del
+/// núcleo viajan en `/*ts ... */` justamente para poder quitarlas aquí: si
+/// llegaran al archivo que servimos, el navegador moriría en la primera línea
+/// —no hay paso de compilación que las quite—. En runtime.ts es al revés:
+/// llegan destapadas, y son las que `tsc --strict` comprueba.
+#[test]
+fn el_nucleo_llega_como_js_al_navegador_y_como_ts_a_node() {
+    let a = app("@client fn vista() -> String { return \"x\"; }");
+    for aguja in ["/*ts", ": unknown", ": string", ": number", "interface "] {
+        assert!(
+            !a.client_js.contains(aguja),
+            "el cliente de navegador no puede llevar «{aguja}»:\n{}",
+            a.client_js
+        );
+    }
+    let p = build("fn f() -> Html { return `<p>x</p>`; }");
+    assert!(!p.runtime.contains("/*ts"), "quedaron marcas sin destapar");
+    assert!(
+        p.runtime.contains("export function print(x: unknown): void"),
+        "{}",
+        p.runtime
+    );
+}
