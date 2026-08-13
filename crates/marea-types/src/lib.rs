@@ -135,6 +135,14 @@ struct Checker {
     init_context: Option<&'static str>,
     /// Tipo de retorno declarado de la función actual.
     current_return: Ty,
+    /// Índices dentro de `scopes` donde empieza el cuerpo de cada cierre que se
+    /// está chequeando (el más interno al final). Una variable que se resuelve
+    /// POR DEBAJO de la última marca no es local del cierre: la captura.
+    closure_bases: Vec<usize>,
+    /// Tipos de los `return` vistos hasta ahora en el cierre actual, cuando no
+    /// escribió `-> T` y hay que deducirlo de ellos. `None` en cualquier otro
+    /// caso, que es lo que distingue "acumular" de "comparar".
+    inferring_return: Option<Vec<Ty>>,
     /// La `@session` del programa (Fase A), si la declara.
     session: Option<Sesion>,
     errors: Vec<TypeError>,
@@ -154,6 +162,8 @@ impl Checker {
             current_location: None,
             init_context: None,
             current_return: Ty::Unit,
+            closure_bases: Vec::new(),
+            inferring_return: None,
             session: None,
             errors: Vec::new(),
             crossings: Vec::new(),
@@ -162,6 +172,51 @@ impl Checker {
 
     pub(crate) fn error(&mut self, e: TypeError) {
         self.errors.push(e);
+    }
+
+    /// Un uso de `name` que se resolvió en el scope número `idx`: ¿es una
+    /// captura, y de algo que no debería capturarse?
+    ///
+    /// Marea no tiene referencias —todo es un valor— así que un cierre COPIA lo
+    /// que captura en el momento de crearse. Sobre algo `mut` eso monta una
+    /// trampa silenciosa: dentro se trabaja sobre la copia, de modo que
+    /// reasignar fuera no se ve dentro ni al revés, y las dos mitades del
+    /// programa creen tener la misma variable. Decirlo aquí cuesta un error;
+    /// callarlo cuesta una tarde de depuración.
+    ///
+    /// Las globales de módulo NO pasan por esta regla: no se copian al entorno
+    /// del cierre, viven en el ámbito del módulo, así que leerlas desde un
+    /// cierre es exactamente lo mismo que leerlas desde una función con nombre
+    /// —y para el estado reactivo ya manda `E_REACTIVE_OFF_CLIENT`.
+    pub(crate) fn check_captura(&mut self, name: &str, idx: usize, mutable: bool, span: Span) {
+        // Fuera de un cierre no hay nada que capturar.
+        let Some(&base) = self.closure_bases.last() else {
+            return;
+        };
+        // Declarada dentro del propio cierre: es local suya, no una captura.
+        if idx >= base || !mutable {
+            return;
+        }
+        self.error(TypeError::new(
+            "E_CAPTURA_MUTABLE",
+            format!(
+                "'{name}' se declaró 'mut' y un cierre captura por valor: aquí dentro sería \
+                 una copia, así que reasignarla fuera no se vería dentro (ni al revés). \
+                 Cópiala a un 'let' antes del cierre, o pásala como parámetro"
+            ),
+            span,
+        ));
+    }
+
+    /// Busca un nombre en la pila de scopes, del más interno al más externo, y
+    /// devuelve en qué scope estaba junto con su tipo y su mutabilidad. El
+    /// índice es lo que permite saber si el uso cruza la frontera de un cierre.
+    pub(crate) fn buscar_en_scopes(&self, name: &str) -> Option<(usize, Ty, bool)> {
+        self.scopes
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(i, s)| s.get(name).map(|(t, m)| (i, t.clone(), *m)))
     }
 
     /// Comprueba el acceso (lectura o escritura) a una global `reactive`. Es

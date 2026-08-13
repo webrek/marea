@@ -310,6 +310,13 @@ impl Checker {
                     Some(e) => self.check_expr(e),
                     None => Ty::Unit,
                 };
+                // Dentro de un cierre que no escribió `-> T` no hay nada contra
+                // qué comparar: este `return` es parte de lo que DEFINE el tipo,
+                // así que se apunta y ya lo juntará `inferir_retorno`.
+                if let Some(recogidos) = &mut self.inferring_return {
+                    recogidos.push(ret_ty);
+                    return;
+                }
                 if !self.is_subtype(&ret_ty, &expected) {
                     let s = value.as_ref().map(|e| e.span()).unwrap_or(*span);
                     self.error(TypeError::new(
@@ -330,12 +337,13 @@ impl Checker {
                 ..
             } => {
                 let value_ty = self.check_expr(value);
-                let mut target = None;
-                for scope in self.scopes.iter().rev() {
-                    if let Some(t) = scope.get(name) {
-                        target = Some(t.clone());
-                        break;
-                    }
+                let mut target: Option<(Ty, bool)> = None;
+                if let Some((idx, ty, mutable)) = self.buscar_en_scopes(name) {
+                    // Asignar a algo de fuera del cierre es la trampa de la
+                    // captura por valor en su forma más nítida: escribiría en la
+                    // copia. `check_captura` la explica.
+                    self.check_captura(name, idx, mutable, *name_span);
+                    target = Some((ty, mutable));
                 }
                 // Si no es una variable local, puede ser una global de módulo.
                 if target.is_none() {

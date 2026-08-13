@@ -314,6 +314,22 @@ pub enum Expr {
         index: Box<Expr>,
         span: Span,
     },
+    /// Función anónima —un cierre— en posición de expresión:
+    /// `fn(a: Int, b: Int) -> Bool { return a < b; }`.
+    ///
+    /// Es exactamente la forma de una declaración pero sin nombre, así que no
+    /// añade ni un token al lexer ni una regla nueva que aprender. `return_type`
+    /// es opcional cuando el cuerpo lo determina; si no, el verificador lo pide.
+    ///
+    /// Vive en `Expr` y no en `Item` a propósito: un cierre sólo aparece dentro
+    /// de un cuerpo y su ubicación (@server/@client) la hereda del `fn` que lo
+    /// crea, así que nunca es un elemento de nivel superior.
+    Fn {
+        params: Vec<Param>,
+        return_type: Option<Type>,
+        body: Block,
+        span: Span,
+    },
 }
 
 /// Inicialización de un campo en un literal de registro: `name: "x"`.
@@ -340,7 +356,8 @@ impl Expr {
             | Expr::Match { span, .. }
             | Expr::Record { span, .. }
             | Expr::List { span, .. }
-            | Expr::Template { span, .. } => *span,
+            | Expr::Template { span, .. }
+            | Expr::Fn { span, .. } => *span,
             Expr::Index { span, .. } => *span,
         }
     }

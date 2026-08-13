@@ -47,6 +47,12 @@ impl Checker {
             } => self.check_record(type_name.as_deref(), *type_name_span, fields, *span),
             Expr::List { elements, span } => self.check_list(elements, *span),
             Expr::Index { object, index, .. } => self.check_index(object, index),
+            Expr::Fn {
+                params,
+                return_type,
+                body,
+                span,
+            } => self.check_fn_expr(params, return_type.as_ref(), body, *span),
             Expr::Template { parts, .. } => {
                 // Una plantilla SIEMPRE es `Html`: los huecos `{x}` se escapan
                 // al emitir, y `{!x}` solo admite algo que ya sea Html. Por eso
@@ -112,11 +118,11 @@ impl Checker {
     }
 
     pub(crate) fn resolve_ident(&mut self, name: &str, span: Span) -> Ty {
-        // Variable en algún scope (del más interno al más externo).
-        for scope in self.scopes.iter().rev() {
-            if let Some((ty, _)) = scope.get(name) {
-                return ty.clone();
-            }
+        // Variable en algún scope (del más interno al más externo). Si se
+        // resolvió por fuera del cierre en curso, el uso es una captura.
+        if let Some((idx, ty, mutable)) = self.buscar_en_scopes(name) {
+            self.check_captura(name, idx, mutable, span);
+            return ty;
         }
         // Nombre de un almacén declarado con `store nombre: T;`. Es un asa del
         // SERVIDOR: solo se declara en ese bundle, así que nombrarla desde otro
@@ -516,7 +522,7 @@ impl Checker {
                 location,
             } => {
                 // Clasifica el cruce de frontera y valida serializabilidad.
-                self.classify_boundary(callee, *location, params, ret, span);
+                let cruza_la_red = self.classify_boundary(callee, *location, params, ret, span);
 
                 if params.len() != arg_tys.len() {
                     self.error(TypeError::new(
@@ -530,6 +536,24 @@ impl Checker {
                     ));
                 } else {
                     for (i, (pty, aty)) in params.iter().zip(arg_tys.iter()).enumerate() {
+                        // Lo que cruza la red viaja como JSON. `classify_boundary`
+                        // ya miró la FIRMA, pero un parámetro `Unknown` acepta
+                        // cualquier cosa, así que aquí se mira lo que de verdad
+                        // se manda. El caso que importa es un cierre: es código,
+                        // no un dato, y no hay JSON que lo represente —por eso un
+                        // `sort(xs, criterio)` se queda de este lado del cable.
+                        if cruza_la_red && !crate::frontera::is_serializable(aty) {
+                            self.error(TypeError::new(
+                                "E_BOUNDARY_NOT_SERIALIZABLE",
+                                format!(
+                                    "el argumento {} es '{}' y no cruza la frontera de red",
+                                    i + 1,
+                                    aty.display()
+                                ),
+                                args[i].span(),
+                            ));
+                            continue;
+                        }
                         // Un literal de cadena del propio fuente es de confianza:
                         // vale donde se espera marcado seguro (`render("...")`).
                         let literal_confiable = matches!(pty, Ty::Html)
@@ -816,6 +840,138 @@ impl Checker {
                 ));
                 Ty::Unknown
             }
+        }
+    }
+
+    // --------------------------- cierres ---------------------------
+
+    /// Tipa una función anónima: `fn(a: Int, b: Int) -> Bool { ... }`.
+    ///
+    /// El cuerpo se chequea en un scope PROPIO apilado sobre los de fuera —eso
+    /// es la captura: lo de fuera se sigue viendo— y con la misma ubicación que
+    /// el `fn` que lo crea. Un cierre escrito en una @client es @client, así que
+    /// las reglas de estado, de red y de frontera le caen encima solas, sin una
+    /// anotación nueva que escribir ni una excepción nueva que recordar.
+    pub(crate) fn check_fn_expr(
+        &mut self,
+        params: &[marea_syntax::ast::Param],
+        return_type: Option<&Type>,
+        body: &Block,
+        span: Span,
+    ) -> Ty {
+        // El índice de este scope es la frontera del cierre: lo que se resuelva
+        // por debajo viene de fuera y por tanto se captura.
+        self.scopes.push(HashMap::new());
+        self.closure_bases.push(self.scopes.len() - 1);
+
+        let mut param_tys: Vec<Ty> = Vec::with_capacity(params.len());
+        let mut vistos: HashMap<String, ()> = HashMap::new();
+        for p in params {
+            self.validate_type_exists(&p.ty);
+            if vistos.insert(p.name.clone(), ()).is_some() {
+                self.error(TypeError::new(
+                    "E_DUPLICATE_PARAM",
+                    format!("el parámetro '{}' está repetido", p.name),
+                    p.span,
+                ));
+            }
+            let pty = self.ty_from_syntax(&p.ty);
+            param_tys.push(pty.clone());
+            // Inmutables, igual que los de una función con nombre.
+            self.scopes
+                .last_mut()
+                .unwrap()
+                .insert(p.name.clone(), (pty, false));
+        }
+
+        let declarado = return_type.map(|t| {
+            self.validate_type_exists(t);
+            self.ty_from_syntax(t)
+        });
+
+        // Un cierre puede aparecer dentro de otro y dentro de cualquier función,
+        // así que el estado del chequeo se salva y se restaura entero.
+        let prev_return = std::mem::replace(
+            &mut self.current_return,
+            declarado.clone().unwrap_or(Ty::Unit),
+        );
+        // Sin `-> T` escrito no hay contra qué comparar los `return`: son ELLOS
+        // los que dicen el tipo, así que se acumulan en vez de chequearse.
+        let acumulador = if declarado.is_none() {
+            Some(Vec::new())
+        } else {
+            None
+        };
+        let prev_infer = std::mem::replace(&mut self.inferring_return, acumulador);
+
+        self.check_block_in_current_scope(body);
+
+        let recogidos = std::mem::replace(&mut self.inferring_return, prev_infer);
+        self.current_return = prev_return;
+        self.closure_bases.pop();
+        self.scopes.pop();
+
+        let ret = match declarado {
+            Some(t) => t,
+            None => self.inferir_retorno(&recogidos.unwrap_or_default(), span),
+        };
+
+        // Igual que una función con nombre: si promete un valor, tiene que
+        // darlo por todos los caminos.
+        if !matches!(ret, Ty::Unit | Ty::Unknown) && !crate::stmt::block_terminates(body) {
+            self.error(TypeError::new(
+                "E_MISSING_RETURN",
+                format!(
+                    "este cierre debe devolver '{}' en todos los caminos",
+                    ret.display()
+                ),
+                span,
+            ));
+        }
+
+        Ty::Fn {
+            params: param_tys,
+            ret: Box::new(ret),
+            location: self.current_location,
+        }
+    }
+
+    /// Deduce el retorno de un cierre sin `-> T` a partir de los `return` que
+    /// tiene. Sin ninguno es `Unit`. Si no coinciden, no hay nada que deducir:
+    /// se pide escribirlo, que es más corto que la regla que haría falta para
+    /// adivinarlo bien.
+    fn inferir_retorno(&mut self, recogidos: &[Ty], span: Span) -> Ty {
+        let mut inferido: Option<Ty> = None;
+        for t in recogidos {
+            // Un `Unknown` viene de un error ya reportado: no aporta ni estorba.
+            if matches!(t, Ty::Unknown) {
+                continue;
+            }
+            match inferido.as_ref() {
+                None => {}
+                Some(previo) if previo == t => continue,
+                Some(previo) => {
+                    let (a, b) = (previo.display(), t.display());
+                    self.error(TypeError::new(
+                        "E_CIERRE_RETORNO_AMBIGUO",
+                        format!(
+                            "no se puede deducir qué devuelve este cierre: unos 'return' dan \
+                             '{a}' y otros '{b}'; escríbelo tú con '-> Tipo' tras los paréntesis"
+                        ),
+                        span,
+                    ));
+                    return Ty::Unknown;
+                }
+            }
+            inferido = Some(t.clone());
+        }
+        match inferido {
+            Some(t) => t,
+            // Ni un `return` con valor deducible. Si los había pero todos eran
+            // Unknown, el error que los produjo ya está reportado y no hay que
+            // encadenar otro: `Unknown` lo absorbe.
+            None if recogidos.is_empty() => Ty::Unit,
+            None => Ty::Unknown,
         }
     }
 
