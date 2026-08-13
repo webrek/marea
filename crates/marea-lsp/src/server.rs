@@ -13,8 +13,15 @@
 //!        [`DocumentStore`] y disparan la publicación de diagnósticos.
 //!      - El `shutdown` (request) se atiende con `Connection::handle_shutdown`,
 //!        que responde y espera el `exit` antes de cerrar el bucle.
-//!      - Las peticiones de funciones (símbolos, completado, definición, hover)
-//!        se delegan; en este paso devuelven vacío/`None` (el Paso 5 las llena).
+//!      - Las peticiones de funciones se resuelven contra el PROGRAMA del
+//!        documento, no contra el documento suelto.
+//!
+//! El estado del bucle son tres cosas: los documentos abiertos, la caché de
+//! programa ([`crate::programa::Cache`]) y el conjunto de archivos a los que se
+//! publicó la última vez, que hace falta para limpiar los diagnósticos de un
+//! archivo cuando deja de formar parte de cualquier programa abierto.
+
+use std::collections::{HashMap, HashSet};
 
 use lsp_server::{Connection, ExtractError, Message, Request, RequestId, Response};
 use lsp_types::notification::{
@@ -28,12 +35,13 @@ use lsp_types::{
 };
 use serde::Serialize;
 
-use crate::analysis::analyze;
+use crate::analysis::NeutralDiag;
 use crate::capabilities::server_capabilities;
-use crate::conversions::neutral_to_diagnostic;
-use crate::documents::DocumentStore;
+use crate::conversions::{neutral_to_diagnostic, ruta_de_uri, uri_texto, Uris};
+use crate::documents::{Document, DocumentStore};
 use crate::features::{completion, goto, hover, symbols};
 use crate::line_index::LineIndex;
+use crate::programa::{Abiertos, Cache, Salida};
 
 /// Error de tipo borrado que devuelven los puntos de entrada del crate.
 type BoxError = Box<dyn std::error::Error + Sync + Send>;
@@ -56,6 +64,8 @@ pub fn run(connection: Connection) -> Result<(), BoxError> {
 /// el `shutdown`.
 fn main_loop(connection: &Connection) -> Result<(), BoxError> {
     let mut store = DocumentStore::new();
+    let mut cache = Cache::new();
+    let mut publicados: HashSet<Uri> = HashSet::new();
 
     for msg in &connection.receiver {
         match msg {
@@ -65,10 +75,10 @@ fn main_loop(connection: &Connection) -> Result<(), BoxError> {
                 if connection.handle_shutdown(&req)? {
                     return Ok(());
                 }
-                handle_request(connection, &store, req)?;
+                handle_request(connection, &store, &mut cache, req)?;
             }
             Message::Notification(note) => {
-                handle_notification(connection, &mut store, note)?;
+                handle_notification(connection, &mut store, &mut cache, &mut publicados, note)?;
             }
             // Las respuestas del cliente (a peticiones que hiciéramos nosotros)
             // no se esperan en este paso; se ignoran.
@@ -83,14 +93,17 @@ fn main_loop(connection: &Connection) -> Result<(), BoxError> {
 fn handle_notification(
     connection: &Connection,
     store: &mut DocumentStore,
+    cache: &mut Cache,
+    publicados: &mut HashSet<Uri>,
     note: lsp_server::Notification,
 ) -> Result<(), BoxError> {
     match note.method.as_str() {
         DidOpenTextDocument::METHOD => {
             let params: DidOpenTextDocumentParams = note.extract(DidOpenTextDocument::METHOD)?;
             let doc = params.text_document;
-            store.open(doc.uri.clone(), doc.text, doc.version);
-            publish_diagnostics(connection, store, &doc.uri, Some(doc.version))?;
+            let uri = doc.uri.clone();
+            store.open(doc.uri, doc.text, doc.version);
+            publicar(connection, store, cache, publicados, Some(&uri))?;
         }
         DidChangeTextDocument::METHOD => {
             let params: DidChangeTextDocumentParams =
@@ -101,43 +114,86 @@ fn handle_notification(
             // viniera vacío (cliente no conforme), se deja el texto previo.
             if let Some(change) = params.content_changes.into_iter().last() {
                 store.update(uri.clone(), change.text, version);
-                publish_diagnostics(connection, store, &uri, Some(version))?;
+                publicar(connection, store, cache, publicados, Some(&uri))?;
             }
         }
         DidCloseTextDocument::METHOD => {
             let params: DidCloseTextDocumentParams = note.extract(DidCloseTextDocument::METHOD)?;
             let uri = params.text_document.uri;
             store.close(&uri);
-            // Al cerrar, se limpian los diagnósticos del documento: lista vacía.
-            send_diagnostics(connection, uri, None, Vec::new())?;
+            cache.olvidar(&uri_texto(&uri));
+            // Republicar es lo que limpia: el archivo cerrado ya no es la
+            // entrada de ningún programa, así que si nadie más lo cubre se le
+            // manda la lista vacía.
+            publicar(connection, store, cache, publicados, None)?;
         }
         _ => {}
     }
     Ok(())
 }
 
+/// Analiza el documento de `uri` con la caché de programa.
+///
+/// Devuelve `None` si el documento no está abierto. La ruta se canonicaliza
+/// porque es la identidad de un módulo: dos URIs distintos que llegan al mismo
+/// archivo tienen que resolver al mismo nodo del grafo.
+fn analizar<'c, 's>(
+    store: &'s DocumentStore,
+    cache: &'c mut Cache,
+    abiertos: &Abiertos<'_>,
+    uri: &Uri,
+) -> Option<(&'c Salida, &'s Document)> {
+    let doc = store.get(uri)?;
+    let ruta = ruta_de_uri(uri).and_then(|p| p.canonicalize().ok());
+    let salida = cache.analizar(
+        &uri_texto(uri),
+        ruta.as_deref(),
+        &doc.text,
+        doc.version,
+        abiertos,
+    );
+    Some((salida, doc))
+}
+
+/// Los buffers abiertos, por ruta canónica. Ganan al disco: es lo que hace que
+/// los diagnósticos vayan al ritmo de lo que se teclea y no al de lo que se
+/// guarda.
+fn buffers(store: &DocumentStore) -> Abiertos<'_> {
+    let mut abiertos = Abiertos::new();
+    for (uri, doc) in store.iter() {
+        if let Some(ruta) = ruta_de_uri(uri).and_then(|p| p.canonicalize().ok()) {
+            abiertos.insertar(ruta, &doc.text, doc.version);
+        }
+    }
+    abiertos
+}
+
 /// Despacha una petición de función a su manejador. Cada manejador deriva su
-/// respuesta del documento abierto (si lo está) y del AST. El `shutdown` ya se
-/// trató antes de llegar aquí.
+/// respuesta del programa del documento abierto. El `shutdown` ya se trató antes
+/// de llegar aquí.
 fn handle_request(
     connection: &Connection,
     store: &DocumentStore,
+    cache: &mut Cache,
     req: Request,
 ) -> Result<(), BoxError> {
+    let abiertos = buffers(store);
+    let uris = Uris::de(store);
+
     let req = match dispatch::<DocumentSymbolRequest, _>(connection, req, |params| {
         let uri = params.text_document.uri;
-        store
-            .get(&uri)
-            .map(|doc| DocumentSymbolResponse::Nested(symbols::document_symbols(doc)))
+        let (salida, doc) = analizar(store, &mut *cache, &abiertos, &uri)?;
+        let simbolos = symbols::document_symbols(salida, doc);
+        Some(DocumentSymbolResponse::Nested(simbolos))
     })? {
         Ok(()) => return Ok(()),
         Err(req) => req,
     };
     let req = match dispatch::<Completion, _>(connection, req, |params| {
         let pos = params.text_document_position;
-        store
-            .get(&pos.text_document.uri)
-            .map(|doc| CompletionResponse::Array(completion::completion(doc, pos.position)))
+        let (salida, doc) = analizar(store, &mut *cache, &abiertos, &pos.text_document.uri)?;
+        let items = completion::completion(salida, doc, pos.position);
+        Some(CompletionResponse::Array(items))
     })? {
         Ok(()) => return Ok(()),
         Err(req) => req,
@@ -145,18 +201,16 @@ fn handle_request(
     let req = match dispatch::<GotoDefinition, _>(connection, req, |params| {
         let pos = params.text_document_position_params;
         let uri = pos.text_document.uri;
-        store
-            .get(&uri)
-            .and_then(|doc| goto::goto_definition(doc, &uri, pos.position))
+        let (salida, doc) = analizar(store, &mut *cache, &abiertos, &uri)?;
+        goto::goto_definition(salida, doc, &uri, &uris, pos.position)
     })? {
         Ok(()) => return Ok(()),
         Err(req) => req,
     };
     let req = match dispatch::<HoverRequest, _>(connection, req, |params| {
         let pos = params.text_document_position_params;
-        store
-            .get(&pos.text_document.uri)
-            .and_then(|doc| hover::hover(doc, pos.position))
+        let (salida, doc) = analizar(store, &mut *cache, &abiertos, &pos.text_document.uri)?;
+        hover::hover(salida, doc, pos.position)
     })? {
         Ok(()) => return Ok(()),
         Err(req) => req,
@@ -227,24 +281,98 @@ fn respond<T: Serialize>(
     Ok(())
 }
 
-/// Analiza el documento de `uri` (si está abierto) y publica sus diagnósticos.
-fn publish_diagnostics(
+/// Publica los diagnósticos de TODOS los documentos abiertos y de los archivos
+/// que sus `import` arrastran.
+///
+/// Se recalculan todos y no sólo el que cambió porque un programa es un grafo:
+/// tocar `usuarios.mar` puede romper `catalogo.mar`, y dejar los errores del
+/// segundo como estaban hasta que alguien lo abra sería peor que no darlos. La
+/// caché hace que los documentos que no dependen de lo que se tocó no cuesten
+/// nada: sus huellas no cambiaron y se devuelve el resultado tal cual.
+///
+/// Cuando dos programas abiertos comparten un archivo, sus diagnósticos se UNEN
+/// en vez de pisarse: si no, el que mira el archivo suelto borraría los errores
+/// que sólo se ven mirando el programa entero (dos módulos que declaran el mismo
+/// nombre, dos `@session`), y los diagnósticos parpadearían según qué documento
+/// se tocara el último.
+fn publicar(
     connection: &Connection,
     store: &DocumentStore,
-    uri: &Uri,
-    version: Option<i32>,
+    cache: &mut Cache,
+    publicados: &mut HashSet<Uri>,
+    disparador: Option<&Uri>,
 ) -> Result<(), BoxError> {
-    let Some(doc) = store.get(uri) else {
-        return Ok(());
-    };
-    let analysis = analyze(&doc.text);
-    let index = LineIndex::new(&doc.text);
-    let diagnostics: Vec<Diagnostic> = analysis
-        .diagnostics
-        .iter()
-        .map(|d| neutral_to_diagnostic(d, &index, &doc.text))
-        .collect();
-    send_diagnostics(connection, uri.clone(), version, diagnostics)
+    let abiertos = buffers(store);
+    let uris = Uris::de(store);
+
+    // El documento que disparó la publicación va primero: es el que el editor
+    // está esperando.
+    let mut docs: Vec<(&Uri, &Document)> = store.iter().collect();
+    docs.sort_by_key(|(uri, _)| match disparador {
+        Some(d) => *uri != d,
+        None => true,
+    });
+
+    let mut orden: Vec<Uri> = Vec::new();
+    let mut acumulado: HashMap<Uri, (String, Vec<NeutralDiag>)> = HashMap::new();
+
+    for (uri, doc) in docs {
+        let ruta = ruta_de_uri(uri).and_then(|p| p.canonicalize().ok());
+        let salida = cache.analizar(
+            &uri_texto(uri),
+            ruta.as_deref(),
+            &doc.text,
+            doc.version,
+            &abiertos,
+        );
+        for archivo in &salida.archivos {
+            let destino = match &archivo.ruta {
+                Some(ruta) => match uris.uri(ruta) {
+                    Some(u) => u,
+                    None => continue,
+                },
+                None => uri.clone(),
+            };
+            if let Some((_, diags)) = acumulado.get_mut(&destino) {
+                for d in &archivo.diags {
+                    if !diags.contains(d) {
+                        diags.push(d.clone());
+                    }
+                }
+                continue;
+            }
+            orden.push(destino.clone());
+            let propios = (archivo.fuente.clone(), archivo.diags.clone());
+            acumulado.insert(destino, propios);
+        }
+    }
+
+    let mut nuevos: HashSet<Uri> = HashSet::new();
+    for uri in orden {
+        let Some((fuente, diags)) = acumulado.remove(&uri) else {
+            continue;
+        };
+        let index = LineIndex::new(&fuente);
+        let lsp: Vec<Diagnostic> = diags
+            .iter()
+            .map(|d| neutral_to_diagnostic(d, &index, &fuente))
+            .collect();
+        // La versión sólo se declara para los archivos que el editor tiene
+        // abiertos; de los demás no tenemos ninguna que citar.
+        let version = store.get(&uri).map(|d| d.version);
+        nuevos.insert(uri.clone());
+        send_diagnostics(connection, uri, version, lsp)?;
+    }
+
+    // Archivos que ya no forman parte de ningún programa abierto: se limpian,
+    // o se quedarían subrayados para siempre.
+    for viejo in publicados.iter() {
+        if !nuevos.contains(viejo) {
+            send_diagnostics(connection, viejo.clone(), None, Vec::new())?;
+        }
+    }
+    *publicados = nuevos;
+    Ok(())
 }
 
 /// Envía una notificación `textDocument/publishDiagnostics` con la lista dada
