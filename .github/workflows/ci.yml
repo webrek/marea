@@ -1,0 +1,54 @@
+# La red de seguridad del repo son sus tests: la prueba diferencial TS/WASM y la
+# guarda contra la deriva de `site/app/` (el artefacto que se despliega tal cual,
+# y que ya estuvo cuatro meses en producción con un XSS que el compilador tenía
+# arreglado). Corriéndolos sólo en local dependen de que alguien se acuerde.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Un aviso nuevo no debe colarse en verde: el repo está a cero.
+  RUSTFLAGS: -D warnings
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain de Rust
+        run: rustup toolchain install stable --profile minimal --component clippy
+
+      # `node:sqlite` (el backend de persistencia que se prueba end-to-end) y el
+      # type stripping nativo de los `.ts` generados piden Node >= 22.18.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Falta un paso de `cargo fmt --all -- --check`: el repo nunca se ha
+      # formateado y hoy rustfmt tocaría ~250 sitios. Ese commit de normalización
+      # va aparte (ensucia `git blame` entero); en cuanto exista, se añade aquí.
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features
+
+      - name: Tests
+        run: cargo test --workspace
+
+      # El compilador es 100% std salvo el LSP; esto falla si a un crate del
+      # compilador se le cuela una dependencia externa.
+      - name: El compilador sigue sin dependencias externas
+        run: |
+          for c in marea-syntax marea-types marea-codegen marea-wasm marea-cli; do
+            deps=$(cargo tree -p "$c" --edges normal --prefix none --no-dedupe \
+                   | grep -v '^marea-' | grep -v '^$' | sort -u)
+            if [ -n "$deps" ]; then
+              echo "::error::$c ganó dependencias externas:"; echo "$deps"; exit 1
+            fi
+          done
