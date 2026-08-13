@@ -1828,7 +1828,8 @@ fn llamar_un_cierre_chequea_los_tipos_de_los_argumentos() {
 #[test]
 fn el_retorno_de_un_cierre_se_usa_con_su_tipo() {
     // Si el `Ty::Fn` no llevara bien el retorno, esto pasaría desapercibido.
-    let src = "@client fn v() { let f = fn() -> Int { return 1; }; let s: String = f(); print(s); }";
+    let src =
+        "@client fn v() { let f = fn() -> Int { return 1; }; let s: String = f(); print(s); }";
     let errs = check_src(src);
     assert!(has_code(&errs, "E_LET_TYPE_MISMATCH"), "{:?}", codes(&errs));
 }
@@ -1870,7 +1871,8 @@ fn un_cierre_con_retorno_declarado_lo_respeta() {
 #[test]
 fn el_retorno_se_deduce_del_cuerpo() {
     // Sin `-> T`: el `return` es lo único que dice el tipo, y basta.
-    let src = "@client fn v() { let f = fn(a: Int) { return a * 2; }; let n: Int = f(3); print(n); }";
+    let src =
+        "@client fn v() { let f = fn(a: Int) { return a * 2; }; let n: Int = f(3); print(n); }";
     let errs = check_src(src);
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }

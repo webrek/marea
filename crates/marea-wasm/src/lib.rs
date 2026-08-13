@@ -646,6 +646,14 @@ fn let_type_name(l: &LetStmt, ctx: &Ctx) -> Option<String> {
 /// la pila (un valor entero, o un puntero a memoria si es String o registro).
 fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String, String> {
     match e {
+        // Un cierre necesita capturar su entorno, y en memoria lineal eso es un
+        // objeto en el montón más una tabla de funciones. El backend WASM no
+        // tiene ninguna de las dos cosas todavía, así que se corta con un error
+        // claro en vez de emitir WAT roto, igual que con `match` y los flotantes.
+        Expr::Fn { .. } => Err(
+            "WASM aún no soporta cierres: necesitan capturar el entorno y una tabla de funciones"
+                .to_string(),
+        ),
         Expr::Int { value, .. } => {
             // El backend WASM usa i32; un literal fuera de rango produciría WAT
             // que wat2wasm rechaza. Mejor un error claro.
@@ -937,6 +945,9 @@ fn collect_strings_block(block: &Block, out: &mut Vec<String>, seen: &mut HashSe
 
 fn collect_strings_expr(e: &Expr, out: &mut Vec<String>, seen: &mut HashSet<String>) {
     match e {
+        // El cuerpo de un cierre no se recorre: `emit_expr` corta antes de
+        // llegar a él, así que sus literales nunca llegan a la sección de datos.
+        Expr::Fn { .. } => {}
         Expr::Str { value, .. } => {
             if seen.insert(value.clone()) {
                 out.push(value.clone());

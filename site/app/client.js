@@ -3,9 +3,14 @@
 //
 // Es el gemelo de runtime.ts pero sin nada de Node (ni http ni fs): solo lo que
 // corre en el navegador — el cliente RPC (fetch al mismo origen), el núcleo
-// reactivo (signals de grano fino) y un puñado de builtins. Más `__mount`, que
-// ata una vista reactiva al DOM: cuando cambia un signal que la vista leyó, el
-// #app se vuelve a pintar solo. Esa es la frontera del TIEMPO tocando el DOM.
+// reactivo (signals de grano fino) y los builtins. Más `__mount`, que ata una
+// vista reactiva al DOM: cuando cambia un signal que la vista leyó, el #app se
+// vuelve a pintar solo. Esa es la frontera del TIEMPO tocando el DOM.
+//
+// Lo que aquí es propio del navegador son DOS funciones: `__rpc` (fetch al mismo
+// origen, sin URL absoluta ni lista blanca porque no hay SSRF que valga desde el
+// navegador) y `__mount`. Todo lo demás lo comparte con runtime.ts, y lo comparte
+// de verdad: viene de `nucleo.js`, un solo texto para los dos.
 
 // --- cliente RPC: cruza la frontera de red al servidor del mismo origen ---
 export async function __rpc(fn, args) {
@@ -21,7 +26,70 @@ export async function __rpc(fn, args) {
   return data.ok;
 }
 
-// --- núcleo reactivo (idéntico en semántica a runtime.ts, sin glitches) ---
+// Núcleo compartido de los DOS runtimes de Marea (generado — no editar a mano).
+//
+// QUÉ ES. La única implementación de lo que Node y el navegador necesitan
+// igual: el núcleo reactivo (signal / memo / effect / resource) y los builtins
+// puros del lenguaje. Antes vivían por duplicado en `runtime.ts` y en
+// `browser.js` y había que sincronizarlas a mano; el bug de `.append()` sobre un
+// `Set` —un Set de JS tiene `.add`— estaba en los SEIS sitios, tres por runtime,
+// y rompía el núcleo reactivo entero en los dos blancos a la vez.
+//
+// CÓMO LLEGA A CADA UNO. El codegen sustituye por este archivo el bloque
+// `@marea:nucleo-inicio/fin` de `runtime.ts` y el de `browser.js`. Se INSERTA,
+// no se importa: la salida tiene un juego de archivos fijo, y el navegador
+// recibe `client.js` tal cual, sin un `import` más que resolver ni servir.
+//
+// POR QUÉ LOS TIPOS VAN EN COMENTARIO. Este texto acaba en los dos sitios: en
+// `client.js`, que el navegador ejecuta como JavaScript plano, y dentro de
+// `runtime.ts`, que pasa por `tsc --strict`. Escribirlo en TypeScript rompe lo
+// primero. Escribirlo con tipos en JSDoc no arregla lo segundo: `tsc` IGNORA los
+// tipos de JSDoc dentro de un `.ts` —solo los lee en un `.js`—, así que al
+// quedar aquí dentro cada parámetro sería un `any` implícito y `--strict`
+// cortaría. De modo que el tipo viaja dentro de un comentario de bloque marcado
+// con `ts`. La línea de ejemplo que sigue está escrita con la marca puesta, así
+// que en cada salida se lee ya convertida — que es la demostración más corta que
+// hay de lo que hace la regla:
+//
+//     export function html(s) { return s; }
+//
+//   - hacia `runtime.ts` se quitan las marcas del comentario y queda TypeScript
+//     de verdad, que `--strict` comprueba entero, anotación por anotación;
+//   - hacia `client.js` se quita el comentario completo y queda JavaScript.
+//
+// Es UNA regla textual, y lo que va dentro del comentario es TypeScript literal:
+// no hay traducción por medio que pueda mentir. Y lo que este archivo ES —el
+// JavaScript que corre en el navegador— se comprueba aparte con `tsc --checkJs`,
+// que es justo quien cazó el `.append` sobre el `Set`.
+
+/// Error de validación del límite: lo provoca una petición mal formada, no un
+/// fallo del servidor, así que el servidor responde 400 y no 500. Vive aquí
+/// porque los builtins que cortan (división entre cero, índice fuera de rango)
+/// lo lanzan en los dos runtimes.
+export class __BoundaryError extends Error {}
+
+// Comparación de variantes para 'match' (best-effort hasta tener uniones reales).
+export function __marea_is(value, tag) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    (value).$tag === tag
+  );
+}
+
+// --- núcleo reactivo (signals de grano fino, sin glitches) ---
+//
+// 'reactive mut' es un signal (fuente); 'reactive' es un memo (derivado perezoso);
+// 'effect { ... }' se re-ejecuta cuando cambia algo que leyó. El rastreo de
+// dependencias es automático: leer un signal/memo dentro de una reacción la
+// suscribe. Al asignar un signal: se invalidan (marcan sucias) las reacciones
+// dependientes y LUEGO se drenan los effects pendientes una sola vez, leyendo
+// valores frescos — así no hay glitches (estados intermedios incoherentes). Un
+// ciclo reactivo (un effect que reescribe lo que lee) se detecta y aborta con
+// un error claro en vez de colgarse.
+
+
+
 let __currentSub = null;
 const __pending = new Set();
 let __flushing = false;
@@ -34,7 +102,9 @@ function __flush() {
     while (__pending.size > 0) {
       if (++guard > 1000) {
         __pending.clear();
-        throw new Error("ciclo reactivo detectado: un effect reescribe una reactiva que lee");
+        throw new Error(
+          "ciclo reactivo detectado: un effect reescribe una reactiva que lee"
+        );
       }
       const r = __pending.values().next().value;
       __pending.delete(r);
@@ -67,6 +137,8 @@ export function __effect(fn) {
     execute() {
       const prev = __currentSub;
       __currentSub = reaction;
+      // La suscripción ocurre en la porción síncrona del cuerpo (por eso los
+      // builtins NO se awaitan: un await partiría el rastreo).
       try {
         void fn();
       } finally {
@@ -80,7 +152,10 @@ export function __effect(fn) {
   reaction.execute();
 }
 
-// Gemelo de runtime.ts: un recurso arranca en Cargando y se resuelve solo.
+// Un RECURSO: la composición de las dos fronteras. Arranca en `Cargando`, lanza
+// la llamada asíncrona y se pone al resultado cuando llega, o a `Fallo` si
+// revienta. Como es un signal, cualquier vista que lo lea se re-pinta sola en
+// cada transición: no hay que orquestar nada a mano.
 export function __resource(f) {
   const s = __signal({ $tag: "Cargando" });
   Promise.resolve()
@@ -107,56 +182,94 @@ export function __memo(fn) {
       }
     },
   };
+  const recompute = () => {
+    const prev = __currentSub;
+    __currentSub = reaction;
+    try {
+      value = fn();
+      dirty = false;
+    } finally {
+      __currentSub = prev;
+    }
+  };
   return {
     get() {
+      if (dirty) recompute();
       if (__currentSub) subs.add(__currentSub);
-      if (dirty) {
-        const prev = __currentSub;
-        __currentSub = reaction;
-        try {
-          value = fn();
-          dirty = false;
-        } finally {
-          __currentSub = prev;
-        }
-      }
       return value;
     },
-    set() {
+    // Un memo es DERIVADO: asignarle no significa nada, y el verificador ya
+    // rechaza `x = ...` sobre una `reactive` sin `mut` (E_ASSIGN_IMMUTABLE). Si
+    // aun así se llega aquí —con `--no-check`, o desde JS a mano— se avisa en
+    // vez de tragárselo: la versión muda de Node perdía la escritura en silencio
+    // mientras la del navegador ya avisaba, y no puede haber dos respuestas.
+    set(_v) {
       throw new Error("una derivada 'reactive' es de solo lectura");
     },
   };
 }
 
-// --- builtins del lenguaje (gemelos de runtime.ts) ---
+// --- builtins del lenguaje ---
+
 export function print(x) {
   console.log(x);
 }
-// Gemelos de runtime.ts: concat y len valen para texto y para listas.
+
+// `concat` y `len` sirven para texto Y para listas: son la misma idea sobre dos
+// estructuras, y tener `unir`/`largo` aparte solo duplicaba la superficie.
 export function concat(a, b) {
   if (Array.isArray(a) && Array.isArray(b)) return a.concat(b);
   return String(a) + String(b);
 }
+
 export function len(x) {
   if (Array.isArray(x)) return x.length;
+  // Se cuentan puntos de código, no unidades UTF-16: "🌊" mide 1, no 2.
   return Array.from(String(x)).length;
 }
+
 export function text(x) {
-  if (x !== null && typeof x === "object" && typeof x.$tag === "string") return x.$tag;
+  // Una variante se imprime por su nombre; si no, saldría "[object Object]".
+  if (x !== null && typeof x === "object") {
+    const t = (x).$tag;
+    if (typeof t === "string") return t;
+  }
   return String(x);
 }
-// Gemelo de runtime.ts: escapa un texto para incrustarlo en HTML.
-// Gemelos de runtime.ts: cortar la división entre cero en vez de devolver
-// Infinity/NaN dentro de un Int.
+
+// 'render' pinta en el #app cuando hay DOM (el navegador) y registra en consola
+// cuando no lo hay (Node). Una sola implementación: la rama que sobra en cada
+// blanco no se toma, y así el mismo programa no tiene dos comportamientos según
+// qué archivo se copió.
+export function render(x) {
+  const app = typeof document !== "undefined" && document.getElementById("app");
+  if (app) app.innerHTML = String(x);
+  else console.log("[render]", x);
+}
+
+// División entera. En JS `7/0` es Infinity y `0/0` es NaN: valores que no son
+// enteros y que se colarían dentro de un Int mintiendo sobre su tipo. El backend
+// WASM trapea, así que aquí también se corta —el mismo programa no puede dar
+// Infinity en un blanco y morir en el otro—. Trunca HACIA CERO, igual que
+// `i32.div_s`: `-7/2` es -3, no -4.
 export function __div(a, b) {
-  if (b === 0) throw new Error("división entre cero");
+  if (b === 0) {
+    throw new __BoundaryError("división entre cero");
+  }
   return Math.trunc(a / b);
 }
+
 export function __rem(a, b) {
-  if (b === 0) throw new Error("módulo entre cero");
+  if (b === 0) {
+    throw new __BoundaryError("módulo entre cero");
+  }
   return a % b;
 }
 
+// Escapa un texto para incrustarlo en HTML. El lenguaje construye marcado
+// concatenando cadenas y 'render' lo inyecta por innerHTML, así que sin esto un
+// dato persistido vía RPC se ejecuta como marcado en todos los clientes. El `&`
+// va PRIMERO: después, el `&` de `&lt;` se volvería a escapar.
 export function escape(x) {
   return String(x)
     .replace(/&/g, "&amp;")
@@ -165,40 +278,40 @@ export function escape(x) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
+
 // Marca una cadena como marcado ya seguro. En runtime es la identidad:
 // la garantía es estática (el tipo Html), esto solo la hace explícita
 // en el fuente para que se vea en una revisión.
 export function html(s) {
   return s;
 }
+
 // --- listas: construir en runtime (el lenguaje no tiene bucles ni cierres, así
 // que sin esto una función no puede devolver un subconjunto filtrado) ---
 
 export function append(xs, x) {
   return xs.concat([x]);
 }
+
+// Indexado de lista con verificación de rango: un índice fuera de rango lanza
+// un error claro en vez de devolver 'undefined' (que reventaría más tarde).
+export function __index(xs, i) {
+  if (i < 0 || i >= xs.length) {
+    // Si el índice vino de la red es una petición mal formada (400), no un
+    // fallo del servidor: si no, el cliente induce 500 y ruido de log a placer.
+    throw new __BoundaryError(`índice fuera de rango: ${i} (longitud ${xs.length})`);
+  }
+  return xs[i];
+}
+
 // --- texto ---
 
 export function contains(s, sub) {
   return String(s).includes(String(sub));
 }
+
 export function lower(s) {
   return String(s).toLowerCase();
-}
-export function __index(xs, i) {
-  if (i < 0 || i >= xs.length) {
-    throw new Error(`índice fuera de rango: ${i} (longitud ${xs.length})`);
-  }
-  return xs[i];
-}
-export function __marea_is(value, tag) {
-  return value !== null && typeof value === "object" && value.$tag === tag;
-}
-// 'render' en el navegador pinta HTML en #app (en Node solo registraba en consola).
-export function render(x) {
-  const app = typeof document !== "undefined" && document.getElementById("app");
-  if (app) app.innerHTML = String(x);
-  else console.log("[render]", x);
 }
 
 // --- el puente reactividad ↔ DOM ---

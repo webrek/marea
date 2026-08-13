@@ -817,7 +817,13 @@ fn el_nucleo_compartido_esta_una_sola_vez_en_cada_runtime() {
     let a = app("@client fn vista() -> String { return \"x\"; }");
     for (quien, texto) in [("runtime.ts", &p.runtime), ("client.js", &a.client_js)] {
         for n in COMPARTIDAS {
-            let veces = texto.matches(&format!("export function {n}")).count();
+            // Sólo código: el núcleo ilustra la convención con una línea de
+            // ejemplo dentro de un comentario, y eso no es una definición.
+            let veces = texto
+                .lines()
+                .filter(|l| !l.trim_start().starts_with("//"))
+                .filter(|l| l.contains(&format!("export function {n}")))
+                .count();
             assert_eq!(
                 veces, 1,
                 "'{n}' aparece {veces} veces en {quien}, y tiene que aparecer 1"
@@ -844,7 +850,8 @@ fn el_nucleo_llega_como_js_al_navegador_y_como_ts_a_node() {
     let p = build("fn f() -> Html { return `<p>x</p>`; }");
     assert!(!p.runtime.contains("/*ts"), "quedaron marcas sin destapar");
     assert!(
-        p.runtime.contains("export function print(x: unknown): void"),
+        p.runtime
+            .contains("export function print(x: unknown): void"),
         "{}",
         p.runtime
     );

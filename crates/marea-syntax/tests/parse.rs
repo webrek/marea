@@ -715,7 +715,8 @@ fn parse_cierre_llamado_en_el_acto() {
 // más vale tenerlo escrito que suponerlo.
 #[test]
 fn un_fn_de_nivel_superior_sigue_siendo_un_item() {
-    let src = "@client fn v() { let f = fn() -> Int { return 1; }; }\nfn otra() -> Int { return 2; }";
+    let src =
+        "@client fn v() { let f = fn() -> Int { return 1; }; }\nfn otra() -> Int { return 2; }";
     let m = parse(src).unwrap();
     assert_eq!(m.items.len(), 2, "los dos 'fn' de fuera son items");
     let Item::Fn(a) = &m.items[0] else { panic!() };

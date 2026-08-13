@@ -5,7 +5,6 @@
 //   - lado cliente:  __rpc(), que serializa la llamada y la manda por fetch.
 // Más los builtins del lenguaje.
 
-// @marea:servidor-inicio — el codegen recorta hasta @marea:servidor-fin cuando
 // el módulo no cruza la frontera de red ni declara almacenes. Aquí dentro está
 // todo lo que ata este runtime a Node: `node:http`, `node:fs` y `process.env`.
 // Un módulo que sólo calcula y devuelve marcado no necesita nada de esto, y
@@ -134,21 +133,6 @@ function __tokenDe(req: http.IncomingMessage): string {
   return "";
 }
 
-// @marea:servidor-fin
-
-/// Error de validación del límite: lo provoca una petición mal formada, no un
-/// fallo del servidor, así que se responde 400 y no 500.
-export class __BoundaryError extends Error {}
-
-export function __badRequest(detalle: string): never {
-  throw new __BoundaryError(detalle);
-}
-
-// @marea:servidor-inicio — el codegen recorta hasta @marea:servidor-fin cuando
-// el módulo no cruza la frontera de red ni declara almacenes. Aquí dentro está
-// todo lo que ata este runtime a Node: `node:http`, `node:fs` y `process.env`.
-// Un módulo que sólo calcula y devuelve marcado no necesita nada de esto, y
-// arrastrarlo le impide vivir en un componente de cliente o en el edge.
 let __server: http.Server | null = null;
 
 // Sirve archivos estáticos de la app web (index.html, client.js) desde la raíz
@@ -366,7 +350,48 @@ export async function __rpc(fn: string, args: unknown[]): Promise<unknown> {
   return (data as Record<string, unknown>).ok;
 }
 
-// @marea:servidor-fin
+
+// Núcleo compartido de los DOS runtimes de Marea (generado — no editar a mano).
+//
+// QUÉ ES. La única implementación de lo que Node y el navegador necesitan
+// igual: el núcleo reactivo (signal / memo / effect / resource) y los builtins
+// puros del lenguaje. Antes vivían por duplicado en `runtime.ts` y en
+// `browser.js` y había que sincronizarlas a mano; el bug de `.append()` sobre un
+// `Set` —un Set de JS tiene `.add`— estaba en los SEIS sitios, tres por runtime,
+// y rompía el núcleo reactivo entero en los dos blancos a la vez.
+//
+// CÓMO LLEGA A CADA UNO. El codegen sustituye por este archivo el bloque
+// `@marea:nucleo-inicio/fin` de `runtime.ts` y el de `browser.js`. Se INSERTA,
+// no se importa: la salida tiene un juego de archivos fijo, y el navegador
+// recibe `client.js` tal cual, sin un `import` más que resolver ni servir.
+//
+// POR QUÉ LOS TIPOS VAN EN COMENTARIO. Este texto acaba en los dos sitios: en
+// `client.js`, que el navegador ejecuta como JavaScript plano, y dentro de
+// `runtime.ts`, que pasa por `tsc --strict`. Escribirlo en TypeScript rompe lo
+// primero. Escribirlo con tipos en JSDoc no arregla lo segundo: `tsc` IGNORA los
+// tipos de JSDoc dentro de un `.ts` —solo los lee en un `.js`—, así que al
+// quedar aquí dentro cada parámetro sería un `any` implícito y `--strict`
+// cortaría. De modo que el tipo viaja dentro de un comentario de bloque marcado
+// con `ts`. La línea de ejemplo que sigue está escrita con la marca puesta, así
+// que en cada salida se lee ya convertida — que es la demostración más corta que
+// hay de lo que hace la regla:
+//
+//     export function html(s: string): string { return s; }
+//
+//   - hacia `runtime.ts` se quitan las marcas del comentario y queda TypeScript
+//     de verdad, que `--strict` comprueba entero, anotación por anotación;
+//   - hacia `client.js` se quita el comentario completo y queda JavaScript.
+//
+// Es UNA regla textual, y lo que va dentro del comentario es TypeScript literal:
+// no hay traducción por medio que pueda mentir. Y lo que este archivo ES —el
+// JavaScript que corre en el navegador— se comprueba aparte con `tsc --checkJs`,
+// que es justo quien cazó el `.append` sobre el `Set`.
+
+/// Error de validación del límite: lo provoca una petición mal formada, no un
+/// fallo del servidor, así que el servidor responde 400 y no 500. Vive aquí
+/// porque los builtins que cortan (división entre cero, índice fuera de rango)
+/// lo lanzan en los dos runtimes.
+export class __BoundaryError extends Error {}
 
 // Comparación de variantes para 'match' (best-effort hasta tener uniones reales).
 export function __marea_is(value: unknown, tag: string): boolean {
@@ -388,6 +413,7 @@ export function __marea_is(value: unknown, tag: string): boolean {
 // ciclo reactivo (un effect que reescribe lo que lee) se detecta y aborta con
 // un error claro en vez de colgarse.
 
+
 interface Reaction {
   invalidate(): void;
 }
@@ -396,8 +422,14 @@ interface EffectReaction extends Reaction {
   execute(): void;
 }
 
+export interface Cell<T> {
+  get(): T;
+  set(v: T): void;
+}
+
+
 let __currentSub: Reaction | null = null;
-const __pending = new Set<EffectReaction>();
+const __pending: Set<EffectReaction> = new Set();
 let __flushing = false;
 
 function __flush(): void {
@@ -421,14 +453,9 @@ function __flush(): void {
   }
 }
 
-export interface Cell<T> {
-  get(): T;
-  set(v: T): void;
-}
-
 export function __signal<T>(initial: T): Cell<T> {
   let value = initial;
-  const subs = new Set<Reaction>();
+  const subs: Set<Reaction> = new Set();
   return {
     get(): T {
       if (__currentSub) subs.add(__currentSub);
@@ -482,7 +509,7 @@ export function __resource(f: () => Promise<unknown>): Cell<unknown> {
 }
 
 export function __memo<T>(fn: () => T): Cell<T> {
-  const subs = new Set<Reaction>();
+  const subs: Set<Reaction> = new Set();
   let value: T;
   let dirty = true;
   const reaction: Reaction = {
@@ -509,29 +536,36 @@ export function __memo<T>(fn: () => T): Cell<T> {
       if (__currentSub) subs.add(__currentSub);
       return value;
     },
-    // Un memo es derivado: no se asigna directamente.
-    set(_v: T): void {},
+    // Un memo es DERIVADO: asignarle no significa nada, y el verificador ya
+    // rechaza `x = ...` sobre una `reactive` sin `mut` (E_ASSIGN_IMMUTABLE). Si
+    // aun así se llega aquí —con `--no-check`, o desde JS a mano— se avisa en
+    // vez de tragárselo: la versión muda de Node perdía la escritura en silencio
+    // mientras la del navegador ya avisaba, y no puede haber dos respuestas.
+    set(_v: T): void {
+      throw new Error("una derivada 'reactive' es de solo lectura");
+    },
   };
 }
 
 // --- builtins del lenguaje ---
+
 export function print(x: unknown): void {
   console.log(x);
 }
+
 // `concat` y `len` sirven para texto Y para listas: son la misma idea sobre dos
 // estructuras, y tener `unir`/`largo` aparte solo duplicaba la superficie.
 export function concat(a: unknown, b: unknown): unknown {
   if (Array.isArray(a) && Array.isArray(b)) return a.concat(b);
   return String(a) + String(b);
 }
-export function render(x: unknown): void {
-  console.log("[render]", x);
-}
+
 export function len(x: unknown): number {
   if (Array.isArray(x)) return x.length;
   // Se cuentan puntos de código, no unidades UTF-16: "🌊" mide 1, no 2.
   return Array.from(String(x)).length;
 }
+
 export function text(x: unknown): string {
   // Una variante se imprime por su nombre; si no, saldría "[object Object]".
   if (x !== null && typeof x === "object") {
@@ -540,19 +574,29 @@ export function text(x: unknown): string {
   }
   return String(x);
 }
-// Escapa un texto para incrustarlo en HTML. El lenguaje construye marcado
-// concatenando cadenas y 'render' lo inyecta por innerHTML, así que sin esto un
-// dato persistido vía RPC se ejecuta como marcado en todos los clientes.
+
+// 'render' pinta en el #app cuando hay DOM (el navegador) y registra en consola
+// cuando no lo hay (Node). Una sola implementación: la rama que sobra en cada
+// blanco no se toma, y así el mismo programa no tiene dos comportamientos según
+// qué archivo se copió.
+export function render(x: unknown): void {
+  const app = typeof document !== "undefined" && document.getElementById("app");
+  if (app) app.innerHTML = String(x);
+  else console.log("[render]", x);
+}
+
 // División entera. En JS `7/0` es Infinity y `0/0` es NaN: valores que no son
 // enteros y que se colarían dentro de un Int mintiendo sobre su tipo. El backend
 // WASM trapea, así que aquí también se corta —el mismo programa no puede dar
-// Infinity en un blanco y morir en el otro—.
+// Infinity en un blanco y morir en el otro—. Trunca HACIA CERO, igual que
+// `i32.div_s`: `-7/2` es -3, no -4.
 export function __div(a: number, b: number): number {
   if (b === 0) {
     throw new __BoundaryError("división entre cero");
   }
   return Math.trunc(a / b);
 }
+
 export function __rem(a: number, b: number): number {
   if (b === 0) {
     throw new __BoundaryError("módulo entre cero");
@@ -560,6 +604,10 @@ export function __rem(a: number, b: number): number {
   return a % b;
 }
 
+// Escapa un texto para incrustarlo en HTML. El lenguaje construye marcado
+// concatenando cadenas y 'render' lo inyecta por innerHTML, así que sin esto un
+// dato persistido vía RPC se ejecuta como marcado en todos los clientes. El `&`
+// va PRIMERO: después, el `&` de `&lt;` se volvería a escapar.
 export function escape(x: unknown): string {
   return String(x)
     .replace(/&/g, "&amp;")
@@ -568,28 +616,23 @@ export function escape(x: unknown): string {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
+
 // Marca una cadena como marcado ya seguro. En runtime es la identidad:
 // la garantía es estática (el tipo Html), esto solo la hace explícita
 // en el fuente para que se vea en una revisión.
 export function html(s: string): string {
   return s;
 }
-// Indexado de lista con verificación de rango: un índice fuera de rango lanza
-// un error claro en vez de devolver 'undefined' (que reventaría más tarde).
+
 // --- listas: construir en runtime (el lenguaje no tiene bucles ni cierres, así
 // que sin esto una función no puede devolver un subconjunto filtrado) ---
 
 export function append(xs: unknown[], x: unknown): unknown[] {
   return xs.concat([x]);
 }
-// --- texto ---
 
-export function contains(s: string, sub: string): boolean {
-  return String(s).includes(String(sub));
-}
-export function lower(s: string): string {
-  return String(s).toLowerCase();
-}
+// Indexado de lista con verificación de rango: un índice fuera de rango lanza
+// un error claro en vez de devolver 'undefined' (que reventaría más tarde).
 export function __index<T>(xs: T[], i: number): T {
   if (i < 0 || i >= xs.length) {
     // Si el índice vino de la red es una petición mal formada (400), no un
@@ -599,7 +642,20 @@ export function __index<T>(xs: T[], i: number): T {
   return xs[i];
 }
 
-// @marea:store-inicio — el codegen recorta hasta @marea:store-fin cuando el
+// --- texto ---
+
+export function contains(s: string, sub: string): boolean {
+  return String(s).includes(String(sub));
+}
+
+export function lower(s: string): string {
+  return String(s).toLowerCase();
+}
+
+export function __badRequest(detalle: string): never {
+  throw new __BoundaryError(detalle);
+}
+
 // módulo no declara ningún `store`. Aquí viven los backends de persistencia,
 // y tres de ellos hacen `import("pg"|"mysql2"|"mongodb")`: paquetes de npm
 // que un consumidor sin base de datos no instala. Un empaquetador (Next,
@@ -635,9 +691,7 @@ interface __Backend {
   update(id: number, item: unknown): Promise<void>;
   remove(id: number): Promise<void>;
 }
-// @marea:store-fin
 
-// @marea:servidor-inicio — el codegen recorta hasta @marea:servidor-fin cuando
 // el módulo no cruza la frontera de red ni declara almacenes. Aquí dentro está
 // todo lo que ata este runtime a Node: `node:http`, `node:fs` y `process.env`.
 // Un módulo que sólo calcula y devuelve marcado no necesita nada de esto, y
@@ -731,7 +785,6 @@ export function post(url: string, cuerpo: string): Promise<string> {
   return __http(url, "POST", cuerpo);
 }
 
-// @marea:servidor-fin
 
 // --- lectura de JSON por ruta ---
 // El lenguaje no tiene valores dinámicos, así que una respuesta se lee por
@@ -785,7 +838,6 @@ export function jsonLen(texto: string, ruta: string): number {
   return 0;
 }
 
-// @marea:store-inicio — el codegen recorta hasta @marea:store-fin cuando el
 // módulo no declara ningún `store`. Aquí viven los backends de persistencia,
 // y tres de ellos hacen `import("pg"|"mysql2"|"mongodb")`: paquetes de npm
 // que un consumidor sin base de datos no instala. Un empaquetador (Next,
@@ -1208,4 +1260,3 @@ export function update(a: __Store, i: number, x: unknown): Promise<void> {
 export function remove(a: __Store, i: number): Promise<void> {
   return a.remove(i);
 }
-// @marea:store-fin

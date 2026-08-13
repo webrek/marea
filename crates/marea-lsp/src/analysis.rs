@@ -342,6 +342,9 @@ fn find_in_expr(expr: &Expr, offset: usize) -> Option<Node<'_>> {
             marea_syntax::ast::TemplatePart::Interp { expr, .. } => find_in_expr(expr, offset),
             _ => None,
         }),
+        // El cuerpo de un cierre es un bloque como cualquier otro: hay que poder
+        // poner el cursor dentro y que el hover y el ir-a-definición funcionen.
+        Expr::Fn { body, .. } => find_in_block(body, offset),
         Expr::Unary { expr: inner, .. } => find_in_expr(inner, offset),
         Expr::Binary { left, right, .. } => {
             find_in_expr(left, offset).or_else(|| find_in_expr(right, offset))

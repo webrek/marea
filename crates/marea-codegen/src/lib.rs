@@ -208,9 +208,6 @@ fn runtime_de(module: &Module) -> String {
         recortar.push("servidor");
     }
     let completo = runtime_ts();
-    if recortar.is_empty() {
-        return completo.to_string();
-    }
     let mut out = String::with_capacity(completo.len());
     let mut dentro = false;
     for linea in completo.lines() {
@@ -1419,6 +1416,23 @@ fn emit_match(
 
 fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
     match e {
+        // Un cierre se emite como función flecha, y `async` como todas las del
+        // usuario: su cuerpo puede llamar a cualquier cosa, y el emisor de
+        // llamadas ya pone el `await` a todo lo que no sea un builtin síncrono.
+        // La captura sale gratis porque JavaScript ya cierra sobre el entorno
+        // léxico; el verificador es quien impone que sea POR VALOR, prohibiendo
+        // capturar una variable mutable.
+        Expr::Fn { params, body, .. } => {
+            let ps: Vec<String> = params
+                .iter()
+                .map(|p| format!("{}: {}", p.name, map_type(&p.ty)))
+                .collect();
+            format!(
+                "(async ({}) => {{\n{}\n}})",
+                ps.join(", "),
+                emit_block_inner(body, 1, reactive)
+            )
+        }
         Expr::Int { value, .. } => value.to_string(),
         Expr::Float { value, .. } => value.to_string(),
         Expr::Str { value, .. } => js_string(value),

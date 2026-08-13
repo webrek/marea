@@ -142,10 +142,12 @@ fn la_session_vive_solo_en_el_servidor() {
     let p = build(CON_SESSION);
     contiene(&p.server, "async function quien(token: string)");
     no_contiene(&p.server, "__register(\"quien\"");
-    no_contiene(&p.client, "quien");
+    // Se busca la DECLARACIÓN, no la palabra: "quien" es español corriente y
+    // aparece en la prosa de los comentarios del runtime, que va inlineado.
+    no_contiene(&p.client, "function quien");
 
     let app = emit_app(&parse(CON_SESSION).unwrap());
-    no_contiene(&app.client_js, "quien");
+    no_contiene(&app.client_js, "function quien");
 }
 
 #[test]
@@ -264,9 +266,13 @@ fn un_modulo_puro_no_arrastra_node() {
         "{}",
         p.runtime
     );
-    // Los marcadores hablan con el codegen, no con quien lee la salida.
+    // Los marcadores hablan con el codegen, no con quien lee la salida. Se
+    // buscan LÍNEAS de marcador: el núcleo los menciona en su prosa al explicar
+    // cómo se compone, y eso no es un marcador.
     assert!(
-        !p.runtime.contains("@marea:"),
+        !p.runtime
+            .lines()
+            .any(|l| l.trim_start().starts_with("// @marea:")),
         "quedaron marcadores en la salida"
     );
 }

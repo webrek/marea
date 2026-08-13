@@ -47,12 +47,7 @@ fn hay_node() -> bool {
 fn en_ambos(nombre: &str, guion: &str) -> Vec<(&'static str, String)> {
     let mut salidas = Vec::new();
     for (quien, runtime, modulo, entrada) in [
-        (
-            "node",
-            marea_codegen::runtime_ts(),
-            "runtime.ts",
-            "t.ts",
-        ),
+        ("node", marea_codegen::runtime_ts(), "runtime.ts", "t.ts"),
         (
             "navegador",
             marea_codegen::browser_rt(),
@@ -141,9 +136,17 @@ try { __rem(1, 0); console.log("no cortó"); } catch { console.log("cortó"); }
     ) {
         let mut lineas = out.lines();
         // Hacia cero: -7/2 = -3 (si truncara hacia abajo sería -4).
-        assert_eq!(lineas.next().unwrap(), "3|-3|-3|3|0|0|3333", "runtime de {quien}");
+        assert_eq!(
+            lineas.next().unwrap(),
+            "3|-3|-3|3|0|0|3333",
+            "runtime de {quien}"
+        );
         // El resto acompaña al truncado: conserva el signo del dividendo.
-        assert_eq!(lineas.next().unwrap(), "1|-1|1|-1|1|-1|1", "runtime de {quien}");
+        assert_eq!(
+            lineas.next().unwrap(),
+            "1|-1|1|-1|1|-1|1",
+            "runtime de {quien}"
+        );
         assert_eq!(lineas.next().unwrap(), "cortó", "runtime de {quien}");
         assert_eq!(lineas.next().unwrap(), "cortó", "runtime de {quien}");
     }
