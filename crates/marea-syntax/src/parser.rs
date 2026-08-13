@@ -63,11 +63,15 @@ impl Parser {
     /// error. Lo usan `build`/`build-wasm`, que exigen un AST completo y válido.
     pub fn parse_module(tokens: Vec<Token>) -> PResult<Module> {
         let mut p = Parser::new(tokens);
+        let mut imports = Vec::new();
+        while p.check(&TokenKind::Import) {
+            imports.push(p.parse_import()?);
+        }
         let mut items = Vec::new();
         while !p.at_eof() {
             items.push(p.parse_item()?);
         }
-        Ok(Module { items })
+        Ok(Module { imports, items })
     }
 
     /// Punto de entrada CON RECUPERACIÓN: devuelve el módulo PARCIAL (los items
@@ -76,8 +80,22 @@ impl Parser {
     /// `marea check` para reportar varios diagnósticos a la vez.
     pub fn parse_module_recovering(tokens: Vec<Token>) -> (Module, Vec<SyntaxError>) {
         let mut p = Parser::new(tokens);
+        let mut imports = Vec::new();
         let mut items = Vec::new();
         let mut errors = Vec::new();
+        while p.check(&TokenKind::Import) {
+            let before = p.pos;
+            match p.parse_import() {
+                Ok(import) => imports.push(import),
+                Err(e) => {
+                    errors.push(e);
+                    p.recover_to_item();
+                }
+            }
+            if p.pos == before && !p.at_eof() {
+                p.advance();
+            }
+        }
         while !p.at_eof() {
             let before = p.pos;
             match p.parse_item() {
@@ -92,11 +110,11 @@ impl Parser {
                 p.advance();
             }
         }
-        (Module { items }, errors)
+        (Module { imports, items }, errors)
     }
 
-    /// Salta tokens hasta el inicio probable del siguiente item (`@`, `fn`,
-    /// `type`, `let`, `reactive`) o el fin del archivo.
+    /// Salta tokens hasta el inicio probable del siguiente item (`import`, `@`,
+    /// `fn`, `type`, `let`, `reactive`) o el fin del archivo.
     ///
     /// NO avanza incondicionalmente: si el error dejó el cursor justo al inicio
     /// de un item (p. ej. un `;` faltante reportado sobre la `fn` siguiente), no
@@ -106,7 +124,8 @@ impl Parser {
         while !self.at_eof() {
             if matches!(
                 self.peek_kind(),
-                TokenKind::At
+                TokenKind::Import
+                    | TokenKind::At
                     | TokenKind::Fn
                     | TokenKind::Type
                     | TokenKind::Let
@@ -189,6 +208,16 @@ impl Parser {
                 Ok(Item::Let(self.parse_let()?))
             }
             TokenKind::Store if sin_anotacion => self.parse_store(),
+            // Un `import` aquí está bien escrito pero mal colocado. Se consume
+            // entero antes de dar el error para que la recuperación siga en el
+            // elemento siguiente y no en mitad de la lista de nombres.
+            TokenKind::Import if sin_anotacion => {
+                let import = self.parse_import()?;
+                Err(SyntaxError::new(
+                    "los 'import' van al principio del archivo, antes de los demás elementos",
+                    import.span,
+                ))
+            }
             _ if !sin_anotacion => Err(SyntaxError::new(
                 "las anotaciones (@server/@client/@edge/@session) solo aplican a funciones",
                 self.peek().span,
@@ -198,6 +227,71 @@ impl Parser {
                 self.peek().span,
             )),
         }
+    }
+
+    /// `import { getUser, User } from "./usuarios.mar";`
+    ///
+    /// `from` no es palabra clave: se reconoce por posición, así que sigue
+    /// valiendo como nombre de variable o de campo. Añadir palabras reservadas
+    /// rompe programas que ya funcionaban, y este no las necesita.
+    fn parse_import(&mut self) -> PResult<Import> {
+        let kw = self.expect(&TokenKind::Import, "'import'")?;
+        self.expect(&TokenKind::LBrace, "'{' con los nombres a importar")?;
+
+        let mut names: Vec<ImportName> = Vec::new();
+        if !self.check(&TokenKind::RBrace) {
+            loop {
+                let (name, span) = self.expect_ident("un nombre a importar")?;
+                if names.iter().any(|n| n.name == name) {
+                    return Err(SyntaxError::new(
+                        format!("el nombre '{name}' se importa dos veces"),
+                        span,
+                    ));
+                }
+                names.push(ImportName { name, span });
+                if !self.eat(&TokenKind::Comma) {
+                    break;
+                }
+                if self.check(&TokenKind::RBrace) {
+                    break; // coma final permitida
+                }
+            }
+        }
+        let cierre = self.expect(&TokenKind::RBrace, "'}' para cerrar los nombres importados")?;
+        // Un import sin nombres no trae nada: es siempre un descuido, y dejarlo
+        // pasar sólo aplaza la confusión al momento de usar lo que no llegó.
+        if names.is_empty() {
+            return Err(SyntaxError::new(
+                "un 'import' debe traer al menos un nombre entre las llaves",
+                kw.span.to(cierre.span),
+            ));
+        }
+
+        if !matches!(self.peek_kind(), TokenKind::Ident(id) if id == "from") {
+            return Err(SyntaxError::new(
+                "se esperaba 'from' tras los nombres importados",
+                self.peek().span,
+            ));
+        }
+        self.advance();
+
+        let (path, path_span) = match self.peek_kind().clone() {
+            TokenKind::Str(s) => (s, self.advance().span),
+            _ => {
+                return Err(SyntaxError::new(
+                    "se esperaba la ruta del módulo entre comillas, p. ej. \"./usuarios.mar\"",
+                    self.peek().span,
+                ))
+            }
+        };
+        let semi = self.expect(&TokenKind::Semicolon, "';' al final del 'import'")?;
+
+        Ok(Import {
+            path,
+            path_span,
+            names,
+            span: kw.span.to(semi.span),
+        })
     }
 
     /// `store Post;` — declara el tipo de elemento del store del servidor.

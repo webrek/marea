@@ -519,3 +519,91 @@ fn politica_sin_nombre_no_liga_nada() {
     let Item::Fn(f) = &m.items[0] else { panic!() };
     assert!(f.identidad_bind.is_none());
 }
+
+// ---------------------------------------------------------------------------
+// Imports. Aquí sólo la sintaxis: seguir las rutas por el disco es cosa de
+// `resolve_program`, y eso se prueba en tests/modulos.rs.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn parse_import_simple() {
+    let src = "import { getUser, User } from \"./usuarios.mar\";\nfn main() {}";
+    let m = parse(src).unwrap();
+    assert_eq!(m.imports.len(), 1);
+    let i = &m.imports[0];
+    assert_eq!(i.path, "./usuarios.mar");
+    let nombres: Vec<&str> = i.names.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(nombres, ["getUser", "User"]);
+    // El span de cada nombre lo señala a él, para poder subrayarlo si el módulo
+    // destino resulta no exportarlo.
+    assert_eq!(&src[i.names[0].span.start..i.names[0].span.end], "getUser");
+    assert_eq!(&src[i.path_span.start..i.path_span.end], "\"./usuarios.mar\"");
+    // Los imports NO son items: quien recorre `items` ve lo mismo que antes.
+    assert_eq!(m.items.len(), 1);
+}
+
+#[test]
+fn parse_varios_imports_con_coma_final() {
+    let m = parse("import { A, } from \"./a.mar\";\nimport { B } from \"../b.mar\";").unwrap();
+    assert_eq!(m.imports.len(), 2);
+    assert_eq!(m.imports[0].names.len(), 1);
+    assert_eq!(m.imports[1].path, "../b.mar");
+}
+
+#[test]
+fn un_archivo_sin_imports_los_deja_vacios() {
+    let m = parse("fn main() {}").unwrap();
+    assert!(m.imports.is_empty());
+}
+
+// 'from' se reconoce por posición, no como palabra reservada: reservarla habría
+// roto los programas que ya la usaban de nombre.
+#[test]
+fn from_sigue_valiendo_como_identificador() {
+    let m = parse("fn f(from: Int) -> Int { return from + 1; }").unwrap();
+    let Item::Fn(f) = &m.items[0] else { panic!() };
+    assert_eq!(f.params[0].name, "from");
+}
+
+#[test]
+fn los_imports_van_al_principio() {
+    let e = parse("fn main() {}\nimport { x } from \"./a.mar\";").expect_err("debe fallar");
+    assert!(e.message.contains("principio del archivo"), "{}", e.message);
+}
+
+#[test]
+fn import_sin_from_da_error() {
+    let e = parse("import { A } \"./a.mar\";").expect_err("debe fallar");
+    assert!(e.message.contains("'from'"), "{}", e.message);
+}
+
+#[test]
+fn import_sin_ruta_da_error() {
+    let e = parse("import { A } from ./a.mar;").expect_err("debe fallar");
+    assert!(e.message.contains("entre comillas"), "{}", e.message);
+}
+
+#[test]
+fn import_vacio_da_error() {
+    let e = parse("import { } from \"./a.mar\";").expect_err("debe fallar");
+    assert!(e.message.contains("al menos un nombre"), "{}", e.message);
+}
+
+#[test]
+fn import_con_nombre_repetido_da_error() {
+    let e = parse("import { A, A } from \"./a.mar\";").expect_err("debe fallar");
+    assert!(e.message.contains("dos veces"), "{}", e.message);
+}
+
+// El LSP parsea texto a medio escribir en cada pulsación: un import roto tiene
+// que dar su diagnóstico y dejar pasar el resto del archivo, no colgar el bucle.
+#[test]
+fn parse_recovering_sigue_tras_un_import_roto() {
+    let (m, errores) = marea_syntax::parse_recovering(
+        "import { A } from ;\nimport { B } from \"./b.mar\";\nfn main() {}",
+    );
+    assert_eq!(errores.len(), 1, "{:?}", errores);
+    assert_eq!(m.imports.len(), 1);
+    assert_eq!(m.imports[0].path, "./b.mar");
+    assert_eq!(m.items.len(), 1);
+}
