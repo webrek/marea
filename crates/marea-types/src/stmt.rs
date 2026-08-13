@@ -74,6 +74,11 @@ impl Checker {
                 .insert(p.name.clone(), (pty, false));
         }
 
+        // La identidad que exige la política entra en el mismo scope que los
+        // parámetros, pero DESPUÉS de ellos: así un choque de nombres se detecta
+        // aquí y no sombrea en silencio a un parámetro.
+        self.bind_identidad(f);
+
         // Valida el tipo de retorno declarado.
         if let Some(rt) = &f.return_type {
             self.validate_type_exists(rt);
@@ -139,6 +144,71 @@ impl Checker {
                 f.span,
             ));
         }
+    }
+
+    /// Liga el nombre de `@server(u: Usuario)` en el scope de la función.
+    ///
+    /// La identidad NO es un parámetro: no viaja en la llamada, la inyecta el
+    /// runtime tras resolver el token. Pero dentro del cuerpo tiene que ser una
+    /// variable como cualquier otra, o la política sería una etiqueta decorativa
+    /// que no deja escribir `u.nombre`. Es inmutable: quién eres no se reasigna.
+    ///
+    /// `@server(Usuario)` sin nombre no liga nada —exige identidad sin usarla— y
+    /// `@server(Public)` no tiene ninguna que ligar.
+    fn bind_identidad(&mut self, f: &FnDecl) {
+        let Some(politica) = &f.politica else { return };
+        let span = politica.span();
+        if matches!(politica, Type::Name { name, .. } if name == "Public") {
+            if let Some(nombre) = &f.identidad_bind {
+                self.error(TypeError::new(
+                    "E_IDENTIDAD_EN_PUBLIC",
+                    format!(
+                        "'Public' es la decisión de no exigir identidad, así que no hay \
+                         ninguna que ligar a '{nombre}'; escribe '@server(Public)' a secas"
+                    ),
+                    span,
+                ));
+            }
+            return;
+        }
+        // El generador inyecta la identidad como PRIMER parámetro de la función
+        // emitida: con el nombre que dé la política, o con uno reservado si no lo
+        // da. Un parámetro que se llame igual produciría dos parámetros con el
+        // mismo nombre, es decir un archivo que ni siquiera carga.
+        let nombre = match &f.identidad_bind {
+            Some(n) => n.clone(),
+            None => "__identidad".to_string(),
+        };
+        if f.params.iter().any(|p| p.name == nombre) {
+            self.error(TypeError::new(
+                "E_IDENTIDAD_CHOCA_PARAM",
+                format!(
+                    "'{nombre}' ya es un parámetro de '{}': la identidad no viaja en la \
+                     llamada —la resuelve el servidor desde el token—, así que no puede \
+                     compartir nombre con algo que el cliente sí manda",
+                    f.name
+                ),
+                span,
+            ));
+            return;
+        }
+        // `@server(Usuario)` exige identidad sin nombrarla: no hay nada que ligar.
+        if f.identidad_bind.is_none() {
+            return;
+        }
+        // El nombre también sombrearía a un builtin dentro del cuerpo:
+        // `print(...)` dejaría de ser el builtin y el archivo generado moriría.
+        if builtins::lookup(&nombre).is_some() || es_interno_del_runtime(&nombre) {
+            self.error(TypeError::new(
+                "E_REDEFINE_BUILTIN",
+                format!("no se puede llamar '{nombre}' a la identidad: es un builtin"),
+                span,
+            ));
+            return;
+        }
+        let ty = self.ty_from_syntax(politica);
+        let scope = self.scopes.last_mut().unwrap();
+        scope.insert(nombre, (ty, false));
     }
 
     pub(crate) fn check_block(&mut self, block: &Block) {

@@ -1693,3 +1693,98 @@ fn e_session_no_invocable() {
         codes(&errs)
     );
 }
+
+// --------- La identidad ligada: `@server(u: Usuario)` ---------
+//
+// Exigir identidad y no poder mirarla dejaría la política en una etiqueta. El
+// nombre entra en el scope de la función como un binding más —inmutable, del
+// tipo de la política— pero NO como parámetro: no viaja en la llamada, la
+// inyecta el runtime tras resolver el token.
+
+/// Programa mínimo con identidad, al que se le cuelga el handler de cada caso.
+fn con_identidad(handler: &str) -> Vec<marea_types::TypeError> {
+    let src = format!(
+        "type Usuario = {{ nombre: String }};\n\
+         @session fn quien(t: String) -> Usuario | NoAutorizado {{ return NoAutorizado; }}\n\
+         {handler}"
+    );
+    check_src(&src)
+}
+
+#[test]
+fn la_identidad_nombrada_esta_en_scope() {
+    let errs = con_identidad(
+        "@server(u: Usuario) fn publicar(texto: String) { print(u.nombre); print(texto); }",
+    );
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+#[test]
+fn la_identidad_lleva_el_tipo_de_la_politica() {
+    // Si el binding no tuviera el tipo de la política, un campo inventado
+    // pasaría desapercibido y el `u.nombre` de arriba sería casualidad.
+    let errs = con_identidad("@server(u: Usuario) fn publicar() { print(u.telefono); }");
+    assert!(has_code(&errs, "E_NO_FIELD"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn la_identidad_es_inmutable() {
+    // Quién eres no se reasigna: lo decidió la @session con el token.
+    let errs = con_identidad(
+        "@server(u: Usuario) fn publicar() { u = Usuario { nombre: \"otro\" }; }",
+    );
+    assert!(has_code(&errs, "E_ASSIGN_IMMUTABLE"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn la_politica_sin_nombre_no_liga_nada() {
+    // `@server(Usuario)` exige identidad sin usarla; no introduce ninguna
+    // variable mágica que el cuerpo pueda leer por accidente.
+    let errs = con_identidad("@server(Usuario) fn borrar(i: Int) { print(u); }");
+    assert!(has_code(&errs, "E_UNRESOLVED_NAME"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn e_identidad_choca_param() {
+    // El cliente manda los parámetros; la identidad la pone el servidor. Que
+    // compartieran nombre sería no poder decir cuál de los dos estás leyendo.
+    let errs = con_identidad("@server(u: Usuario) fn publicar(u: String) { print(u); }");
+    assert!(
+        has_code(&errs, "E_IDENTIDAD_CHOCA_PARAM"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+#[test]
+fn e_identidad_choca_con_el_nombre_reservado() {
+    // Aunque la política no la nombre, el generador la inyecta como primer
+    // parámetro con un nombre reservado: un parámetro homónimo daría dos
+    // parámetros iguales, o sea un archivo generado que ni siquiera carga.
+    let errs = con_identidad("@server(Usuario) fn borrar(__identidad: Int) { print(1); }");
+    assert!(
+        has_code(&errs, "E_IDENTIDAD_CHOCA_PARAM"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+#[test]
+fn e_identidad_en_public() {
+    // `Public` es la decisión de no exigir identidad: no hay ninguna que ligar,
+    // y el runtime no pasaría nada, así que `u` sería 'undefined' en ejecución.
+    let errs = check_src("@server(u: Public) fn feed() -> Int { return 1; }");
+    assert!(
+        has_code(&errs, "E_IDENTIDAD_EN_PUBLIC"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+#[test]
+fn la_identidad_no_puede_llamarse_como_un_builtin() {
+    // Se vuelve el primer parámetro de la función emitida: llamarla `print`
+    // sombrearía al builtin dentro del cuerpo y el archivo generado moriría.
+    let errs = con_identidad("@server(print: Usuario) fn publicar() { print(1); }");
+    assert!(has_code(&errs, "E_REDEFINE_BUILTIN"), "{:?}", codes(&errs));
+}

@@ -25,11 +25,14 @@ fn quien(token: String) -> Usuario | NoAutorizado {
     return NoAutorizado;
 }
 
-// Exige identidad. El Usuario NO viaja en los argumentos: lo inyecta el runtime
-// tras resolver el token, así que el cliente no puede fabricarlo.
-@server(Usuario)
+// Exige identidad y le pone nombre: dentro del cuerpo, 'u' es el Usuario que
+// resolvió la @session. NO viaja en los argumentos —el cliente sigue llamando
+// publicar(texto)—, lo inyecta el runtime como primer argumento tras validar el
+// token, así que no hay forma de fabricarlo desde fuera. Sin token, la petición
+// se corta con un 401 antes de que este cuerpo llegue a ejecutarse.
+@server(u: Usuario)
 fn publicar(texto: String) {
-    save(posts, Post { autor: "yo", texto: texto });
+    save(posts, Post { autor: u.nombre, texto: texto });
 }
 
 // Público, dicho a propósito. Es la otra mitad de la regla: que algo sea abierto
