@@ -58,6 +58,23 @@ pub fn lookup(name: &str) -> Option<Ty> {
             ret: Box::new(Ty::Html),
             location: None,
         }),
+        // El modelo de eventos: `on("click", fn() { ... })` devuelve el ATRIBUTO
+        // que ata un elemento a su manejador, así que su tipo es `Html` y entra
+        // en un hueco crudo de plantilla como cualquier otro marcado. El resto
+        // de reglas —qué eventos existen, qué forma tiene un manejador, dónde
+        // vale ponerlo— vive en `crate::eventos`.
+        "on" => Some(Ty::Fn {
+            params: vec![
+                Ty::String,
+                Ty::Fn {
+                    params: vec![],
+                    ret: Box::new(Ty::Unit),
+                    location: None,
+                },
+            ],
+            ret: Box::new(Ty::Html),
+            location: None,
+        }),
         // Estado del servidor: 'save(a, x)' añade al almacén; 'all(a)' lo lee.
         "save" => Some(Ty::Fn {
             params: vec![Ty::Unknown],
@@ -173,6 +190,7 @@ pub const VALUE_NAMES: &[&str] = &[
     "text",
     "escape",
     "html",
+    "on",
     "save",
     "all",
     "update",

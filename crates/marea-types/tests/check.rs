@@ -2014,3 +2014,150 @@ fn un_cierre_que_no_cruza_la_red_no_molesta_a_nadie() {
     let errs = check_src(src);
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
+
+// --- el modelo de eventos: 'on' -------------------------------------------
+//
+// Un manejador es la otra mitad de la frontera del tiempo: el estado ya llegaba
+// al DOM, pero el DOM no podía tocar el estado, y lo único que había era un
+// `onclick="marea.f(3)"` escrito dentro de una cadena, que no miraba nadie.
+// Estas reglas son exactamente lo que aquella cadena no podía comprobar.
+
+#[test]
+fn on_engancha_un_manejador_en_client() {
+    let src = "\
+reactive mut n = 0;
+@client fn vista() -> Html { return `<b {!on(\"click\", fn() { n = n + 1; })}>+</b>`; }
+";
+    let errs = check_src(src);
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// Sin anotación también vale: esa función se emite en los dos bundles y en el
+// del servidor `on` sencillamente no llega a llamarse.
+#[test]
+fn on_vale_en_una_funcion_sin_anotacion() {
+    let src = "fn boton() -> Html { return `<b {!on(\"click\", fn() { print(1); })}>x</b>`; }";
+    let errs = check_src(src);
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// Un manejador no puede vivir en el servidor: allí no hay DOM al que engancharlo.
+#[test]
+fn e_on_off_client() {
+    let src = "\
+@server fn boton() -> Html { return `<b {!on(\"click\", fn() { print(1); })}>x</b>`; }
+";
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_ON_OFF_CLIENT"), "{:?}", codes(&errs));
+}
+
+// Un evento mal escrito no da error en ningún sitio: el navegador acepta
+// `addEventListener("clcik", ...)` sin rechistar y lo que se ve es un botón
+// mudo. Aquí corta, y con la lista de los válidos delante.
+#[test]
+fn e_evento_desconocido() {
+    let src = "\
+@client fn v() -> Html { return `<b {!on(\"clcik\", fn() { print(1); })}>x</b>`; }
+";
+    let errs = check_src(src);
+    assert!(
+        has_code(&errs, "E_EVENTO_DESCONOCIDO"),
+        "{:?}",
+        codes(&errs)
+    );
+    let e = errs
+        .iter()
+        .find(|e| e.code == "E_EVENTO_DESCONOCIDO")
+        .unwrap();
+    assert!(e.message.contains("click"), "{}", e.message);
+    assert!(e.message.contains("pointerleave"), "{}", e.message);
+}
+
+#[test]
+fn e_evento_no_literal() {
+    let src = "\
+@client fn v(e: String) -> Html { return `<b {!on(e, fn() { print(1); })}>x</b>`; }
+";
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_EVENTO_NO_LITERAL"), "{:?}", codes(&errs));
+}
+
+// El manejador no recibe el evento como valor: esa forma todavía no existe en
+// el lenguaje, así que un cierre con parámetros es una expectativa falsa.
+#[test]
+fn e_manejador_con_params() {
+    let src = "\
+@client fn v() -> Html { return `<b {!on(\"click\", fn(x: Int) { print(x); })}>x</b>`; }
+";
+    let errs = check_src(src);
+    assert!(
+        has_code(&errs, "E_MANEJADOR_CON_PARAMS"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+#[test]
+fn e_manejador_devuelve() {
+    let src = "\
+@client fn v() -> Html { return `<b {!on(\"click\", fn() -> Int { return 1; })}>x</b>`; }
+";
+    let errs = check_src(src);
+    assert!(
+        has_code(&errs, "E_MANEJADOR_DEVUELVE"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+#[test]
+fn e_manejador_no_fn() {
+    let src = "@client fn v() -> Html { return `<b {!on(\"click\", 3)}>x</b>`; }";
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_MANEJADOR_NO_FN"), "{:?}", codes(&errs));
+}
+
+// Escapado, el atributo llega al navegador como texto y el manejador no se
+// engancha nunca: otro botón mudo sin un aviso. Es el hueco crudo o nada.
+#[test]
+fn e_on_escapado() {
+    let src = "\
+@client fn v() -> Html { return `<b {on(\"click\", fn() { print(1); })}>x</b>`; }
+";
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_ON_ESCAPADO"), "{:?}", codes(&errs));
+}
+
+// El caso de uso entero: asignar a una `reactive mut` desde dentro del
+// manejador. Sin esto no hay contador que valga.
+#[test]
+fn un_manejador_puede_asignar_a_una_reactiva() {
+    let src = "\
+reactive mut cuenta = 0;
+@client fn vista() -> Html {
+    return `{text(cuenta)}<b {!on(\"click\", fn() { cuenta = cuenta + 1; })}>+</b>`;
+}
+";
+    let errs = check_src(src);
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// Un manejador puede cruzar la otra frontera: llamar a una @server desde dentro
+// es lo que compone las dos mitades y hace útil el modelo entero.
+#[test]
+fn un_manejador_puede_cruzar_la_frontera_de_red() {
+    let src = "\
+@server(Public) fn guardar(n: Int) { print(n); }
+@client fn vista() -> Html { return `<b {!on(\"click\", fn() { guardar(1); })}>x</b>`; }
+";
+    let errs = check_src(src);
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// 'on' es un builtin y el bundle lo importa del runtime: redeclararlo produce
+// un archivo que ni siquiera carga.
+#[test]
+fn on_es_un_builtin_y_no_se_puede_redefinir() {
+    let errs = check_src("fn on(a: Int) -> Int { return a; }");
+    assert!(has_code(&errs, "E_REDEFINE_BUILTIN"), "{:?}", codes(&errs));
+}

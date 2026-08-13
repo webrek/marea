@@ -243,8 +243,105 @@ export function text(x) {
 // qué archivo se copió.
 export function render(x) {
   const app = typeof document !== "undefined" && document.getElementById("app");
-  if (app) app.innerHTML = String(x);
-  else console.log("[render]", x);
+  if (app) {
+    const marcado = String(x);
+    // Podar ANTES de escribir: el marcado que entra es el que dice qué
+    // manejadores siguen vivos (ver `__podar`).
+    __podar(marcado);
+    app.innerHTML = marcado;
+  } else console.log("[render]", x);
+}
+
+// --- modelo de eventos: la frontera del TIEMPO en dirección al programa ---
+//
+// QUÉ RESUELVE. El reactivo pinta de estado a DOM; esto es la vuelta. `on` es un
+// builtin del lenguaje: recibe el nombre del evento y un CIERRE, y devuelve el
+// ATRIBUTO con el que ese elemento queda atado al manejador. Como devuelve
+// marcado (`Html`), encaja en un hueco crudo de plantilla sin sintaxis nueva:
+//
+//     `<button {!on("click", fn() { cuenta = cuenta + 1; })}>suma</button>`
+//
+// POR QUÉ POR DELEGACIÓN. El cierre NO se puede escribir en el atributo: es
+// código con entorno capturado, y un atributo solo guarda texto —de ahí venía el
+// apaño de `onclick="marea.f(3)"`, que obligaba a exponer funciones globales y
+// no lo miraba nadie—. Así que el atributo lleva un ID, el cierre vive en esta
+// tabla, y hay UN oyente por tipo de evento colgado del documento que busca el
+// ID y lo invoca. Enganchar el oyente a cada elemento sería el fallo clásico:
+// re-pintar tira los nodos y sus oyentes, y quien los puso no se entera —o los
+// vuelve a poner encima de los viejos—. Colgados del documento, que ningún
+// re-pintado toca, no hay oyente huérfano ni duplicado que perseguir.
+//
+// EN FASE DE CAPTURA. Es la única que alcanza a los eventos que NO burbujean
+// (`blur`, `pointerleave`): del documento hacia el objetivo pasa siempre, y
+// hacia arriba solo pasan los que burbujean. Con una sola regla para los once.
+
+
+
+/// Los cierres vivos, por ID. Cada `on` mete uno; `__podar` saca los que ya no
+/// nombra el marcado que está en pantalla.
+const __manejadores = new Map();
+/// Los tipos de evento que ya tienen su oyente en el documento. Uno por tipo,
+/// puesto la primera vez que hace falta y nunca retirado.
+const __enganchados = new Set();
+let __idManejador = 0;
+
+// Estos dos no burbujean, así que un manejador suyo solo puede ser el del
+// elemento que recibió el evento: subir buscando uno haría saltar el del
+// contenedor cuando el puntero pasa de un hijo a otro.
+const __SIN_BURBUJEO = new Set(["blur", "pointerleave"]);
+
+export function on(evento, manejador) {
+  const id = "h" + ++__idManejador;
+  __manejadores.set(id, { fn: manejador });
+  __engancharRaiz(evento);
+  // Un atributo por tipo de evento: dos `on` distintos en la misma etiqueta
+  // serían dos atributos con el mismo nombre y el analizador de HTML se quedaría
+  // con el primero, callándose el segundo.
+  return `data-marea-on-${evento}="${id}"`;
+}
+
+function __engancharRaiz(evento) {
+  if (typeof document === "undefined" || __enganchados.has(evento)) return;
+  __enganchados.add(evento);
+  document.addEventListener(evento, (ev) => __despachar(evento, ev), true);
+}
+
+/// Busca el manejador desde el objetivo hacia arriba y ejecuta el PRIMERO que
+/// encuentra. Uno solo: que un clic dispare además los manejadores de todos los
+/// contenedores de encima es la clase de sorpresa que se paga depurando.
+function __despachar(evento, ev) {
+  const atributo = "data-marea-on-" + evento;
+  let nodo = (ev.target);
+  while (nodo) {
+    const id = typeof nodo.getAttribute === "function" ? nodo.getAttribute(atributo) : null;
+    if (id !== null) {
+      const entrada = __manejadores.get(id);
+      if (entrada) {
+        // Un `submit` navega por defecto, y navegar tira el estado de la app
+        // entera: un manejador de Marea existe precisamente para atenderlo aquí.
+        if (evento === "submit") ev.preventDefault();
+        void entrada.fn();
+      }
+      return;
+    }
+    if (__SIN_BURBUJEO.has(evento)) return;
+    nodo = (nodo.parentNode);
+  }
+}
+
+/// Tira los cierres que el marcado entrante ya no nombra.
+///
+/// La vida de un manejador es la del elemento que lo lleva, y el elemento vive
+/// mientras esté en el marcado que se escribe en el `#app`: ese texto es la
+/// lista de los vivos, así que no hace falta llevar la cuenta de re-pintados ni
+/// adivinar cuándo caduca uno. Sin esto la tabla crecería un cierre por botón y
+/// por re-pintado —un contador pulsado mil veces dejaría mil cierres muertos.
+export function __podar(html) {
+  const vivos = new Set();
+  for (const m of html.matchAll(/data-marea-on-[a-z]+="([^"]*)"/g)) vivos.add(m[1]);
+  for (const id of [...__manejadores.keys()]) {
+    if (!vivos.has(id)) __manejadores.delete(id);
+  }
 }
 
 // División entera. En JS `7/0` es Infinity y `0/0` es NaN: valores que no son
@@ -318,11 +415,18 @@ export function lower(s) {
 // Envuelve la vista en un effect: cada vez que cambia un signal que la vista
 // leyó, se vuelve a pintar el #app. La vista lee sus reactivas en su parte
 // SÍNCRONA (antes de cualquier await), así que la suscripción queda registrada.
+//
+// El re-pintado tira los nodos viejos, y con ellos los manejadores que llevaban
+// puestos: `__podar` los saca de la tabla mirando qué IDs nombra el marcado
+// nuevo. Los OYENTES no se tocan —cuelgan del documento, no de los nodos—, que
+// es lo que hace que re-pintar no deje ninguno huérfano.
 export function __mount(vista) {
   const app = typeof document !== "undefined" && document.getElementById("app");
   if (!app) return;
   __effect(async () => {
-    app.innerHTML = await vista();
+    const marcado = String(await vista());
+    __podar(marcado);
+    app.innerHTML = marcado;
   });
 }
 
