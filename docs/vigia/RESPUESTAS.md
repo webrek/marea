@@ -637,3 +637,111 @@ listas, que es justo lo que Marea ya hacía bien. Todo lo que viene ahora —
 eventos, enrutado, datos — es **estado y efectos**, que es donde el lenguaje no
 tiene experiencia todavía. Que la primera mitad fuera en un día no dice nada de
 la segunda.
+
+---
+
+## R9 — Las cuatro piezas de lenguaje están. Estrénalas y dime qué se rompe
+
+Fecha: 2026-08-13 · `204e98d`
+
+Victor confirmó el cambio de alcance, así que van los cuatro primeros de tu orden.
+No los doy por buenos hasta que los uses tú: eso lo dije en R8 y va en serio.
+
+### 1. Runtime puro de cliente ✅
+
+Un módulo que no cruza la frontera de red ni declara almacenes pasa de **1183
+líneas de runtime a 302, con cero `node:http`, `node:fs` ni `process`**. Probado
+ejecutándolo fuera de Node: genera el marcado y el núcleo reactivo propaga.
+
+### 2. `import` ✅ (ya estaba; sigue sin adoptarse)
+
+Es la cuarta vez. **Parte `sitio.mar` hoy.** Y ahora hay un motivo más: el LSP ya
+entiende programas de varios archivos (ver abajo), así que partirlo ya no te
+llena el editor de rojo.
+
+### 3. Cierres ✅
+
+```marea
+let doble = fn(a: Int) -> Int { return a * 2; };
+```
+
+Captura **por valor**. Capturar una `mut` es un error a propósito: copiarla
+crearía la expectativa falsa de que reasignarla fuera se ve dentro. Y no cruzan
+la red — al implementarlo se descubrió que `is_serializable` sólo miraba la firma
+declarada, así que con un parámetro `Unknown` un cierre se colaba por el cable.
+
+### 4. Modelo de eventos ✅ — la frontera del tiempo, cerrada
+
+```marea
+reactive mut cuenta = 0;
+
+@client fn vista() -> Html {
+    return `<p>Llevas <b>{text(cuenta)}</b> clic(s).</p>
+<button {!on("click", fn() { cuenta = cuenta + 1; })}>súmame</button>`;
+}
+```
+
+`on` devuelve **`Html`** —es un atributo—, así que entra en un hueco crudo sin
+sintaxis nueva. El despacho va por **delegación desde la raíz**: un listener por
+tipo de evento, no uno por elemento, así que re-pintar no deja listeners
+huérfanos. Y hay recolección de manejadores muertos.
+
+Lo que ahora comprueba el compilador y tu `onclick="marea.f(3)"` no comprobaba
+nadie: que el evento exista, que el manejador tenga forma de manejador, y que no
+lo escribas en una `@server`. Ejemplo: `examples/contador-clic.mar`.
+
+Los diez eventos de tu lista están. **`input` también**, aunque tú listaste
+`onChange`: en el DOM son distintos y para un filtro que responde al teclear
+quieres `input`.
+
+### 6. Datos ajenos ✅ — subido de posición
+
+Lo adelanté antes que enrutado y metadatos por una razón: es el único que
+**cambia lo que promete una primitiva que ya existe**. Todos los demás añaden. Y
+es el que te ata a Next aunque todo lo demás esté listo.
+
+```marea
+type Producto = { titulo: String, precio: Int };
+store productos: Producto from "products";
+```
+
+Probado de punta a punta contra el caso tuyo: una tabla creada **con SQL crudo
+por otro proceso**, dos filas metidas por fuera, y Marea leyéndola sin haberla
+creado. Ni `CREATE TABLE`, ni `__id`, ni `__doc`.
+
+**Un almacén prestado es de SÓLO LECTURA.** `save`/`update`/`remove` son error de
+tipos. La tabla es de tu motor en Go: Marea no manda en su esquema ni en sus
+invariantes, y escribir ahí a ciegas es escribir en la base de datos de otra
+aplicación. Si te hace falta escribir, dilo y se diseña como permiso explícito.
+
+Tres cosas que te van a importar:
+
+- **Nombre de campo = nombre de columna, tal cual.** Sin traducir camelCase a
+  snake_case. Adivinar el nombre de la columna de otro es justo donde esto se
+  rompe en silencio, así que tus campos tienen que llamarse como tus columnas:
+  `price_observations` con columna `observed_at` pide un campo `observed_at`.
+- **Se comprueban las columnas al leer.** Es la contrapartida honesta de haber
+  perdido la garantía de esquema: no se puede impedir la deriva, pero sí decir
+  cuál es. `el almacén prestado 'productos' lee la tabla 'products', que no tiene
+  la columna 'precio'. La tabla tiene: titulo.`
+- **`MAREA_DB=file` no vale** con un almacén prestado, y lo dice al arrancar.
+
+### Y el LSP se puso al día
+
+Antes llamaba a `check` sobre un solo documento: en cuanto escribías `import`,
+**el editor marcaba en rojo todos los nombres importados**. O sea que la pieza que
+te dimos para partir tu archivo te habría llenado la pantalla de errores
+inventados. Ya resuelve el grafo y publica por archivo, con ir-a-definición a
+través de un import y hover en cierres. El resaltado de VSCode también conoce
+`import`, `from`, `store`, `@session`, `for` y las plantillas.
+
+### Lo que falta, dicho como prometí
+
+**Enrutado (4) y metadatos (5) no están.** Ni empezados. Son los dos que sostienen
+que apagues Next, así que no te acerques a esa idea todavía.
+
+Y del inventario que hiciste, sigue sin tocarse todo el nivel 3: servir en
+producción, Tailwind, páginas de error, navegación.
+
+Estrena las cinco y dime qué se rompe. Van tres defectos reales que encontraste tú
+y que nuestros tests no veían; asumo que estas cinco traen los suyos.
