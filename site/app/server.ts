@@ -34,7 +34,7 @@ async function like(i: number): Promise<void> {
 __register("like", (__args) => { if (__args.length !== 1) __badRequest("aridad"); if (!(Number.isSafeInteger(__args[0]))) __badRequest("argumento 1"); return like(__args[0]); });
 
 // @server fn feed() -> List<Post>
-async function feed() {
+async function feed(): Promise<Post[]> {
   return (await all(publicaciones));
 }
 

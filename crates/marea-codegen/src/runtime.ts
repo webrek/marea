@@ -583,18 +583,66 @@ export function jsonLen(texto: string, ruta: string): number {
 export interface __Store {
   nombre: string;
   save(x: unknown): Promise<void>;
-  all(): Promise<unknown[]>;
+  // `any[]` y no `unknown[]`: el VERIFICADOR de Marea ya garantiza el tipo de
+  // los elementos —un almacén se declara `store posts: Post;` y `all(posts)` se
+  // tipa `List<Post>`—, así que la garantía existe, sólo que la da él y no
+  // TypeScript. Con `unknown[]` habría que castear en cada uso, y anotar el
+  // retorno de una función que lee el almacén dejaba de compilar. Es el mismo
+  // criterio que traduce el `Unknown` de Marea a `any` y no a `unknown`.
+  all(): Promise<any[]>;
   update(i: number, x: unknown): Promise<void>;
   remove(i: number): Promise<void>;
 }
 
 const __stores: Record<string, __Store> = Object.create(null);
 
+// Los tres backends de npm se cargan con `await import(...)` la primera vez que
+// se consulta, así que un paquete ausente no se nota al arrancar: se nota en la
+// primera petición, y al cliente le llega "error interno" —el endpoint no filtra
+// detalles del servidor, y hace bien—. Diagnosticarlo cuesta entonces veinte
+// minutos de mirar al sitio equivocado: el proxy, el puerto, la contraseña.
+//
+// Así que se comprueba al ARRANCAR, junto al resto de guardas del almacén, y se
+// dice qué falta y cómo instalarlo.
+const __PAQUETE_DE: Record<string, string> = {
+  postgres: "pg",
+  mysql: "mysql2",
+  mongodb: "mongodb",
+};
+
+async function __exigirDriver(): Promise<void> {
+  const cual = process.env.MAREA_DB ?? "file";
+  const paquete = __PAQUETE_DE[cual];
+  if (paquete === undefined) return; // 'file' y 'sqlite' no piden nada de npm
+  try {
+    await import(cual === "mysql" ? "mysql2/promise" : paquete);
+  } catch {
+    throw new Error(
+      `[marea] MAREA_DB=${cual} necesita el paquete '${paquete}', que no está instalado donde corre este programa. Instálalo con: npm i ${paquete}`,
+    );
+  }
+}
+
 export function __store(__nombre: string, E: __Schema): __Store {
   // Idempotente: dos declaraciones del mismo nombre comparten instancia (el
   // bundle de servidor se importa una vez, pero la demo importa dos módulos).
   const previo = __stores[__nombre];
   if (previo !== undefined) return previo;
+
+  // El driver de npm se comprueba aquí, que es donde `__store` corre: al cargar
+  // el bundle de servidor, no en la primera petición. La comprobación es
+  // asíncrona (un `import`), así que no puede cortar la construcción; lo que
+  // hace es avisar por stderr en cuanto se sabe, y guardar el fallo para que
+  // cualquier operación posterior lo repita en vez de dejar un "error interno".
+  let __faltaDriver: string | null = null;
+  const __driverListo = __exigirDriver().catch((e: unknown) => {
+    __faltaDriver = e instanceof Error ? e.message : String(e);
+    console.error(__faltaDriver);
+  });
+  async function __driverOk(): Promise<void> {
+    await __driverListo;
+    if (__faltaDriver !== null) throw new Error(__faltaDriver);
+  }
 
   // Cuando el store no guarda registros (p.ej. `store Int;` o `store String;`) el
   // esquema tiene una sola columna '__doc' de tipo json: ahí cabe el valor entero.
@@ -1078,20 +1126,29 @@ export function __store(__nombre: string, E: __Schema): __Store {
     );
   }
 
+  // Toda operación espera antes a saber si el driver está: así el fallo llega
+  // con su nombre y su comando de instalación en vez de como "error interno".
+  const conDriver =
+    <A extends unknown[], R>(f: (...a: A) => Promise<R>) =>
+    async (...a: A): Promise<R> => {
+      await __driverOk();
+      return f(...a);
+    };
+
   const a: __Store = __prestado
     ? {
         nombre: __nombre,
         save: () => __soloLectura("save"),
-        all: _todos,
+        all: conDriver(_todos),
         update: () => __soloLectura("update"),
         remove: () => __soloLectura("remove"),
       }
     : {
         nombre: __nombre,
-        save: _guardar,
-        all: _todos,
-        update: _actualizar,
-        remove: _borrar,
+        save: conDriver(_guardar),
+        all: conDriver(_todos),
+        update: conDriver(_actualizar),
+        remove: conDriver(_borrar),
       };
   __stores[__nombre] = a;
   return a;
@@ -1101,7 +1158,9 @@ export function __store(__nombre: string, E: __Schema): __Store {
 export function save(a: __Store, x: unknown): Promise<void> {
   return a.save(x);
 }
-export function all(a: __Store): Promise<unknown[]> {
+// Mismo criterio que en `__Store.all`: el tipo de los elementos lo garantiza el
+// verificador de Marea, no TypeScript.
+export function all(a: __Store): Promise<any[]> {
   return a.all();
 }
 export function update(a: __Store, i: number, x: unknown): Promise<void> {

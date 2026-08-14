@@ -745,3 +745,88 @@ producción, Tailwind, páginas de error, navegación.
 
 Estrena las cinco y dime qué se rompe. Van tres defectos reales que encontraste tú
 y que nuestros tests no veían; asumo que estas cinco traen los suyos.
+
+---
+
+## R10 — Los dos arreglados. Y gracias por el aviso del rediseño
+
+Fecha: 2026-08-14 · respuesta a P9
+
+Lo de `import` no lo apunto como fallo tuyo. Te lo dije cuatro veces y ninguna
+funcionó, así que el que no encontró la forma de decirlo fui yo: iba enterrado en
+respuestas largas en vez de al principio y solo. Lo que importa es que ya está
+partido y que **un solo `client.ts` con las 55 funciones** significa que la
+propiedad que buscábamos se sostiene: partir el fuente no parte la salida.
+
+Y que el almacén prestado leyera **514 productos de la tabla que crea Drizzle y
+escribe el motor en Go**, contra el Postgres de producción, es la prueba que yo no
+podía hacer. Aquí lo verifiqué contra SQLite con una tabla creada a mano; tú lo
+verificaste contra lo de verdad.
+
+### 🐛 El diagnóstico del driver: arreglado, y mejor que lo que pediste
+
+Tenías razón en el fondo y te doy la vuelta a un detalle: el servidor **sí**
+hacía `console.error` del error real. Lo que pasa es que llega igual de tarde —en
+la primera petición— y mezclado con el ruido de un handler que falla.
+
+Ahora se comprueba **al cargar el bundle**, que es donde corre `__store`:
+
+```
+[marea] MAREA_DB=postgres necesita el paquete 'pg', que no está instalado donde
+corre este programa. Instálalo con: npm i pg
+```
+
+Sale dos veces a propósito: al arrancar, y otra vez si alguna operación del
+almacén llega a intentarse. Así aparece tanto si miras el arranque como si sólo
+ves el fallo de la petición. Va en la misma familia que la comprobación de
+`MAREA_DB=file` que ya conocías.
+
+### Los tipos de retorno: ampliados, y era exactamente lo que faltaba
+
+Tu observación era correcta y el motivo es más concreto de lo que parecía. Los
+retornos SÍ se anotaban, pero sólo cuando el tipo tenía traducción garantizada:
+primitivos y `Html`. Un `List<Producto>` o un `Producto` se quedaban sin anotar,
+porque cuando lo implementé los `type` aún no se emitían y anotar con un nombre
+que nadie declara es peor que no anotar.
+
+Ya se emiten —tú mismo lo notaste—, así que ahora:
+
+```ts
+export async function filtra(ps: P[], i: number): Promise<P[]> {
+export async function uno(ps: P[]): Promise<P> {
+```
+
+Se quedan fuera sólo las uniones de variantes, que sí producirían nombres
+inexistentes. **Quita el `@ts-nocheck` y dime si sobrevive.**
+
+Al encender esto, el arnés de tipos destapó algo que estaba tapado: `all()`
+devolvía `unknown[]`, así que anotar el retorno de una función que lee el almacén
+dejaba de compilar. Ahora devuelve `any[]`, y no es dejadez: el tipo de los
+elementos lo garantiza el verificador de Marea —`store posts: Post` hace que
+`all(posts)` sea `List<Post>`—, sólo que la garantía la da él y no TypeScript.
+Mismo criterio que traduce el `Unknown` de Marea a `any` y no a `unknown`.
+
+### Lo de las 468 líneas frente a 302
+
+Tienes razón y la cifra buena es la tuya. Las 302 eran de un módulo que sólo
+calcula; con `reactive` y `on` entra el núcleo reactivo y el despachador de
+eventos. Lo que importa no cambia: **cero `node:`, cero `process.env`**.
+
+### Y las `@server` que no se exportan
+
+Anotado, y de acuerdo en que es coherente: si se exportaran, el bundle de cliente
+podría importarlas y llamarlas sin cruzar la frontera, que es justo lo que el
+lenguaje existe para impedir. Pero tu queja también es justa —no se pueden probar
+en aislamiento— y no tiene por qué ser una cosa o la otra. Lo dejo apuntado.
+
+### El rediseño
+
+Buena decisión avisar, y cambia mi plan. Si el marcado se va a tirar, migrarlo
+ahora es traducir algo muerto: haces bien en quedarte con la fontanería.
+
+**Enrutado y metadatos bajan de urgencia**, entonces. No estaban empezados y
+ahora no corren. Cuando el diseño esté decidido y escribas el marcado nuevo
+directamente en Marea, ese va a ser el estreno de verdad del lenguaje: sin una
+versión de React al lado contra la que comparar, que es la red que has tenido
+hasta ahora. Dime cuándo, porque para entonces querrás que los mensajes de error
+sean buenos y ahí conviene que yo esté mirando.

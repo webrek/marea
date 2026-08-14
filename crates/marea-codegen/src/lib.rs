@@ -276,7 +276,15 @@ fn type_aliases(module: &Module) -> std::collections::HashMap<String, Type> {
 /// Una variante nominal se emite con la forma que YA tiene en runtime —el
 /// `{ $tag: "NotFound" }` que el codegen construye—, así que el tipo describe el
 /// valor real y no una aproximación.
-fn emit_type_decls(module: &Module) -> String {
+/// Las declaraciones `export type` de un módulo y los nombres que declaran.
+/// Van juntos porque uno no sirve sin el otro: una firma sólo puede citar un
+/// tipo si el archivo lo declara.
+struct Tipos {
+    decls: String,
+    nombres: HashSet<String>,
+}
+
+fn emit_type_decls(module: &Module) -> Tipos {
     fn ts_de(t: &Type, declarados: &HashSet<String>) -> String {
         match t {
             Type::Union { variants, .. } => variants
@@ -329,7 +337,10 @@ fn emit_type_decls(module: &Module) -> String {
     if !s.is_empty() {
         s.push('\n');
     }
-    s
+    Tipos {
+        decls: s,
+        nombres: declarados,
+    }
 }
 
 /// Una función con `@server` o `@edge` corre "remota": handler + stub RPC.
@@ -951,8 +962,8 @@ struct Servidor<'a> {
     sesion: Option<&'a str>,
     /// La lista de importación del runtime, ya ajustada a este módulo.
     builtins: &'a str,
-    /// Las declaraciones `export type` del módulo.
-    tipos: &'a str,
+    /// Las declaraciones `export type` del módulo y sus nombres.
+    tipos: &'a Tipos,
 }
 
 fn emit_server(s_: &Servidor) -> String {
@@ -969,7 +980,7 @@ fn emit_server(s_: &Servidor) -> String {
     let mut s = String::new();
     s.push_str("// Generado por Marea — lado servidor.\n");
     s.push_str(&format!("import {} from \"./runtime.ts\";\n\n", builtins));
-    s.push_str(tipos);
+    s.push_str(&tipos.decls);
     // Un almacén por `store nombre: T;`. Vive solo aquí: el verificador ya
     // impide usar el estado del servidor fuera de @server.
     for (nombre, esquema) in stores {
@@ -993,11 +1004,11 @@ fn emit_server(s_: &Servidor) -> String {
         s.push('\n');
     }
     for f in shared {
-        s.push_str(&emit_fn_def(f, false));
+        s.push_str(&emit_fn_def(f, false, &tipos.nombres));
         s.push('\n');
     }
     for f in remote {
-        s.push_str(&emit_fn_def(f, false));
+        s.push_str(&emit_fn_def(f, false, &tipos.nombres));
         s.push('\n');
         // El transporte ya garantiza que 'args' es un arreglo; aquí exigimos la
         // aridad exacta para que un argumento faltante no se cuele como undefined.
@@ -1064,12 +1075,12 @@ fn emit_client(
     local: &[&FnDecl],
     globals: &[&LetStmt],
     builtins: &str,
-    tipos: &str,
+    tipos: &Tipos,
 ) -> String {
     let mut s = String::new();
     s.push_str("// Generado por Marea — lado cliente.\n");
     s.push_str(&format!("import {} from \"./runtime.ts\";\n\n", builtins));
-    s.push_str(tipos);
+    s.push_str(&tipos.decls);
     let no_reactive: HashSet<String> = HashSet::new();
     for l in globals {
         s.push_str(&format!(
@@ -1086,7 +1097,7 @@ fn emit_client(
         s.push('\n');
     }
     for f in local {
-        s.push_str(&emit_fn_def(f, true));
+        s.push_str(&emit_fn_def(f, true, &tipos.nombres));
         s.push('\n');
     }
     s
@@ -1130,18 +1141,18 @@ fn emit_demo(local: &[&FnDecl], puro: bool) -> String {
 ///
 /// TypeScript infiere el retorno de una función normal, pero de una RECURSIVA no
 /// puede: sin anotación da TS7023 ("implicitly has return type 'any'"), y eso es
-/// un error en modo estricto. Con `-> Int` en Marea, el `.ts` se quedaba con el
-/// tipo sólo en el comentario.
+/// un error en modo estricto.
 ///
-/// Devuelve `None` cuando el tipo no tiene una traducción que exista en TS: un
-/// registro nombrado o una unión de variantes producirían nombres que el codegen
-/// NO declara, y anotar con ellos cambiaría un TS7023 por un "Cannot find name".
-/// Mejor no anotar que anotar mal. Cuando se emitan los `type`, esto se amplía.
-fn ts_return_type(f: &FnDecl) -> Option<String> {
-    fn traducir(t: &Type) -> Option<String> {
+/// Se anota cuando el tipo tiene una traducción que EXISTE en el archivo
+/// generado: los primitivos, y los `type` declarados por el módulo, que ahora se
+/// emiten como `export type`. Una unión de variantes se queda fuera: produciría
+/// nombres que nadie declara, y anotar mal es peor que no anotar —cambiaría un
+/// TS7023 por un "Cannot find name"—.
+fn ts_return_type(f: &FnDecl, declarados: &HashSet<String>) -> Option<String> {
+    fn traducir(t: &Type, declarados: &HashSet<String>) -> Option<String> {
         match t {
             Type::Name { name, args, .. } if name == "List" => {
-                let e = traducir(args.first()?)?;
+                let e = traducir(args.first()?, declarados)?;
                 Some(format!("{e}[]"))
             }
             Type::Name { name, args, .. } if args.is_empty() => match name.as_str() {
@@ -1151,18 +1162,24 @@ fn ts_return_type(f: &FnDecl) -> Option<String> {
                 "String" | "Html" => Some("string".to_string()),
                 "Bool" => Some("boolean".to_string()),
                 "Unit" => Some("void".to_string()),
+                // Un `type` del módulo: existe en la salida porque se emite su
+                // `export type`. Una variante nominal, no.
+                otro if declarados.contains(otro) => Some(otro.to_string()),
                 _ => None,
             },
+            // Un registro escrito en línea se traduce a su type-literal, que no
+            // depende de que nadie lo declare.
+            Type::Record { .. } => Some(map_type(t)),
             _ => None,
         }
     }
     match &f.return_type {
         None => Some("void".to_string()),
-        Some(t) => traducir(t),
+        Some(t) => traducir(t, declarados),
     }
 }
 
-fn emit_fn_def(f: &FnDecl, export: bool) -> String {
+fn emit_fn_def(f: &FnDecl, export: bool, declarados: &HashSet<String>) -> String {
     let params = ts_params_handler(f);
     let kw = if export {
         "export async function"
@@ -1173,7 +1190,7 @@ fn emit_fn_def(f: &FnDecl, export: bool) -> String {
     // bloque (respetando el alcance léxico), arrancando vacío.
     let body = emit_block_inner(&f.body, 1, &HashSet::new());
     // La función se emite `async`, así que lo anotado es la promesa.
-    let ret = match ts_return_type(f) {
+    let ret = match ts_return_type(f, declarados) {
         Some(t) => format!(": Promise<{t}>"),
         None => String::new(),
     };
