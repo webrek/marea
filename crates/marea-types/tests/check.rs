@@ -2346,3 +2346,423 @@ fn on_es_un_builtin_y_no_se_puede_redefinir() {
     let errs = check_src("fn on(a: Int) -> Int { return a; }");
     assert!(has_code(&errs, "E_REDEFINE_BUILTIN"), "{:?}", codes(&errs));
 }
+
+// ===========================================================================
+// PÁGINAS: @page("/ruta")
+//
+// Lo que se fija aquí son las reglas que separan una página de una función
+// cualquiera: que la ruta y la firma digan lo mismo, que sólo se devuelva
+// `Pagina` o `Respuesta`, y que una página corra donde corre un `@server` sin
+// que haya que escribirlo. El 404 no aparece por ningún lado a propósito: es la
+// variante de fallo del retorno, no un caso especial del enrutado.
+// ===========================================================================
+
+/// Una página con todo puesto: los seis campos, el hueco atado a su parámetro y
+/// el fallo como variante de la unión.
+#[test]
+fn una_pagina_completa_tipa() {
+    let src = r#"
+@page("/modelo/:id")
+fn modelo(id: Int) -> Pagina | NoEncontrado {
+    if id < 0 { return NoEncontrado; }
+    return Pagina {
+        titulo: "Un modelo",
+        descripcion: "Lo que cuesta en cada tienda",
+        canonica: concat("https://ahorrame.mx/modelo/", text(id)),
+        metas: [Meta { clave: "og:type", valor: "product" }],
+        jsonld: [json("{\"@type\":\"Product\"}")],
+        cuerpo: `<h1>Un modelo</h1>`,
+    };
+}
+"#;
+    let errs = check_src(src);
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+/// Los cuatro campos que se pueden omitir se pueden omitir de verdad: su vacío
+/// significa algo. El título y la canónica no están entre ellos.
+#[test]
+fn una_pagina_solo_exige_titulo_y_canonica() {
+    let src = r#"
+@page("/")
+fn portada() -> Pagina {
+    return Pagina { titulo: "Ahórrame", canonica: "https://ahorrame.mx/" };
+}
+"#;
+    let errs = check_src(src);
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+#[test]
+fn e_campo_obligatorio_sin_titulo() {
+    let src = r#"
+@page("/")
+fn portada() -> Pagina {
+    return Pagina { canonica: "https://ahorrame.mx/" };
+}
+"#;
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_CAMPO_OBLIGATORIO"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn e_campo_obligatorio_sin_canonica() {
+    let src = r#"
+@page("/")
+fn portada() -> Pagina {
+    return Pagina { titulo: "Ahórrame" };
+}
+"#;
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_CAMPO_OBLIGATORIO"), "{:?}", codes(&errs));
+}
+
+// --------------------------- la ruta y la firma ---------------------------
+
+#[test]
+fn e_ruta_sin_barra() {
+    let src = r#"
+@page("precios")
+fn precios() -> Pagina {
+    return Pagina { titulo: "Precios", canonica: "c" };
+}
+"#;
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_RUTA_SIN_BARRA"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn e_ruta_param_sin_nombre() {
+    let src = r#"
+@page("/modelo/:")
+fn modelo() -> Pagina {
+    return Pagina { titulo: "x", canonica: "c" };
+}
+"#;
+    let errs = check_src(src);
+    assert!(
+        has_code(&errs, "E_RUTA_PARAM_SIN_NOMBRE"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+#[test]
+fn e_ruta_param_repetido() {
+    let src = r#"
+@page("/a/:id/b/:id")
+fn dos(id: Int) -> Pagina {
+    return Pagina { titulo: "x", canonica: "c" };
+}
+"#;
+    let errs = check_src(src);
+    assert!(
+        has_code(&errs, "E_RUTA_PARAM_REPETIDO"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+/// La ruta promete un hueco que la firma no recoge: el valor de la URL no
+/// tendría dónde entrar.
+#[test]
+fn e_ruta_segmento_sin_param() {
+    let src = r#"
+@page("/modelo/:id")
+fn modelo() -> Pagina {
+    return Pagina { titulo: "x", canonica: "c" };
+}
+"#;
+    let errs = check_src(src);
+    assert!(
+        has_code(&errs, "E_RUTA_SEGMENTO_SIN_PARAM"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+/// Y al revés: a una página la invoca una URL, así que un parámetro que la ruta
+/// no menciona no se lo pasa nadie.
+#[test]
+fn e_param_sin_segmento() {
+    let src = r#"
+@page("/modelo")
+fn modelo(id: Int) -> Pagina {
+    return Pagina { titulo: "x", canonica: "c" };
+}
+"#;
+    let errs = check_src(src);
+    assert!(
+        has_code(&errs, "E_PARAM_SIN_SEGMENTO"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+/// En una URL sólo caben Int y String: un Float en un segmento no significa
+/// nada, porque no hay una escritura suya que el lenguaje sepa deshacer.
+#[test]
+fn e_ruta_param_tipo() {
+    let src = r#"
+@page("/precio/:p")
+fn precio(p: Float) -> Pagina {
+    return Pagina { titulo: "x", canonica: "c" };
+}
+"#;
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_RUTA_PARAM_TIPO"), "{:?}", codes(&errs));
+}
+
+/// Un String en la ruta sí vale: un slug es texto.
+#[test]
+fn un_segmento_de_texto_vale() {
+    let src = r#"
+@page("/categoria/:slug")
+fn categoria(slug: String) -> Pagina {
+    return Pagina { titulo: slug, canonica: concat("https://x/", slug) };
+}
+"#;
+    let errs = check_src(src);
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// ------------------------------- el retorno -------------------------------
+
+/// El error que esta regla existe para atajar. El mensaje tiene que explicar la
+/// diferencia entre el cuerpo y la página, no sólo negar el tipo.
+#[test]
+fn e_pagina_retorno_html() {
+    let src = r#"
+@page("/precios")
+fn precios() -> Html {
+    return `<h1>Precios</h1>`;
+}
+"#;
+    let errs = check_src(src);
+    let e = errs
+        .iter()
+        .find(|e| e.code == "E_PAGINA_RETORNO")
+        .unwrap_or_else(|| panic!("{:?}", codes(&errs)));
+    assert!(
+        e.message.contains("cuerpo") && e.message.contains("canónica"),
+        "el mensaje debe explicar qué le falta a un Html para ser una página: {}",
+        e.message
+    );
+}
+
+#[test]
+fn e_pagina_retorno_otro_tipo() {
+    let src = r#"
+@page("/precios")
+fn precios() -> Int {
+    return 1;
+}
+"#;
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_PAGINA_RETORNO"), "{:?}", codes(&errs));
+}
+
+/// Una ruta sirve un documento o sirve otra cosa; el tipo de contenido se
+/// decide al declararla, no en cada rama.
+#[test]
+fn e_pagina_retorno_pagina_y_respuesta_a_la_vez() {
+    let src = r#"
+@page("/precios")
+fn precios() -> Pagina | Respuesta {
+    return textoPlano("x");
+}
+"#;
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_PAGINA_RETORNO"), "{:?}", codes(&errs));
+}
+
+/// Lo que no es HTML devuelve `Respuesta`, que es donde se decide el tipo de
+/// contenido.
+#[test]
+fn una_ruta_puede_servir_lo_que_no_es_html() {
+    let src = r#"
+@page("/robots.txt")
+fn robots() -> Respuesta {
+    return textoPlano("User-agent: *\n");
+}
+
+@page("/sitemap.xml")
+fn sitemap() -> Respuesta {
+    return documentoXml(`<urlset></urlset>`);
+}
+"#;
+    let errs = check_src(src);
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+/// Sin `Html` no hay sitemap: un texto sin escapar con un '&' dentro rompe el
+/// documento, y esa es exactamente la garantía que el tipo ya da —XML escapa los
+/// mismos cinco caracteres que HTML—.
+#[test]
+fn documento_xml_no_acepta_texto_sin_escapar() {
+    let src = r#"
+fn crudo() -> String { return "a & b"; }
+
+@page("/sitemap.xml")
+fn sitemap() -> Respuesta {
+    return documentoXml(crudo());
+}
+"#;
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_ARG_TYPE"), "{:?}", codes(&errs));
+}
+
+// ---------------------------- Json no es Html ----------------------------
+
+/// El motivo es de corrección y no de estilo: `Html` escapa el '&' a '&amp;', y
+/// dentro de un bloque de JSON-LD eso corrompe el JSON. Los dos tipos no se
+/// mezclan en ninguna de las dos direcciones.
+#[test]
+fn un_json_no_es_html() {
+    let src = r#"
+@page("/")
+fn portada() -> Pagina {
+    return Pagina { titulo: "x", canonica: "c", cuerpo: json("{}") };
+}
+"#;
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_ARG_TYPE"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn un_html_no_es_json() {
+    let src = r#"
+@page("/")
+fn portada() -> Pagina {
+    return Pagina { titulo: "x", canonica: "c", jsonld: [`<b>no</b>`] };
+}
+"#;
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_ARG_TYPE"), "{:?}", codes(&errs));
+}
+
+// ---------------------------- la query string ----------------------------
+
+/// Convertir texto a número puede fallar, así que el tipo lo dice y el `match`
+/// obliga a decidir el valor por defecto.
+#[test]
+fn entero_devuelve_una_union_que_hay_que_cubrir() {
+    let src = r#"
+fn pagina() -> Int {
+    let n: Int = entero(consulta("pagina"));
+    return n;
+}
+"#;
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_LET_TYPE_MISMATCH"), "{:?}", codes(&errs));
+}
+
+#[test]
+fn entero_con_match_da_un_int() {
+    let src = r#"
+fn pagina() -> Int {
+    return match entero(consulta("pagina")) {
+        NoEsNumero => 1,
+        n => n,
+    };
+}
+"#;
+    let errs = check_src(src);
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// ------------------------- dónde corre una página -------------------------
+
+/// `@page` implica servidor sin escribirlo: puede leer el almacén directamente,
+/// que es lo que hace falta para renderizar lo que va a indexarse.
+#[test]
+fn una_pagina_puede_leer_el_almacen() {
+    let src = r#"
+type Modelo = { nombre: String };
+store modelos: Modelo;
+
+@page("/")
+fn portada() -> Pagina {
+    return Pagina {
+        titulo: "Modelos",
+        canonica: "https://x/",
+        cuerpo: `<p>{text(len(all(modelos)))}</p>`,
+    };
+}
+"#;
+    let errs = check_src(src);
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+/// La otra mitad de la misma regla, y la que de verdad importa: el estado
+/// reactivo vive en el navegador y no existe cuando se renderiza la página.
+#[test]
+fn una_pagina_no_puede_tocar_estado_reactivo() {
+    let src = r#"
+reactive mut cuenta = 0;
+
+@page("/")
+fn portada() -> Pagina {
+    return Pagina { titulo: text(cuenta), canonica: "c" };
+}
+"#;
+    let errs = check_src(src);
+    assert!(
+        has_code(&errs, "E_REACTIVE_OFF_CLIENT"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+/// Una página no exige política aunque el programa declare identidad: es una URL
+/// pública por construcción —se sirve para que la indexen—, así que no hay a
+/// quién exigirle nada. Sin esto, un sitio dejaría de compilar entero el día que
+/// se le añade una `@session`.
+#[test]
+fn una_pagina_no_exige_politica_aunque_haya_session() {
+    let src = r#"
+type Usuario = { nombre: String };
+
+@session
+fn quien(token: String) -> Usuario | NoAutorizado {
+    return NoAutorizado;
+}
+
+@page("/")
+fn portada() -> Pagina {
+    return Pagina { titulo: "x", canonica: "c" };
+}
+"#;
+    let errs = check_src(src);
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// ---------------------------- rutas repetidas ----------------------------
+
+#[test]
+fn e_ruta_duplicada() {
+    let src = r#"
+@page("/precios")
+fn precios() -> Pagina { return Pagina { titulo: "a", canonica: "c" }; }
+
+@page("/precios")
+fn otra() -> Pagina { return Pagina { titulo: "b", canonica: "c" }; }
+"#;
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_RUTA_DUPLICADA"), "{:?}", codes(&errs));
+}
+
+/// Lo que choca es a qué URLs responde una ruta, no cómo se escribió: dos huecos
+/// con nombres distintos atienden exactamente lo mismo.
+#[test]
+fn e_ruta_duplicada_aunque_el_hueco_se_llame_distinto() {
+    let src = r#"
+@page("/modelo/:id")
+fn uno(id: Int) -> Pagina { return Pagina { titulo: "a", canonica: "c" }; }
+
+@page("/modelo/:slug")
+fn otro(slug: String) -> Pagina { return Pagina { titulo: "b", canonica: "c" }; }
+"#;
+    let errs = check_src(src);
+    assert!(has_code(&errs, "E_RUTA_DUPLICADA"), "{:?}", codes(&errs));
+}

@@ -23,6 +23,7 @@ mod collect;
 mod error;
 mod expr;
 mod frontera;
+mod paginas;
 mod programa;
 mod stmt;
 mod subtipado;
@@ -36,7 +37,6 @@ pub use ty::Ty;
 use marea_syntax::ast::{
     BinOp, Block, ElseBranch, Expr, FnDecl, Item, Location, Module, Pattern, Stmt, Type, UnaryOp,
 };
-use marea_syntax::builtins::es_sincrono;
 use marea_syntax::span::Span;
 use std::collections::HashMap;
 
@@ -90,6 +90,7 @@ pub fn check(module: &Module) -> Vec<TypeError> {
     // antes de las políticas, que se comparan contra ella.
     checker.collect_session(module);
     checker.check_politicas(module);
+    checker.check_paginas(module);
     checker.check_bodies(module);
     checker.errors
 }
@@ -103,6 +104,7 @@ pub fn check_with_boundaries(module: &Module) -> (Vec<TypeError>, Vec<BoundaryCr
     // antes de las políticas, que se comparan contra ella.
     checker.collect_session(module);
     checker.check_politicas(module);
+    checker.check_paginas(module);
     checker.check_bodies(module);
     (checker.errors, checker.crossings)
 }
@@ -259,6 +261,28 @@ impl Checker {
                 span,
             ));
         }
+    }
+}
+
+/// Dónde corre una función, contando lo que su anotación implica sin escribirlo.
+///
+/// `@page` no dice `@server`, pero una página se renderiza en el servidor: es lo
+/// que lee un buscador, y la interactividad va encima con islas. Así que le
+/// caen las mismas reglas que ya existen —puede tocar el almacén, no puede tocar
+/// estado reactivo del cliente, no puede llamar a una `@client`— sin una sola
+/// regla nueva que escribir ni recordar. Todo lo que mire la ubicación de una
+/// función declarada tiene que pasar por aquí; leer `f.location` a pelo deja las
+/// páginas fuera de la mitad de las reglas, que es justo el error que esto evita.
+///
+/// Lo que NO hereda es la política (`@server(Public)`): una página es una URL
+/// pública por construcción —se sirve para que la indexen— así que no hay a
+/// quién exigirle identidad. Por eso `check_politicas` sigue mirando
+/// `f.location`, que en una página es `None`.
+pub(crate) fn ubicacion_efectiva(f: &FnDecl) -> Option<Location> {
+    match f.location {
+        Some(l) => Some(l),
+        None if f.ruta.is_some() => Some(Location::Server),
+        None => None,
     }
 }
 

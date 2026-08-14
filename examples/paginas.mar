@@ -1,0 +1,147 @@
+// ============================================================================
+// PÁGINAS — Marea sirviendo un SITIO, no una app suelta.
+//
+// Una página es una función anotada con la ruta que atiende. Lo que la separa
+// de cualquier otra función son tres cosas, y las tres las comprueba el
+// compilador:
+//
+//   - Los `:huecos` de la ruta se atan a los parámetros POR NOMBRE, y sólo
+//     pueden ser Int o String: es lo que cabe en una URL.
+//   - Devuelve `Pagina` —el documento con sus metadatos— o `Respuesta` para lo
+//     que no es HTML (el sitemap, el robots.txt). `Html` a secas no vale: es el
+//     cuerpo de una página, no la página.
+//   - El 404 no es un caso especial: es la variante de fallo del retorno,
+//     `Pagina | NoEncontrado`, como cualquier otro fallo del lenguaje.
+//
+// Una página corre en el SERVIDOR aunque no lo diga: se renderiza para que la
+// lea un buscador. Por eso puede tocar el almacén sin envolverlo en nada, y por
+// eso no puede tocar el estado reactivo del cliente. La interactividad va
+// encima, con islas.
+// ============================================================================
+
+type Modelo = { nombre: String, tiendas: Int, precio: Int };
+
+store modelos: Modelo;
+
+// --------------------------------------------------------------------------
+// Las páginas
+// --------------------------------------------------------------------------
+
+// La portada. Sin parámetros, así que la ruta no tiene huecos.
+//
+// Escribe el título y la canónica y omite lo demás: no tener descripción, ni
+// metas, ni JSON-LD, ni cuerpo es un estado legítimo. Un título o una canónica
+// que faltan no lo son.
+@page("/")
+fn portada() -> Pagina {
+    return Pagina {
+        titulo: "Ahórrame — el precio de cada modelo en todas las tiendas",
+        descripcion: "Compara en qué tienda está más barato cada modelo.",
+        canonica: "https://ahorrame.mx/",
+        cuerpo: `<h1>Ahórrame</h1>{!listado(all(modelos))}`,
+    };
+}
+
+// La página de un modelo. `:id` se ata al parámetro `id: Int`, y el 404 sale de
+// la unión: si el modelo no está, se devuelve la variante y el runtime traduce.
+@page("/modelo/:id")
+fn modelo(id: Int) -> Pagina | NoEncontrado {
+    let ms = all(modelos);
+    if id < 0 {
+        return NoEncontrado;
+    }
+    if id < len(ms) {
+        let m = ms[id];
+        return Pagina {
+            titulo: concat(m.nombre, " — ¿dónde está más barato?"),
+            descripcion: `Precio de {m.nombre} comparado en {text(m.tiendas)} tiendas`,
+            canonica: concat("https://ahorrame.mx/modelo/", text(id)),
+            // Lo que no tiene campo propio va como etiqueta suelta.
+            metas: [Meta { clave: "og:type", valor: "product" }],
+            // Un elemento por bloque: nunca un arreglo, que es lo que revienta
+            // a las herramientas que lo leen.
+            jsonld: [fichaLd(m)],
+            cuerpo: ficha(m),
+        };
+    }
+    return NoEncontrado;
+}
+
+// La query string se LEE; construirla no necesita nada del lenguaje, porque se
+// concatena en el href y navega el navegador.
+@page("/buscar")
+fn buscar() -> Pagina {
+    let q = consulta("q");
+    // Convertir texto a número puede fallar, así que el tipo lo dice y el match
+    // obliga a decidir el valor por defecto aquí y no en el runtime.
+    let pagina = match entero(consulta("pagina")) {
+        NoEsNumero => 1,
+        n => n,
+    };
+    return Pagina {
+        titulo: concat("Buscar: ", q),
+        descripcion: `Resultados para {q}, página {text(pagina)}`,
+        canonica: concat("https://ahorrame.mx/buscar?q=", q),
+        cuerpo: `<h1>Resultados para {q}</h1>{!listado(coincidencias(all(modelos), q))}`,
+    };
+}
+
+// Lo que no es HTML devuelve `Respuesta`, que es donde se decide el tipo de
+// contenido. Sin escapado, porque no hay marcado que escapar.
+@page("/robots.txt")
+fn robots() -> Respuesta {
+    return textoPlano("User-agent: *\nSitemap: https://ahorrame.mx/sitemap.xml\n");
+}
+
+// `documentoXml` EXIGE `Html`, y ahí está el detalle: XML escapa los mismos
+// cinco caracteres, así que la garantía que ya existe vale tal cual y un nombre
+// con '&' no puede romper el sitemap.
+@page("/sitemap.xml")
+fn sitemap() -> Respuesta {
+    return documentoXml(`<urlset>{!urls(all(modelos))}</urlset>`);
+}
+
+// --------------------------------------------------------------------------
+// Pintado y datos (funciones normales: las llama la página, no la URL)
+// --------------------------------------------------------------------------
+
+fn ficha(m: Modelo) -> Html {
+    return `<h1>{m.nombre}</h1>
+<p>Desde {text(m.precio)} pesos en {text(m.tiendas)} tiendas</p>`;
+}
+
+fn listado(ms: List<Modelo>) -> Html {
+    let mut out = ``;
+    for m, i in ms {
+        out = `{!out}<li><a href="/modelo/{text(i)}">{m.nombre}</a></li>`;
+    }
+    return `<ul>{!out}</ul>`;
+}
+
+fn urls(ms: List<Modelo>) -> Html {
+    let mut out = ``;
+    for m, i in ms {
+        out = `{!out}<url><loc>https://ahorrame.mx/modelo/{text(i)}</loc></url>`;
+    }
+    return out;
+}
+
+// El JSON-LD tiene su propio tipo y no es `Html` con otro nombre: `Html` escapa
+// el '&' a '&amp;', y dentro de un bloque de JSON-LD eso corrompe el JSON. La
+// única puerta es `json(...)`, confianza explícita como la de `html(...)`.
+fn fichaLd(m: Modelo) -> Json {
+    return json(concat(
+        "{\"@context\":\"https://schema.org\",\"@type\":\"Product\",\"name\":\"",
+        concat(m.nombre, "\"}")
+    ));
+}
+
+fn coincidencias(ms: List<Modelo>, q: String) -> List<Modelo> {
+    let mut out = [];
+    for m in ms {
+        if contains(lower(m.nombre), lower(q)) {
+            out = append(out, m);
+        }
+    }
+    return out;
+}

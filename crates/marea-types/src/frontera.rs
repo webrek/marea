@@ -237,6 +237,12 @@ impl Checker {
 pub(crate) fn is_serializable(ty: &Ty) -> bool {
     match ty {
         Ty::Int | Ty::Float | Ty::Bool | Ty::String | Ty::Html | Ty::Unit | Ty::Unknown => true,
+        // Un `Json` es texto: cruza como cualquier cadena.
+        Ty::Json => true,
+        // Una `Respuesta` no es un valor, es lo que se le contesta a UNA
+        // petición —con su tipo de contenido—. No hay nada que el cliente pueda
+        // hacer con ella al otro lado del cable.
+        Ty::Respuesta => false,
         // Un almacén es un asa del servidor: no tiene representación en el cable.
         Ty::Store(_, _) => false,
         // Las uniones de etiquetas/escalares son serializables (etiqueta + datos).

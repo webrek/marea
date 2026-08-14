@@ -48,7 +48,8 @@ impl Checker {
 
     pub(crate) fn check_fn(&mut self, f: &FnDecl) {
         self.scopes = vec![HashMap::new()];
-        self.current_location = f.location;
+        // Una página corre en el servidor aunque no lo escriba: `ubicacion_efectiva`.
+        self.current_location = ubicacion_efectiva(f);
         self.current_return = match &f.return_type {
             Some(t) => self.ty_from_syntax(t),
             None => Ty::Unit,
@@ -87,7 +88,11 @@ impl Checker {
         // Un parámetro `Html` de una función remota lo rellena quien mande el
         // JSON: la confianza no cruza la red. Se comprueba en la declaración y
         // no solo en la llamada, porque el atacante no usa el cliente generado.
-        if matches!(f.location, Some(Location::Server) | Some(Location::Edge)) {
+        // En una página vale igual, y de sobra: sus parámetros salen de la URL.
+        if matches!(
+            self.current_location,
+            Some(Location::Server) | Some(Location::Edge)
+        ) {
             for p in &f.params {
                 if matches!(self.ty_from_syntax(&p.ty), Ty::Html) {
                     self.error(TypeError::new(

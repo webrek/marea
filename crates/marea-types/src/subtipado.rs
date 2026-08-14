@@ -13,6 +13,14 @@ impl Checker {
         if name == "Record" {
             return Some(None);
         }
+        // Los registros builtin (`Pagina`, `Meta`) tienen campos fijos y no
+        // pasan por los alias del módulo, así que se resuelven aquí. Van antes
+        // que los alias por la misma razón que en `ty_from_syntax`: un `type
+        // Pagina = ...` del usuario no puede cambiar lo que el compilador sabe
+        // emitir.
+        if let Some(campos) = builtins::record_lookup(name) {
+            return Some(Some(campos));
+        }
         // Un alias cíclico no es resoluble: cortamos antes de recurrir.
         if self.cyclic.contains(name) {
             return None;
