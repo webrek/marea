@@ -545,6 +545,105 @@ fn store_tiene_backends_de_base_de_datos() {
     assert!(p.runtime.contains("await import(\"pg\")"), "{}", p.runtime);
 }
 
+// --- almacén prestado (`store x: T from "tabla"`) ---
+//
+// Lo que se comprueba de verdad —que Marea lee una tabla que no creó y que falla
+// nombrando la columna que falta— vive en `prestado_integracion.rs`, contra una
+// base SQLite real. Aquí sólo lo que es literalmente texto emitido: el esquema
+// que viaja al runtime y la lista de importación.
+
+/// La línea `import { ... } from "./runtime.ts"` del bundle de servidor. Se
+/// extrae en vez de buscar el nombre suelto en todo el archivo: `save` aparece
+/// también en cualquier comentario o identificador que lo contenga, y una
+/// aserción así pasa (o falla) por la prosa, no por el código.
+fn importados(server: &str) -> Vec<&str> {
+    let linea = server
+        .lines()
+        .find(|l| l.starts_with("import {"))
+        .expect("el bundle de servidor siempre importa del runtime");
+    let tras = linea.split_once('{').expect("la importación abre").1;
+    let cuerpo = tras.split_once('}').expect("la importación cierra").0;
+    cuerpo.split(',').map(|n| n.trim()).collect()
+}
+
+#[test]
+fn store_prestado_no_normaliza_el_nombre_de_la_tabla() {
+    let p = build(
+        r#"
+        type Producto = { sku: String, precio: Int };
+        store productos: Producto from "priceObservations";
+        @server fn catalogo() -> List<Producto> { return all(productos); }
+        "#,
+    );
+    // La tabla es la que dice el fuente, con sus mayúsculas: es de otro, y
+    // adivinarle el nombre es justo donde esto se rompería en silencio.
+    assert!(
+        p.server.contains("table: \"priceObservations\""),
+        "{}",
+        p.server
+    );
+    assert!(p.server.contains("prestado: true"), "{}", p.server);
+    // Nombre de campo = nombre de columna, tal cual (sin camelCase→snake_case).
+    assert!(
+        p.server.contains("{ name: \"sku\", kind: \"text\" }"),
+        "{}",
+        p.server
+    );
+    // Ni '__id' ni '__doc': esas columnas son de los almacenes propios.
+    assert!(!p.server.contains("__doc"), "{}", p.server);
+}
+
+#[test]
+fn store_propio_no_se_marca_como_prestado() {
+    let p = build(
+        r#"
+        type Post = { texto: String };
+        store almacen: Post;
+        @server fn g() { save(almacen, Post { texto: "a" }); }
+        "#,
+    );
+    assert!(p.server.contains("table: \"almacen\""), "{}", p.server);
+    assert!(!p.server.contains("prestado"), "{}", p.server);
+}
+
+#[test]
+fn con_solo_almacenes_prestados_no_se_importa_la_escritura() {
+    let p = build(
+        r#"
+        type Producto = { sku: String };
+        store productos: Producto from "products";
+        @server fn catalogo() -> List<Producto> { return all(productos); }
+        "#,
+    );
+    let ns = importados(&p.server);
+    assert!(ns.contains(&"all"), "{ns:?}");
+    assert!(ns.contains(&"__store"), "{ns:?}");
+    // Sin nada que escribir, los builtins de escritura ni se nombran.
+    for w in ["save", "update", "remove"] {
+        assert!(!ns.contains(&w), "sobra '{w}': {ns:?}");
+    }
+}
+
+#[test]
+fn un_almacen_propio_basta_para_importar_la_escritura() {
+    // Mezclar los dos no debe recortar de más: el propio sí se escribe.
+    let p = build(
+        r#"
+        type Producto = { sku: String };
+        type Nota = { t: String };
+        store productos: Producto from "products";
+        store notas: Nota;
+        @server fn g() { save(notas, Nota { t: "a" }); }
+        "#,
+    );
+    let ns = importados(&p.server);
+    for w in ["save", "update", "remove"] {
+        assert!(ns.contains(&w), "falta '{w}': {ns:?}");
+    }
+    assert!(p.server.contains("prestado: true"), "{}", p.server);
+    assert!(p.server.contains("table: \"notas\""), "{}", p.server);
+}
+
 #[test]
 fn store_file_lleva_la_firma_del_esquema() {
     let p = build("type Post = { a: Int };\nstore almacen: Post;\n@server fn g() { save(almacen, Post { a: 1 }); }");
