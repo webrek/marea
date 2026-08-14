@@ -158,7 +158,15 @@ const BUILTINS_PURO: &[&str] = &[
     "__memo",
     "__resource",
     "__effect",
+    // Texto a número. Vive en el núcleo compartido (es cómputo puro), así que
+    // existe en los dos blancos y no depende del enrutado.
+    "entero",
 ];
+
+/// Los que sólo existen si el módulo SIRVE PÁGINAS (`@page`). Un módulo sin
+/// rutas no tiene tabla que registrar ni petición en curso que consultar, y
+/// pedir estos nombres le importaría cosas que su runtime no exporta.
+const BUILTINS_PAGINA: &[&str] = &["__ruta", "consulta", "textoPlano", "documentoXml"];
 
 /// Los que sólo existen si el módulo CRUZA la frontera de red: el registro de
 /// handlers, el cliente RPC y la red saliente. Un módulo que sólo calcula y
@@ -181,12 +189,17 @@ const BUILTINS_STORE_ESCRITURA: &[&str] = &["save", "update", "remove"];
 /// hace es cómputo sobre sus argumentos, y el bundle resultante se puede
 /// importar desde un componente de cliente o desde el edge. Es la diferencia
 /// entre generar marcado y ser una aplicación.
+///
+/// Una página (`@page("/ruta")`) es lo contrario de puro: implica servidor —se
+/// renderiza para que un buscador la lea— y necesita el `node:http` que sirve la
+/// ruta. Sin esta condición, un módulo que sólo declarara páginas se emitía con
+/// el runtime recortado y se quedaba sin servidor que las sirviera.
 fn es_puro(module: &Module) -> bool {
     store_decls(module).is_empty()
         && !module
             .items
             .iter()
-            .any(|it| matches!(it, Item::Fn(f) if is_remote(f) || f.es_session))
+            .any(|it| matches!(it, Item::Fn(f) if is_remote(f) || f.es_session || es_pagina(f)))
 }
 
 /// La lista de importación del runtime para este módulo.
@@ -194,6 +207,9 @@ fn builtins_de(module: &Module) -> String {
     let mut ns: Vec<&str> = BUILTINS_PURO.to_vec();
     if !es_puro(module) {
         ns.extend_from_slice(BUILTINS_SERVIDOR);
+    }
+    if !paginas(module).is_empty() {
+        ns.extend_from_slice(BUILTINS_PAGINA);
     }
     if !store_decls(module).is_empty() {
         let escribe = hay_almacen_propio(module);
@@ -351,6 +367,11 @@ fn is_remote(f: &FnDecl) -> bool {
     !f.es_session && matches!(f.location, Some(Location::Server) | Some(Location::Edge))
 }
 
+/// ¿Esta función sirve una ruta? `@page("/modelo/:id")`.
+fn es_pagina(f: &FnDecl) -> bool {
+    f.ruta.is_some()
+}
+
 /// Reparte las funciones del módulo en los tres cubos que consumen los emisores:
 /// `(remotas, locales, compartidas)`.
 ///
@@ -359,6 +380,11 @@ fn is_remote(f: &FnDecl) -> bool {
 /// viajar al navegador. Va en `shared` porque el servidor sí la necesita —el
 /// runtime la invoca en cada petición con política—, y fuera de `local`, que es
 /// lo que se emite para el cliente.
+///
+/// Una `@page` va al mismo sitio y por una razón parecida: implica servidor —se
+/// renderiza para que un buscador la lea—. Sin esto viajaba también al bundle
+/// del navegador, que es donde no puede correr, y de paso mandaba al cliente el
+/// cuerpo de una función que consulta la base de datos.
 fn repartir(module: &Module) -> (Vec<&FnDecl>, Vec<&FnDecl>, Vec<&FnDecl>) {
     let mut remote = Vec::new();
     let mut local = Vec::new();
@@ -366,7 +392,7 @@ fn repartir(module: &Module) -> (Vec<&FnDecl>, Vec<&FnDecl>, Vec<&FnDecl>) {
     let mut shared = Vec::new();
     for item in &module.items {
         if let Item::Fn(f) = item {
-            if f.es_session {
+            if f.es_session || es_pagina(f) {
                 shared.push(f);
             } else if is_remote(f) {
                 remote.push(f);
@@ -389,6 +415,97 @@ fn session_fn(module: &Module) -> Option<String> {
         Item::Fn(f) if f.es_session => Some(f.name.clone()),
         _ => None,
     })
+}
+
+/// Las páginas del módulo, EN EL ORDEN EN QUE HAY QUE PROBARLAS.
+///
+/// La tabla se arma al compilar —la ruta es un literal justamente para eso— y
+/// también se ORDENA al compilar, de más específica a más general: `/modelo/nuevo`
+/// antes que `/modelo/:id`. Si mandara el orden del archivo, mover una función
+/// treinta líneas más arriba cambiaría qué página sirve una URL, y eso es un
+/// cambio de comportamiento que no se ve en el diff de la línea que se tocó.
+///
+/// El criterio, segmento a segmento: un literal es más específico que un
+/// `:nombre`. Entre dos igual de específicas gana la que se declaró antes (el
+/// orden es estable), que sólo puede pasar si sirven el mismo patrón.
+fn paginas(module: &Module) -> Vec<&FnDecl> {
+    let mut ps: Vec<&FnDecl> = module
+        .items
+        .iter()
+        .filter_map(|it| match it {
+            Item::Fn(f) if es_pagina(f) => Some(f),
+            _ => None,
+        })
+        .collect();
+    ps.sort_by_key(|f| especificidad(f.ruta.as_deref().unwrap_or("")));
+    ps
+}
+
+/// La clave de orden de un patrón: 0 por segmento literal, 1 por dinámico. Se
+/// compara elemento a elemento, así que decide el PRIMER segmento en que dos
+/// patrones difieren, que es el mismo criterio con que se leen.
+fn especificidad(ruta: &str) -> Vec<u8> {
+    let dinamico = |s: &str| u8::from(s.starts_with(':'));
+    ruta.split('/').map(dinamico).collect()
+}
+
+/// El tipo con el que el runtime convierte un segmento de URL. Sólo los
+/// escalares tienen una lectura evidente desde texto; lo demás se pasa tal cual
+/// (el verificador es quien decide si eso es legal).
+fn tipo_segmento(t: &Type) -> &'static str {
+    match t {
+        Type::Name { name, args, .. } if args.is_empty() => match name.as_str() {
+            "Int" => "Int",
+            "Float" => "Float",
+            "Bool" => "Bool",
+            _ => "String",
+        },
+        _ => "String",
+    }
+}
+
+/// La línea de tabla de una página: el patrón, los tipos de sus segmentos y el
+/// envoltorio que reparte los segmentos —que llegan POR NOMBRE— a los
+/// parámetros de la función en el orden en que ésta los declara.
+///
+/// Por nombre y no por posición porque es lo único que no miente: `@page(
+/// "/a/:x/:y") fn f(y: Int, x: Int)` tiene que llamar a `f` con `y` primero, y
+/// una tabla posicional los cruzaría en silencio —dos `Int`, ningún error—.
+fn emit_ruta(f: &FnDecl) -> String {
+    let patron = f.ruta.as_deref().unwrap_or("");
+    let mut params: Vec<String> = Vec::new();
+    for segmento in patron.split('/') {
+        let Some(nombre) = segmento.strip_prefix(':') else {
+            continue;
+        };
+        // Un `:nombre` que ningún parámetro recoge se lee como texto y no llega
+        // a ninguna parte. Es un programa que el verificador rechaza; aquí sólo
+        // hace falta que no invente un tipo que nadie declaró.
+        let mut tipo = "String";
+        for p in &f.params {
+            if p.name == nombre {
+                tipo = tipo_segmento(&p.ty);
+            }
+        }
+        let n = js_string(nombre);
+        params.push(format!("{{ nombre: {n}, tipo: \"{tipo}\" }}"));
+    }
+    // El envoltorio afirma el tipo de cada segmento porque el runtime los
+    // entrega como `unknown` —no conoce las firmas— y aquí sí se sabe: acaba de
+    // convertirlos con el tipo que dice esta misma tabla.
+    let mut args: Vec<String> = Vec::new();
+    for p in &f.params {
+        let nombre = js_string(&p.name);
+        args.push(format!("__p[{nombre}] as {}", map_type(&p.ty)));
+    }
+    let recibe = if f.params.is_empty() { "()" } else { "(__p)" };
+    format!(
+        "__ruta({}, [{}], async {recibe} => {}({}));\n",
+        js_string(patron),
+        params.join(", "),
+        f.name,
+        args.join(", ")
+    )
 }
 
 /// La política del handler CUANDO exige identidad. `@server(Public)` —y la
@@ -437,10 +554,12 @@ pub fn emit(module: &Module) -> Project {
     let builtins = builtins_de(module);
     let tipos = emit_type_decls(module);
     let sesion = session_fn(module);
+    let paginas = paginas(module);
 
     Project {
         runtime,
         server: emit_server(&Servidor {
+            paginas: &paginas,
             remote: &remote,
             shared: &shared,
             globals: &plain_globals,
@@ -492,10 +611,12 @@ pub fn emit_app(module: &Module) -> AppProject {
     let sesion = session_fn(module);
     let builtins = builtins_de(module);
     let tipos = emit_type_decls(module);
+    let paginas = paginas(module);
 
     AppProject {
         runtime: runtime_de(module),
         server: emit_server(&Servidor {
+            paginas: &paginas,
             remote: &remote,
             shared: &shared,
             globals: &plain_globals,
@@ -964,6 +1085,9 @@ struct Servidor<'a> {
     builtins: &'a str,
     /// Las declaraciones `export type` del módulo y sus nombres.
     tipos: &'a Tipos,
+    /// Las `@page` del módulo, ya ordenadas de más específica a más general.
+    /// Están además en `shared`: la tabla las REGISTRA, no las define.
+    paginas: &'a [&'a FnDecl],
 }
 
 fn emit_server(s_: &Servidor) -> String {
@@ -976,6 +1100,7 @@ fn emit_server(s_: &Servidor) -> String {
         sesion,
         builtins,
         tipos,
+        paginas,
     } = *s_;
     let mut s = String::new();
     s.push_str("// Generado por Marea — lado servidor.\n");
@@ -1066,6 +1191,16 @@ fn emit_server(s_: &Servidor) -> String {
             f.name,
             pass.join(", ")
         ));
+    }
+    // La TABLA DE RUTAS. Va al final porque cita a las funciones de arriba, y
+    // se escribe entera aquí, al compilar: en runtime no hay nada que registrar
+    // ni orden que dependa de qué se importó primero. Sale ya ordenada de más
+    // específica a más general (ver `paginas`).
+    if !paginas.is_empty() {
+        s.push_str("// La tabla de rutas, armada al COMPILAR.\n");
+        for f in paginas {
+            s.push_str(&emit_ruta(f));
+        }
     }
     s
 }

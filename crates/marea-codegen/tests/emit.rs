@@ -874,6 +874,138 @@ fn los_builtins_de_lista_y_texto_llegan_al_runtime() {
     assert!(!p.client.contains("await append"), "{}", p.client);
 }
 
+// ================== Enrutado: lo que se decide AL COMPILAR ==================
+//
+// Lo que se decide al servir —qué responde `/modelo/7`, si `/modelo/abc` es un
+// 404, si dos peticiones a la vez se pisan la query— se ejercita contra el
+// servidor levantado, en `rutas_integracion.rs`. Aquí sólo lo que es una
+// decisión del compilador y no se puede observar corriendo una sola URL: el
+// ORDEN de la tabla y a qué bundle va cada función.
+
+/// Las líneas de CÓDIGO del texto emitido, sin comentarios.
+///
+/// El filtro no es cosmético. La salida lleva un comentario con la firma de
+/// cada función, así que una aserción sobre "el texto emitido" puede darse por
+/// satisfecha con la prosa en vez de con la línea que importa. Ya ha pasado.
+fn codigo(texto: &str) -> Vec<&str> {
+    texto
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.starts_with("//"))
+        .collect()
+}
+
+/// Las líneas `__ruta(...)` de un bundle de servidor, en orden.
+fn tabla(server: &str) -> Vec<&str> {
+    codigo(server)
+        .into_iter()
+        .filter(|l| l.starts_with("__ruta("))
+        .collect()
+}
+
+/// El orden de la tabla lo decide la especificidad, no el orden del archivo.
+///
+/// Si mandara el archivo, mover una función treinta líneas arriba cambiaría qué
+/// página sirve una URL —y eso no se ve en el diff de la línea que se tocó—.
+#[test]
+fn la_tabla_va_de_mas_especifica_a_mas_general() {
+    let p = build(
+        r#"
+        @page("/modelo/:id")
+        fn ficha(id: Int) -> Pagina { return Pagina { cuerpo: `a` }; }
+        @page("/modelo/nuevo")
+        fn nuevo() -> Pagina { return Pagina { cuerpo: `b` }; }
+        "#,
+    );
+    let rutas = tabla(&p.server);
+    assert_eq!(rutas.len(), 2, "{}", p.server);
+    assert!(rutas[0].contains("/modelo/nuevo"), "{}", p.server);
+    assert!(rutas[1].contains("/modelo/:id"), "{}", p.server);
+}
+
+/// Los segmentos se atan a los parámetros POR NOMBRE. Por posición se cruzarían
+/// en silencio cuando los dos son del mismo tipo: ningún error, otra página.
+#[test]
+fn los_segmentos_se_atan_por_nombre() {
+    let p = build(
+        r#"
+        @page("/p/:x/:y")
+        fn par(y: String, x: String) -> Pagina { return Pagina { cuerpo: `z` }; }
+        "#,
+    );
+    let rutas = tabla(&p.server);
+    let ruta = rutas.first().expect("debe haber una ruta");
+    // La ruta declara :x antes que :y; la función pide (y, x) y así se la llama.
+    assert!(ruta.contains("par(__p[\"y\"]"), "{ruta}");
+    assert!(ruta.contains("nombre: \"x\", tipo: \"String\""), "{ruta}");
+}
+
+/// El tipo del parámetro viaja a la tabla: es lo que convierte el segmento y,
+/// cuando no convierte, lo que hace que la URL no exista.
+#[test]
+fn el_tipo_del_segmento_viaja_a_la_tabla() {
+    let p = build(
+        r#"
+        @page("/m/:id")
+        fn ficha(id: Int) -> Pagina { return Pagina { cuerpo: `a` }; }
+        "#,
+    );
+    let ruta = tabla(&p.server)[0];
+    assert!(ruta.contains("nombre: \"id\", tipo: \"Int\""), "{ruta}");
+    assert!(ruta.contains("ficha(__p[\"id\"] as number)"), "{ruta}");
+}
+
+/// Una página corre en el SERVIDOR. Sin esto viajaba también al bundle del
+/// navegador —donde no puede correr—, y de paso le mandaba al cliente el cuerpo
+/// de una función que consulta la base de datos.
+#[test]
+fn una_pagina_no_viaja_al_navegador() {
+    let src = r#"
+        @page("/x")
+        fn pagina() -> Pagina { return Pagina { cuerpo: `x` }; }
+        "#;
+    let p = build(src);
+    assert!(p.server.contains("async function pagina"), "{}", p.server);
+    assert!(!p.client.contains("function pagina"), "{}", p.client);
+    let a = app(src);
+    assert!(!a.client_js.contains("function pagina"), "{}", a.client_js);
+}
+
+/// Un módulo que SÓLO sirve páginas no es puro: necesita el servidor que las
+/// sirva. Antes se emitía con el runtime recortado —sin `node:http`— y se
+/// quedaba sin nadie que atendiera sus propias rutas.
+#[test]
+fn un_modulo_de_solo_paginas_lleva_servidor() {
+    let p = build(
+        r#"
+        @page("/")
+        fn casa() -> Pagina { return Pagina { cuerpo: `h` }; }
+        "#,
+    );
+    for n in [
+        "node:http",
+        "export function __ruta",
+        "export function consulta",
+        "export function textoPlano",
+        "export function documentoXml",
+    ] {
+        assert!(p.runtime.contains(n), "falta '{n}' en runtime.ts");
+    }
+    // Y el bundle los importa: sin el import, el nombre no existe al ejecutar.
+    assert!(p.server.contains("__ruta"), "{}", p.server);
+}
+
+/// Un módulo SIN páginas no paga nada: ni importa los builtins del enrutado ni
+/// registra una tabla vacía.
+#[test]
+fn sin_paginas_no_hay_tabla_ni_importaciones_de_ruta() {
+    let p = build("@server fn f() -> Int { return 1; }");
+    assert!(tabla(&p.server).is_empty(), "{}", p.server);
+    for n in ["__ruta", "consulta", "textoPlano", "documentoXml"] {
+        assert!(!p.server.contains(n), "sobra '{n}' en server.ts");
+    }
+}
+
 // ================== Un solo núcleo para los dos runtimes ==================
 
 /// Lo que los dos runtimes comparten. Estuvo duplicado, con implementaciones
@@ -886,7 +1018,7 @@ fn los_builtins_de_lista_y_texto_llegan_al_runtime() {
 /// del entorno capturado; el otro va al mismo origen desde el navegador. Son dos
 /// transportes, y juntarlos sería inventar una abstracción para tapar que el
 /// nombre coincide.
-const COMPARTIDAS: [&str; 18] = [
+const COMPARTIDAS: [&str; 19] = [
     "__div",
     "__effect",
     "__index",
@@ -898,6 +1030,7 @@ const COMPARTIDAS: [&str; 18] = [
     "append",
     "concat",
     "contains",
+    "entero",
     "escape",
     "html",
     "len",
