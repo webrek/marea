@@ -28,9 +28,9 @@ impl Checker {
         // El PRIMER argumento es el almacén: `todos(productos)`. De ahí sale el
         // tipo de los elementos, así que un módulo puede tener varios almacenes
         // sin ambigüedad.
-        let elem = match arg_tys.first() {
-            Some(Ty::Store(_, e)) => (**e).clone(),
-            Some(Ty::Unknown) | None => Ty::Unknown,
+        let (elem, almacen) = match arg_tys.first() {
+            Some(Ty::Store(n, e)) => ((**e).clone(), Some(n.clone())),
+            Some(Ty::Unknown) | None => (Ty::Unknown, None),
             Some(otro) => {
                 self.error(TypeError::new(
                     "E_NO_STORE",
@@ -41,9 +41,38 @@ impl Checker {
                     ),
                     args.first().map(|a| a.span()).unwrap_or(span),
                 ));
-                Ty::Unknown
+                (Ty::Unknown, None)
             }
         };
+
+        // Un almacén PRESTADO es de SÓLO LECTURA. La tabla es de otro programa:
+        // Marea no manda en su esquema ni en sus invariantes —qué columnas hay,
+        // cuáles no admiten nulo, qué disparadores corren, qué otra tabla queda
+        // desincronizada— así que escribir en ella desde aquí es escribir en la
+        // base de datos de otra aplicación. Leerla sí vale: leer no rompe nada
+        // de eso. Si algún día hace falta escribir, será un permiso explícito
+        // en el fuente, no un silencio.
+        let escribe = matches!(name, "save" | "update" | "remove");
+        let prestado = match &almacen {
+            Some(a) if escribe => self
+                .stores_prestados
+                .get(a)
+                .map(|tabla| (a.clone(), tabla.clone())),
+            _ => None,
+        };
+        if let Some((a, tabla)) = prestado {
+            self.error(TypeError::new(
+                "E_STORE_PRESTADO_SOLO_LECTURA",
+                format!(
+                    "'{name}' escribiría en '{a}', que toma prestada la tabla '{tabla}': esa \
+                     tabla es de otro programa y Marea no manda en su esquema ni en sus \
+                     invariantes, así que escribir en ella a ciegas es escribir en la base de \
+                     datos de otra aplicación. Un almacén prestado es de sólo lectura: léelo \
+                     con 'all({a})' y deja que escriba su dueño"
+                ),
+                span,
+            ));
+        }
 
         // Firma de cada builtin de estado, contando el almacén: (aridad,
         // posiciones de índice Int, posiciones de valor, ¿devuelve List<T>?).

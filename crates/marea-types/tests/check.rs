@@ -1378,6 +1378,183 @@ fn los_campos_con_palabras_reservadas_de_sql_son_validos() {
     assert!(errs.is_empty(), "{:?}", codes(&errs));
 }
 
+// --- almacenes PRESTADOS: `store p: T from "tabla";` ---
+//
+// Un almacén propio POSEE su tabla: Marea la crea, manda en su esquema y por eso
+// puede garantizarlo. Con `from` la toma PRESTADA de otro programa, que es lo que
+// permite migrar una web cuyas tablas escribe otro motor. Lo que cambia no es el
+// tipo —leer sigue dando `List<T>`— sino quién manda en la tabla, y de ahí salen
+// las reglas de abajo.
+
+// Leer un almacén prestado es exactamente leer uno propio: mismo tipo, misma
+// ubicación. Es el caso que existe para funcionar.
+#[test]
+fn leer_un_almacen_prestado_tipa() {
+    let errs = check_src(
+        "type Producto = { nombre: String, precio: Int };\n\
+         store productos: Producto from \"products\";\n\
+         @server fn catalogo() -> List<Producto> { return all(productos); }",
+    );
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// El tipo sigue mandando en la lectura: `all` de un prestado devuelve `List<T>`,
+// no un comodín. Sin esto el préstamo sería un agujero por el que entra `?` al
+// resto del programa.
+#[test]
+fn el_tipo_manda_en_la_lectura_de_un_prestado() {
+    let errs = check_src(
+        "type Producto = { nombre: String, precio: Int };\n\
+         store productos: Producto from \"products\";\n\
+         @server fn f() -> List<Int> { return all(productos); }",
+    );
+    assert!(
+        has_code(&errs, "E_RETURN_TYPE_MISMATCH"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+// Escribir en la tabla de otro a ciegas es escribir en la base de datos de otra
+// aplicación: Marea no manda en su esquema ni en sus invariantes. Sólo lectura.
+#[test]
+fn e_store_prestado_solo_lectura_save() {
+    let errs = check_src(
+        "type Producto = { nombre: String };\n\
+         store productos: Producto from \"products\";\n\
+         @server fn f() { save(productos, Producto { nombre: \"x\" }); }",
+    );
+    assert!(
+        has_code(&errs, "E_STORE_PRESTADO_SOLO_LECTURA"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+#[test]
+fn e_store_prestado_solo_lectura_update_y_remove() {
+    let errs = check_src(
+        "type Producto = { nombre: String };\n\
+         store productos: Producto from \"products\";\n\
+         @server fn f() { update(productos, 0, Producto { nombre: \"x\" }); }",
+    );
+    assert!(
+        has_code(&errs, "E_STORE_PRESTADO_SOLO_LECTURA"),
+        "{:?}",
+        codes(&errs)
+    );
+    let errs = check_src(
+        "type Producto = { nombre: String };\n\
+         store productos: Producto from \"products\";\n\
+         @server fn f() { remove(productos, 0); }",
+    );
+    assert!(
+        has_code(&errs, "E_STORE_PRESTADO_SOLO_LECTURA"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+// La regla es del PRÉSTAMO, no del builtin: en un almacén propio se sigue
+// escribiendo igual que siempre.
+#[test]
+fn escribir_en_un_almacen_propio_sigue_valiendo() {
+    let errs = check_src(
+        "type Producto = { nombre: String };\n\
+         store productos: Producto;\n\
+         @server fn f() { save(productos, Producto { nombre: \"x\" }); }",
+    );
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// Una tabla sin nombre no es ninguna tabla: `from \"\"` (o sólo espacios) no dice
+// de dónde leer, y el error tiene que salir aquí y no en la primera consulta.
+#[test]
+fn e_tabla_externa_vacia() {
+    let errs = check_src(
+        "type P = { a: Int };\n\
+         store productos: P from \"\";",
+    );
+    assert!(has_code(&errs, "E_TABLA_EXTERNA_VACIA"), "{:?}", codes(&errs));
+    let errs = check_src(
+        "type P = { a: Int };\n\
+         store productos: P from \"   \";",
+    );
+    assert!(has_code(&errs, "E_TABLA_EXTERNA_VACIA"), "{:?}", codes(&errs));
+}
+
+// Una tabla ajena tiene COLUMNAS y el tipo es lo único que dice a qué campo va
+// cada una. Un escalar no tiene campos: no hay mapeo posible.
+#[test]
+fn e_store_prestado_no_registro() {
+    let errs = check_src("store contadores: Int from \"counters\";");
+    assert!(
+        has_code(&errs, "E_STORE_PRESTADO_NO_REGISTRO"),
+        "{:?}",
+        codes(&errs)
+    );
+    // Una lista tampoco: la tabla ya es la colección.
+    let errs = check_src("type P = { a: Int };\nstore productos: List<P> from \"products\";");
+    assert!(
+        has_code(&errs, "E_STORE_PRESTADO_NO_REGISTRO"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+// Un almacén PROPIO sí admite un escalar: Marea manda en ese esquema y lo guarda
+// en una columna suya. La regla nueva no puede llevarse eso por delante.
+#[test]
+fn un_almacen_propio_escalar_sigue_valiendo() {
+    let errs = check_src("store contadores: Int;");
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
+// Dos almacenes sobre la misma tabla serían dos vistas del mismo sitio con dos
+// tipos: el día que una se quede atrás respecto al esquema real, nadie lo vería.
+#[test]
+fn e_tabla_externa_duplicada() {
+    let errs = check_src(
+        "type P = { a: Int };\ntype Q = { b: String };\n\
+         store uno: P from \"products\";\n\
+         store otro: Q from \"products\";",
+    );
+    assert!(
+        has_code(&errs, "E_TABLA_EXTERNA_DUPLICADA"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+// También cuando la tabla prestada es la que un almacén PROPIO ya iba a crear:
+// la de uno propio se deriva del nombre en minúsculas, así que el choque es el
+// mismo aunque sólo uno lleve `from`.
+#[test]
+fn una_tabla_prestada_no_puede_pisar_la_de_un_almacen_propio() {
+    let errs = check_src(
+        "type P = { a: Int };\ntype Q = { b: String };\n\
+         store productos: P;\n\
+         store ajenos: Q from \"Productos\";",
+    );
+    assert!(
+        has_code(&errs, "E_TABLA_EXTERNA_DUPLICADA"),
+        "{:?}",
+        codes(&errs)
+    );
+}
+
+// Dos prestados a tablas distintas son dos almacenes normales y corrientes.
+#[test]
+fn dos_prestados_a_tablas_distintas_tipan() {
+    let errs = check_src(
+        "type P = { a: Int };\ntype L = { b: String };\n\
+         store productos: P from \"products\";\n\
+         store anuncios: L from \"listings\";\n\
+         @server fn f() -> Int { return len(all(productos)); }",
+    );
+    assert!(errs.is_empty(), "{:?}", codes(&errs));
+}
+
 // --- red saliente ---
 
 // Salir a la red es del servidor: desde el navegador la petición la haría el

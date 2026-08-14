@@ -1,0 +1,25 @@
+// E_STORE_PRESTADO_SOLO_LECTURA — 'store productos: Producto from "products";'
+// no declara un almacén de Marea: declara que ya existe una tabla ajena, y que
+// este programa la quiere LEER. La escribe otro motor, así que Marea no manda
+// en su esquema ni en sus invariantes —qué columnas hay, cuáles no admiten
+// nulo, qué disparadores corren, qué otra tabla queda desincronizada—. Escribir
+// ahí a ciegas es escribir en la base de datos de otra aplicación.
+//
+// Por eso un almacén prestado es de SÓLO LECTURA: 'catalogo' de abajo compila
+// perfectamente y es lo que este archivo existe para poder hacer. Lo que falla
+// es 'publicar', que intenta guardar en la tabla del vecino.
+
+type Producto = { nombre: String, precio: Int };
+
+// La tabla la crea y la escribe el motor en Go; aquí sólo se lee.
+store productos: Producto from "products";
+
+@server
+fn catalogo() -> List<Producto> {
+    return all(productos);
+}
+
+@server
+fn publicar(nombre: String, precio: Int) {
+    save(productos, Producto { nombre: nombre, precio: precio });
+}

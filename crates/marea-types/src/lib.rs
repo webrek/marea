@@ -120,6 +120,15 @@ struct Checker {
     /// builtins de estado, así que `all(productos)` y `all(ordenes)` son
     /// distintos, y `save(ordenes, p)` con un Producto es un error de tipos.
     stores: HashMap<String, Ty>,
+    /// Almacenes PRESTADOS (`store p: T from "tabla";`), por nombre, con la
+    /// tabla ajena que mapean. Un almacén propio no aparece aquí.
+    ///
+    /// La marca vive aparte y no dentro de `Ty::Store` porque no es del TIPO:
+    /// `all(p)` sigue dando `List<T>` se preste la tabla o no. Lo que cambia es
+    /// quién manda en ella, y eso decide una sola cosa —que escribir está
+    /// prohibido—, así que no tiene por qué contaminar cada comparación de
+    /// tipos.
+    stores_prestados: HashMap<String, String>,
     /// Variables de nivel superior (`let`/`reactive` de módulo) y su mutabilidad.
     /// Visibles desde cualquier función; son el estado reactivo de la app.
     globals: HashMap<String, (Ty, bool)>,
@@ -160,6 +169,7 @@ impl Checker {
             aliases: HashMap::new(),
             cyclic: std::collections::HashSet::new(),
             stores: HashMap::new(),
+            stores_prestados: HashMap::new(),
             globals: HashMap::new(),
             reactive_globals: std::collections::HashSet::new(),
             scopes: Vec::new(),

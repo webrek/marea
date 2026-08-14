@@ -190,6 +190,107 @@ fn dos_almacenes_con_el_mismo_nombre_en_modulos_distintos() {
     );
 }
 
+/// Dos almacenes PRESTADOS sobre la misma tabla ajena, en archivos distintos.
+/// Con `from` el nombre ya no dice a qué tabla va un almacén, así que dos
+/// nombres perfectamente distintos —y con tipos distintos— pueden estar mirando
+/// el mismo sitio. Serían dos vistas del mismo dato, y el día que una se quede
+/// atrás respecto al esquema real nadie lo vería: nada compara los dos tipos.
+#[test]
+fn dos_almacenes_prestados_sobre_la_misma_tabla() {
+    let errs = check_modulos(
+        "tabla-doble",
+        &[
+            (
+                "a.mar",
+                "import { P } from \"./b.mar\";\n\
+                 type Q = { y: Int };\n\
+                 store espejo: Q from \"products\";\n\
+                 @server fn f() -> List<Q> { return all(espejo); }\n",
+            ),
+            (
+                "b.mar",
+                "type P = { x: Int };\nstore productos: P from \"products\";\n",
+            ),
+        ],
+    );
+    assert!(
+        codigos(&errs).contains(&"E_TABLA_EXTERNA_DUPLICADA"),
+        "{:?}",
+        codigos(&errs)
+    );
+}
+
+/// Dos prestados a tablas DISTINTAS son dos almacenes normales: la regla no
+/// puede convertir el préstamo en algo que sólo se pueda hacer una vez.
+#[test]
+fn dos_almacenes_prestados_a_tablas_distintas_tipan() {
+    let errs = check_modulos(
+        "tabla-doble-ok",
+        &[
+            (
+                "a.mar",
+                "import { P } from \"./b.mar\";\n\
+                 type Q = { y: Int };\n\
+                 store anuncios: Q from \"listings\";\n\
+                 @server fn f() -> List<Q> { return all(anuncios); }\n",
+            ),
+            (
+                "b.mar",
+                "type P = { x: Int };\nstore productos: P from \"products\";\n",
+            ),
+        ],
+    );
+    assert!(errs.is_empty(), "{:?}", codigos(&errs));
+}
+
+/// Importar un almacén prestado no lo convierte en tuyo: la tabla sigue siendo
+/// de otro, así que la prohibición de escribir viaja con él al módulo que lo
+/// importa. Sin esto, bastaba un `import` para saltarse la regla.
+#[test]
+fn un_prestado_importado_sigue_siendo_de_solo_lectura() {
+    let errs = check_modulos(
+        "prestado-importado",
+        &[
+            (
+                "a.mar",
+                "import { productos, Producto } from \"./b.mar\";\n\
+                 @server fn f() { save(productos, Producto { x: 1 }); }\n",
+            ),
+            (
+                "b.mar",
+                "type Producto = { x: Int };\n\
+                 store productos: Producto from \"products\";\n",
+            ),
+        ],
+    );
+    assert!(
+        errs.iter()
+            .any(|(m, c)| m == "a.mar" && c == "E_STORE_PRESTADO_SOLO_LECTURA"),
+        "el error es de quien escribe: {errs:?}"
+    );
+}
+
+/// Y leerlo desde el módulo que lo importa sigue valiendo, con su tipo.
+#[test]
+fn un_prestado_importado_se_lee_con_su_tipo() {
+    let errs = check_modulos(
+        "prestado-leido",
+        &[
+            (
+                "a.mar",
+                "import { productos, Producto } from \"./b.mar\";\n\
+                 @server fn f() -> List<Producto> { return all(productos); }\n",
+            ),
+            (
+                "b.mar",
+                "type Producto = { x: Int };\n\
+                 store productos: Producto from \"products\";\n",
+            ),
+        ],
+    );
+    assert!(errs.is_empty(), "{:?}", codigos(&errs));
+}
+
 /// Importar un nombre que además se declara aquí: en el bundle serían la misma
 /// declaración de primer nivel.
 #[test]
