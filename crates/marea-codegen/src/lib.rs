@@ -169,6 +169,12 @@ const BUILTINS_SERVIDOR: &[&str] = &["__register", "__rpc", "fetch", "post"];
 /// no los hay traería un import a nombres que el runtime recortado ya no exporta.
 const BUILTINS_STORE: &[&str] = &["__store", "save", "all", "update", "remove"];
 
+/// Los de ESCRITURA. Un almacén prestado (`from "tabla"`) es de sólo lectura: la
+/// tabla es de otro. Si TODOS los almacenes del módulo son prestados, estos tres
+/// no se importan siquiera — el programa no tiene nada que escribir, y el
+/// nombre no está ahí para llamarlo por descuido.
+const BUILTINS_STORE_ESCRITURA: &[&str] = &["save", "update", "remove"];
+
 /// ¿Este módulo puede vivir sin Node?
 ///
 /// Sí cuando no cruza la frontera de red ni guarda estado: entonces todo lo que
@@ -190,7 +196,12 @@ fn builtins_de(module: &Module) -> String {
         ns.extend_from_slice(BUILTINS_SERVIDOR);
     }
     if !store_decls(module).is_empty() {
-        ns.extend_from_slice(BUILTINS_STORE);
+        let escribe = hay_almacen_propio(module);
+        for &n in BUILTINS_STORE {
+            if escribe || !BUILTINS_STORE_ESCRITURA.contains(&n) {
+                ns.push(n);
+            }
+        }
     }
     format!("{{ {} }}", ns.join(", "))
 }
@@ -617,32 +628,74 @@ const APP_HTML: &str = "<!doctype html>\n\
 /// el archivo de persistencia. `None` si no hay store.
 /// Los almacenes del módulo: (nombre, literal JS de su esquema).
 fn store_decls(module: &Module) -> Vec<(String, String)> {
-    module
-        .items
-        .iter()
-        .filter_map(|it| match it {
-            Item::Store { name, ty, .. } => {
-                Some((name.clone(), schema_literal_de(ty, name, module)))
-            }
-            _ => None,
-        })
-        .collect()
+    let mut out = Vec::new();
+    for it in &module.items {
+        if let Item::Store { name, ty, .. } = it {
+            let tabla = tabla_externa_de(it);
+            let esquema = schema_literal_de(ty, name, tabla, module);
+            out.push((name.clone(), esquema));
+        }
+    }
+    out
+}
+
+/// La tabla que un almacén toma PRESTADA (`store x: T from "tabla"`), si la
+/// toma. `None` es el almacén de siempre: Marea lo posee y lo crea.
+fn tabla_externa_de(it: &Item) -> Option<&str> {
+    match it {
+        Item::Store { tabla_externa, .. } => tabla_externa.as_deref(),
+        _ => None,
+    }
+}
+
+/// ¿Este elemento es un almacén que Marea POSEE?
+fn es_almacen_propio(it: &Item) -> bool {
+    matches!(it, Item::Store { .. }) && tabla_externa_de(it).is_none()
+}
+
+/// ¿El módulo tiene algún almacén propio? Sólo entonces escribe: uno prestado
+/// lee una tabla ajena y nada más.
+fn hay_almacen_propio(module: &Module) -> bool {
+    module.items.iter().any(es_almacen_propio)
 }
 
 /// Literal JS del esquema del store (`{ table, columns: [{name,kind}] }`) para
 /// el runtime, o `"null"` si no hay store. Los backends SQL/Mongo derivan de aquí
 /// la tabla y las columnas.
-fn schema_literal_de(store_ty: &Type, nombre: &str, module: &Module) -> String {
-    // La tabla toma el NOMBRE del almacén, no el del tipo: dos almacenes del
-    // mismo tipo son dos tablas distintas, que es justo lo que se quiere.
+///
+/// Un almacén PRESTADO añade `prestado: true`, y eso cambia lo que el runtime
+/// hace con el esquema: deja de ser una orden (crea esta tabla con estas
+/// columnas) y pasa a ser una expectativa (esta tabla ya existe y debe tener
+/// estas columnas). Va en el literal, y no en una variable de entorno ni en una
+/// convención de nombres, porque es una propiedad del programa: se lee en el
+/// fuente y viaja hasta el runtime sin que nadie tenga que acordarse.
+fn schema_literal_de(
+    store_ty: &Type,
+    nombre: &str,
+    tabla_externa: Option<&str>,
+    module: &Module,
+) -> String {
     let (_, columns) = resolve_store_fields(store_ty, module);
-    let table = nombre.to_lowercase();
+    // Uno propio: la tabla toma el NOMBRE del almacén, no el del tipo (dos
+    // almacenes del mismo tipo son dos tablas distintas, que es lo que se
+    // quiere). Uno prestado: el nombre EXACTO que dice el fuente, sin pasarlo a
+    // minúsculas — la tabla es de otro y su nombre no es nuestro para
+    // normalizarlo.
+    let table = match tabla_externa {
+        Some(t) => t.to_string(),
+        None => nombre.to_lowercase(),
+    };
     let cols: Vec<String> = columns
         .iter()
         .map(|(n, k)| format!("{{ name: {}, kind: {} }}", js_string(n), js_string(k)))
         .collect();
+    let prestado = if tabla_externa.is_some() {
+        ", prestado: true"
+    } else {
+        ""
+    };
     format!(
-        "{{ table: {}, columns: [{}] }}",
+        "{{ table: {}, columns: [{}]{prestado} }}",
         js_string(&table),
         cols.join(", ")
     )

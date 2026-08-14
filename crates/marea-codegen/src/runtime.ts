@@ -394,6 +394,12 @@ export function __badRequest(detalle: string): never {
 interface __Schema {
   table: string;
   columns: { name: string; kind: "text" | "int" | "real" | "bool" | "json" }[];
+  // `store x: T from "tabla"`: la tabla NO es de Marea. Con esto el esquema deja
+  // de ser una orden ("crea esta tabla") y pasa a ser una expectativa ("esta
+  // tabla ya existe y debe tener estas columnas"). El almacén es de sólo
+  // lectura: no se emite CREATE TABLE, no hay columnas '__id'/'__doc' —una tabla
+  // ajena no las tiene— y escribir en ella es un error.
+  prestado?: boolean;
 }
 
 // Una fila persistida: id estable + el valor del .mar. El id desacopla la
@@ -597,6 +603,55 @@ export function __store(__nombre: string, E: __Schema): __Store {
     return cols.length === 1 && cols[0].name === "__doc";
   }
 
+  // --- ALMACÉN PRESTADO ---
+  //
+  // Lo que se comprueba AL ARRANCAR, no en la primera petición: son dos
+  // condiciones que no dependen de los datos, y descubrirlas a mitad de un RPC
+  // convierte un error de configuración en un 500 sin explicación.
+  const __prestado = E.prestado === true;
+  if (__prestado) {
+    // Sin campos no hay columnas que leer. Un almacén propio escalar cabe en una
+    // columna '__doc' porque Marea la crea; en una tabla ajena esa columna no
+    // existe, y adivinar cuál de las suyas es "el valor" sería inventar.
+    if (__isDoc()) {
+      throw new Error(
+        `[marea] el almacén prestado '${__nombre}' no guarda un registro: una tabla ajena se lee por columnas y un tipo sin campos no dice cuáles. Declara un tipo registro.`,
+      );
+    }
+    // El backend de archivo es un log JSONL que escribe Marea: no hay ninguna
+    // tabla ajena que leer ahí, así que 'file' no es un backend degradado para
+    // este caso, es el caso imposible.
+    const cual = process.env.MAREA_DB ?? "file";
+    if (cual !== "sqlite" && cual !== "postgres" && cual !== "mysql" && cual !== "mongodb") {
+      throw new Error(
+        `[marea] el almacén prestado '${__nombre}' quiere leer la tabla '${E.table}', pero MAREA_DB=${cual}: el backend de archivo es un log que escribe Marea, no una base con tablas de otro. Usa MAREA_DB=sqlite|postgres|mysql|mongodb (con MAREA_DB_URL).`,
+      );
+    }
+  }
+
+  // La contrapartida honesta de haber perdido la garantía de esquema: prestar
+  // una tabla hace IMPOSIBLE impedir que su dueño le quite una columna, pero no
+  // impide detectarlo en la primera lectura y decir CUÁL falta. Sin esto, el
+  // campo llegaría `undefined` al programa y el error saldría tres capas más
+  // abajo, hablando de otra cosa.
+  function __exigirColumnas(existentes: string[]): void {
+    if (existentes.length === 0) {
+      throw new Error(
+        `[marea] el almacén prestado '${__nombre}' no encuentra la tabla '${E.table}' (o no tiene columnas). Marea no la crea: es de otro.`,
+      );
+    }
+    const hay = new Set(existentes);
+    const faltan = E.columns.map((c) => c.name).filter((n) => !hay.has(n));
+    if (faltan.length === 0) return;
+    const cuales =
+      faltan.length === 1
+        ? `la columna '${faltan[0]}'`
+        : `las columnas ${faltan.map((n) => `'${n}'`).join(", ")}`;
+    throw new Error(
+      `[marea] el almacén prestado '${__nombre}' lee la tabla '${E.table}', que no tiene ${cuales}. La tabla tiene: ${existentes.join(", ")}.`,
+    );
+  }
+
   // --- conversión registro <-> fila (para los backends SQL) ---
   function __toRow(rec: any): unknown[] {
     if (__isDoc()) return [JSON.stringify(rec ?? null)];
@@ -610,6 +665,10 @@ export function __store(__nombre: string, E: __Schema): __Store {
   // Parseo de columnas JSON tolerante: una celda corrupta cae a null en vez de
   // tumbar la carga completa del store (aislamos la fila mala).
   function __parseCell(v: any): unknown {
+    // Un driver puede devolver la celda YA parseada (jsonb en postgres, JSON en
+    // mysql, un arreglo nativo en Mongo). Volver a parsear lo que ya es un valor
+    // lanzaría, y el catch lo dejaría en null: dato perdido en silencio.
+    if (v !== null && typeof v === "object") return v;
     try {
       return JSON.parse(v ?? "null");
     } catch {
@@ -663,6 +722,10 @@ export function __store(__nombre: string, E: __Schema): __Store {
   // Constructores de SQL incremental, parametrizados por dialecto (`q` = comilla de
   // identificador, `p(i)` = i-ésimo placeholder: '?' en sqlite/mysql, '$i' en pg).
   function __selectSql(q: string): string {
+    // Prestado: la tabla ajena no tiene '__id', así que ni se pide ni se ordena
+    // por él. El orden es el que dé la tabla; ordenar por una columna del
+    // usuario sería elegir por él un criterio que no ha declarado.
+    if (__prestado) return `SELECT ${__cols(q)} FROM ${__table(q)}`;
     return `SELECT ${__idCol(q)}, ${__cols(q)} FROM ${__table(q)} ORDER BY ${__idCol(q)}`;
   }
   function __insertSql(q: string, p: (i: number) => string): string {
@@ -679,7 +742,10 @@ export function __store(__nombre: string, E: __Schema): __Store {
     return `DELETE FROM ${__table(q)} WHERE ${__idCol(q)} = ${p(1)}`;
   }
   // Fila SQL -> __Row. __fromRow ignora la columna __id (solo lee las del esquema).
-  function __rowFrom(row: any): __Row {
+  function __rowFrom(row: any, i: number): __Row {
+    // Prestado: no hay '__id' que leer. El id es posicional y no se usa jamás
+    // para escribir (un prestado no escribe): sólo numera la copia en memoria.
+    if (__prestado) return { id: i + 1, item: __fromRow(row) };
     return { id: Number(row.__id), item: __fromRow(row) };
   }
 
@@ -761,7 +827,18 @@ export function __store(__nombre: string, E: __Schema): __Store {
       if (db) return db;
       const { DatabaseSync } = await import("node:sqlite");
       db = new DatabaseSync(path);
-      db.exec(__createSql(q));
+      if (__prestado) {
+        // Ni CREATE TABLE ni CREATE TABLE IF NOT EXISTS: la tabla es de otro y
+        // Marea no manda en su esquema. Lo único que hace es comprobar que
+        // tiene lo que el tipo dice.
+        __exigirColumnas(
+          (db.prepare(`PRAGMA table_info(${__table(q)})`).all() as any[]).map((c) =>
+            String(c.name),
+          ),
+        );
+      } else {
+        db.exec(__createSql(q));
+      }
       return db;
     }
     return {
@@ -790,7 +867,15 @@ export function __store(__nombre: string, E: __Schema): __Store {
       if (pool) return pool;
       const pg = await import("pg");
       pool = new pg.Pool({ connectionString: process.env.MAREA_DB_URL });
-      await pool.query(__createSql(q));
+      if (__prestado) {
+        const r = await pool.query(
+          "SELECT column_name FROM information_schema.columns WHERE table_name = $1",
+          [E.table],
+        );
+        __exigirColumnas((r.rows as any[]).map((c) => String(c.column_name)));
+      } else {
+        await pool.query(__createSql(q));
+      }
       return pool;
     }
     return {
@@ -819,7 +904,17 @@ export function __store(__nombre: string, E: __Schema): __Store {
       if (pool) return pool;
       const mysql = await import("mysql2/promise");
       pool = mysql.createPool(process.env.MAREA_DB_URL ?? "");
-      await pool.query(__createSql(q));
+      if (__prestado) {
+        const [cols] = await pool.query(
+          "SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ?",
+          [E.table],
+        );
+        __exigirColumnas(
+          (cols as any[]).map((c) => String(c.column_name ?? c.COLUMN_NAME)),
+        );
+      } else {
+        await pool.query(__createSql(q));
+      }
       return pool;
     }
     return {
@@ -860,10 +955,25 @@ export function __store(__nombre: string, E: __Schema): __Store {
       const { _id, ...rest } = d;
       return rest;
     }
+    // Prestado: se proyectan EXACTAMENTE los campos del tipo. Devolver el resto
+    // del documento metería en el valor campos que el programa no declaró (y un
+    // `_id` que ni siquiera es un número cuando lo escribe otro).
+    function __itemPrestado(d: any): unknown {
+      const rec: any = {};
+      for (const c of E.columns) rec[c.name] = d?.[c.name];
+      return rec;
+    }
     return {
       async load() {
         const c = await open();
         const docs = (await c.find({}).sort({ _id: 1 }).toArray()) as any[];
+        if (__prestado) {
+          // Mongo no declara esquema: lo que hay es lo que traen los documentos,
+          // así que la comprobación se hace contra el primero. Una colección
+          // vacía no tiene nada que leer ni nada que contradecir.
+          if (docs.length > 0) __exigirColumnas(Object.keys(docs[0]));
+          return docs.map((d, i) => ({ id: i + 1, item: __itemPrestado(d) }));
+        }
         return docs.map((d) => ({ id: Number(d._id), item: __itemOf(d) }));
       },
       async insert(id, item) {
@@ -957,13 +1067,32 @@ export function __store(__nombre: string, E: __Schema): __Store {
   }
 
 
-  const a: __Store = {
-    nombre: __nombre,
-    save: _guardar,
-    all: _todos,
-    update: _actualizar,
-    remove: _borrar,
-  };
+  // Un prestado no escribe. El verificador ya rechaza `save`/`update`/`remove`
+  // sobre él al compilar, y el codegen ni siquiera importa esos builtins cuando
+  // todos los almacenes del módulo son prestados. Esto es la última línea: si
+  // alguien llega hasta aquí igual, se entera de por qué en vez de escribir en
+  // la tabla de otro.
+  function __soloLectura(op: string): never {
+    throw new Error(
+      `[marea] '${op}' sobre el almacén prestado '${__nombre}': la tabla '${E.table}' la mantiene otro programa y Marea sólo la lee.`,
+    );
+  }
+
+  const a: __Store = __prestado
+    ? {
+        nombre: __nombre,
+        save: () => __soloLectura("save"),
+        all: _todos,
+        update: () => __soloLectura("update"),
+        remove: () => __soloLectura("remove"),
+      }
+    : {
+        nombre: __nombre,
+        save: _guardar,
+        all: _todos,
+        update: _actualizar,
+        remove: _borrar,
+      };
   __stores[__nombre] = a;
   return a;
 }
