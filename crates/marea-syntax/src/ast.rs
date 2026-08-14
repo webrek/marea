@@ -95,6 +95,8 @@ pub struct Anotacion {
     pub politica: Option<Type>,
     pub identidad_bind: Option<String>,
     pub es_session: bool,
+    pub ruta: Option<String>,
+    pub ruta_span: Option<Span>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -115,6 +117,12 @@ pub struct FnDecl {
     /// `@session`: la función que traduce un token en una identidad. Hay como
     /// mucho una por programa, la invoca el runtime y no el código del usuario.
     pub es_session: bool,
+    /// `@page("/modelo/:id")` — la ruta que sirve esta función. Los segmentos
+    /// `:nombre` se atan a los parámetros por nombre. Una página corre en el
+    /// SERVIDOR: se renderiza para que la lea un buscador, y la interactividad
+    /// va encima con islas.
+    pub ruta: Option<String>,
+    pub ruta_span: Option<Span>,
     pub name: String,
     pub params: Vec<Param>,
     pub return_type: Option<Type>,

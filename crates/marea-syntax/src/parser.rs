@@ -200,7 +200,8 @@ impl Parser {
 
     fn parse_item(&mut self) -> PResult<Item> {
         let anotacion = self.parse_anotacion()?;
-        let sin_anotacion = anotacion.location.is_none() && !anotacion.es_session;
+        let sin_anotacion =
+            anotacion.location.is_none() && !anotacion.es_session && anotacion.ruta.is_none();
         match self.peek_kind() {
             TokenKind::Fn => Ok(Item::Fn(self.parse_fn(anotacion)?)),
             TokenKind::Type if sin_anotacion => Ok(Item::Type(self.parse_type_decl()?)),
@@ -219,7 +220,7 @@ impl Parser {
                 ))
             }
             _ if !sin_anotacion => Err(SyntaxError::new(
-                "las anotaciones (@server/@client/@edge/@session) solo aplican a funciones",
+                "las anotaciones (@server/@client/@edge/@session/@page) solo aplican a funciones",
                 self.peek().span,
             )),
             _ => Err(SyntaxError::new(
@@ -349,25 +350,41 @@ impl Parser {
         let (name, span) = self.expect_ident("nombre de anotación tras '@'")?;
         if name == "session" {
             return Ok(Anotacion {
-                location: None,
-                politica: None,
-                identidad_bind: None,
                 es_session: true,
+                ..Anotacion::default()
+            });
+        }
+        // `@page("/modelo/:id")`. La ruta es un literal: tiene que poder leerse
+        // sin ejecutar nada, porque la tabla de rutas se arma al compilar.
+        if name == "page" {
+            self.expect(&TokenKind::LParen, "'(' tras '@page'")?;
+            let (ruta, ruta_span) = match self.peek_kind().clone() {
+                TokenKind::Str(s) => (s, self.advance().span),
+                _ => {
+                    return Err(SyntaxError::new(
+                        "se esperaba la ruta entre comillas: @page(\"/modelo/:id\")",
+                        self.peek().span,
+                    ))
+                }
+            };
+            self.expect(&TokenKind::RParen, "')' para cerrar la ruta")?;
+            return Ok(Anotacion {
+                ruta: Some(ruta),
+                ruta_span: Some(ruta_span),
+                ..Anotacion::default()
             });
         }
         let location = match name.as_str() {
             "server" => Location::Server,
             "client" => Location::Client,
             "edge" => Location::Edge,
-            other => {
-                return Err(SyntaxError::new(
-                    format!(
-                        "anotación desconocida '@{}'; usa @server, @client, @edge o @session",
-                        other
-                    ),
-                    at.span.to(span),
-                ))
-            }
+            other => return Err(SyntaxError::new(
+                format!(
+                    "anotación desconocida '@{}'; usa @server, @client, @edge, @session o @page",
+                    other
+                ),
+                at.span.to(span),
+            )),
         };
         // Política: `@server(Usuario)`. Opcional en la gramática; que falte o no
         // sea aceptable lo decide el verificador, que es quien sabe si el
@@ -395,7 +412,7 @@ impl Parser {
             location: Some(location),
             politica,
             identidad_bind,
-            es_session: false,
+            ..Anotacion::default()
         })
     }
 
@@ -431,6 +448,8 @@ impl Parser {
             politica: anotacion.politica,
             identidad_bind: anotacion.identidad_bind,
             es_session: anotacion.es_session,
+            ruta: anotacion.ruta,
+            ruta_span: anotacion.ruta_span,
             name,
             params,
             return_type,
