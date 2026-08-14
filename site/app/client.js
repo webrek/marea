@@ -469,6 +469,23 @@ export function contains(s, sub) {
   return String(s).includes(String(sub));
 }
 
+// Convertir texto a número PUEDE fallar, así que el tipo lo dice
+// (`Int | NoEsNumero`) y el `match` obliga a decidir el valor por defecto en el
+// fuente. Es lo que hacía falta para leer una query string —`entero(consulta(
+// "pagina"))`—, pero el hueco que tapa es más viejo: hasta ahora el lenguaje no
+// tenía NINGUNA forma de convertir texto a número.
+//
+// Estricto como la conversión de un segmento de ruta, y por la misma razón:
+// `Number(" 7 ")` es 7 y `Number("")` es 0, de modo que delegar en `Number`
+// convertiría en enteros dos cadenas que nadie escribió como números.
+export function entero(s) {
+  const t = String(s);
+  if (!/^-?\d+$/.test(t)) return { $tag: "NoEsNumero" };
+  const n = Number(t);
+  if (!Number.isSafeInteger(n)) return { $tag: "NoEsNumero" };
+  return n;
+}
+
 export function lower(s) {
   return String(s).toLowerCase();
 }

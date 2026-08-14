@@ -12,6 +12,10 @@
 // arrastrarlo le impide vivir en un componente de cliente o en el edge.
 import http from "node:http";
 import fs from "node:fs";
+// El contexto POR PETICIÓN. Ver `__contextoPeticion`, más abajo: es lo que
+// permite que `consulta()` lea la query string de SU petición y no la de otra
+// que esté a medias en el mismo proceso.
+import { AsyncLocalStorage } from "node:async_hooks";
 
 // El `fetch` del entorno, capturado antes de que lo tape el builtin homónimo de
 // Marea (`export function fetch`, más abajo). Una declaración de módulo gana al
@@ -165,8 +169,7 @@ function __serveStatic(req: http.IncomingMessage, res: http.ServerResponse): boo
   const ext = dot === -1 ? "" : path.slice(dot);
   const mime = __MIME[ext];
   if (mime === undefined) {
-    res.statusCode = 404;
-    res.end();
+    __noEncontrado(res);
     return true;
   }
   const file = root + path;
@@ -174,8 +177,7 @@ function __serveStatic(req: http.IncomingMessage, res: http.ServerResponse): boo
   try {
     data = fs.readFileSync(file);
   } catch {
-    res.statusCode = 404;
-    res.end();
+    __noEncontrado(res);
     return true;
   }
   res.setHeader("content-type", mime);
@@ -183,13 +185,281 @@ function __serveStatic(req: http.IncomingMessage, res: http.ServerResponse): boo
   return true;
 }
 
+// --------------------------------------------------------------------------
+// ENRUTADO: servir un SITIO, no una app suelta
+//
+// La tabla la arma el COMPILADOR. `@page("/modelo/:id")` exige un literal justo
+// para esto: el codegen emite un `__ruta(...)` por página en `server.ts`, ya
+// ordenadas de más específica a más general, y aquí no hay registro dinámico
+// que pueda variar entre dos arranques del mismo binario.
+//
+// LO QUE UNA RUTA DEVUELVE, y con qué content-type:
+//   - `Pagina`   -> text/html. HOY se emite SÓLO su `cuerpo`; los metadatos
+//     (titulo, canonica, metas, jsonld) se tipan pero no se escriben: su
+//     criterio de aceptación es "las etiquetas que Google ya indexó", y eso se
+//     valida contra el sitio real, no aquí.
+//   - `Respuesta` -> el tipo que dijo quien la construyó (`textoPlano`,
+//     `documentoXml`): sitemap.xml y robots.txt no son HTML, y sin esto el SEO
+//     —que es el negocio— se queda fuera.
+//   - una VARIANTE de fallo (`Pagina | NoEncontrado`) -> 404. No es un caso
+//     especial ni una "página de error" que registrar: es la rama de fallo del
+//     tipo de retorno, que el compilador ya obliga a declarar.
+// --------------------------------------------------------------------------
+
+const __CT_HTML = "text/html; charset=utf-8";
+
+// Un 404 con cuerpo. Una respuesta vacía la pinta el navegador como una página
+// en blanco, y quien la ve no sabe si el sitio se ha caído o la URL no existe.
+const __CUERPO_404 =
+  '<!doctype html>\n<html lang="es">\n<meta charset="utf-8">\n<title>404 — no encontrado</title>\n<h1>No encontrado</h1>\n<p>Esta dirección no existe en este sitio.</p>\n';
+// Un 500 NO dice qué falló: el detalle se queda en el log del servidor, igual
+// que en el endpoint RPC. Decirlo aquí sería un oráculo con el que ir probando.
+const __CUERPO_500 =
+  '<!doctype html>\n<html lang="es">\n<meta charset="utf-8">\n<title>500 — error del servidor</title>\n<h1>Error del servidor</h1>\n';
+
+function __responder(
+  res: http.ServerResponse,
+  status: number,
+  tipo: string,
+  cuerpo: string,
+): void {
+  res.statusCode = status;
+  res.setHeader("content-type", tipo);
+  res.end(cuerpo);
+}
+
+// El 404 compartido. Con rutas, este servidor sirve un SITIO y su 404 es una
+// página; sin ellas sólo atiende el endpoint RPC y los estáticos de la app, y
+// ahí un cuerpo HTML no le sirve a nadie —así el comportamiento de las apps que
+// no usan `@page` no cambia—.
+function __noEncontrado(res: http.ServerResponse): void {
+  if (__rutas.length === 0) {
+    res.statusCode = 404;
+    res.end();
+    return;
+  }
+  __responder(res, 404, __CT_HTML, __CUERPO_404);
+}
+
+// Un segmento `:nombre` de una ruta, con el tipo que le puso la función. El
+// tipo viaja desde el compilador porque es él quien lo conoce: aquí sólo se
+// aplica.
+interface __ParamRuta {
+  nombre: string;
+  tipo: string;
+}
+// Recibe los segmentos ya convertidos, POR NOMBRE. El envoltorio que emite el
+// codegen es quien los reparte a los parámetros de la función en su orden, que
+// es donde vive el conocimiento de cuál va dónde.
+type __ManejadorRuta = (p: Record<string, unknown>) => unknown | Promise<unknown>;
+interface __Ruta {
+  patron: string;
+  partes: string[];
+  params: __ParamRuta[];
+  fn: __ManejadorRuta;
+}
+const __rutas: __Ruta[] = [];
+
+export function __ruta(patron: string, params: __ParamRuta[], fn: __ManejadorRuta): void {
+  __rutas.push({ patron, partes: patron.split("/"), params, fn });
+}
+
+// El resultado de convertir un segmento. Se distingue "no vale" del valor
+// convertido con una etiqueta y no con `null`, porque el valor convertido puede
+// ser cualquier cosa —incluido algo falso, como el 0 o la cadena vacía—.
+type __Conversion = { ok: true; v: unknown } | { ok: false };
+const __NO_CASA: __Conversion = { ok: false };
+
+// Convierte un segmento de URL al tipo con que se declaró el parámetro.
+//
+// Un `:id` declarado `Int` que no parsea como entero es un 404, NO un 500: una
+// URL con basura es una URL que no existe, no un fallo del servidor. Por eso
+// esto no lanza: devuelve "no casa", y el despachador sigue probando las rutas
+// siguientes hasta quedarse sin ninguna.
+//
+// Estricto a propósito: `Number("7abc")` es NaN, pero `Number(" 7 ")` es 7 y
+// `Number("0x10")` es 16. Ninguna de esas dos URLs es el 7 ni el 16 que el
+// programa cree estar sirviendo, y aceptarlas serviría la misma página en
+// direcciones distintas —que en un sitio que vive de Google es contenido
+// duplicado, o sea el problema que se venía a resolver—.
+function __convertirSegmento(texto: string, tipo: string): __Conversion {
+  if (tipo === "Int") {
+    if (!/^-?\d+$/.test(texto)) return __NO_CASA;
+    const n = Number(texto);
+    return Number.isSafeInteger(n) ? { ok: true, v: n } : __NO_CASA;
+  }
+  if (tipo === "Float") {
+    if (!/^-?\d+(\.\d+)?$/.test(texto)) return __NO_CASA;
+    const n = Number(texto);
+    return Number.isFinite(n) ? { ok: true, v: n } : __NO_CASA;
+  }
+  if (tipo === "Bool") {
+    if (texto === "true") return { ok: true, v: true };
+    if (texto === "false") return { ok: true, v: false };
+    return __NO_CASA;
+  }
+  // `String` y cualquier otro: el segmento tal cual. Las URLs son texto.
+  return { ok: true, v: texto };
+}
+
+function __casarRuta(r: __Ruta, partes: string[]): Record<string, unknown> | null {
+  if (partes.length !== r.partes.length) return null;
+  const p: Record<string, unknown> = Object.create(null);
+  for (let i = 0; i < partes.length; i++) {
+    const patron = r.partes[i];
+    if (!patron.startsWith(":")) {
+      if (patron !== partes[i]) return null;
+      continue;
+    }
+    // Un segmento vacío no es un valor: '/modelo/' no sirve '/modelo/:id'.
+    if (partes[i] === "") return null;
+    let texto: string;
+    try {
+      texto = decodeURIComponent(partes[i]);
+    } catch {
+      // Percent-encoding roto: la dirección no es una dirección.
+      return null;
+    }
+    const nombre = patron.slice(1);
+    const decl = r.params.find((d) => d.nombre === nombre);
+    const c = __convertirSegmento(texto, decl === undefined ? "String" : decl.tipo);
+    if (!c.ok) return null;
+    p[nombre] = c.v;
+  }
+  return p;
+}
+
+interface __Casada {
+  r: __Ruta;
+  p: Record<string, unknown>;
+  consulta: URLSearchParams;
+}
+
+// El casado es SÍNCRONO y se hace antes de tocar nada: así el camino de las
+// peticiones que no son de una página (el RPC, los estáticos) no gana ni un
+// `await` —y, sobre todo, sigue registrando sus oyentes de `data` en el mismo
+// turno del bucle de eventos en que llega la petición—.
+function __casarPeticion(req: http.IncomingMessage): __Casada | null {
+  if (__rutas.length === 0 || req.method !== "GET") return null;
+  const crudo = req.url ?? "/";
+  const corte = crudo.indexOf("?");
+  const camino = corte === -1 ? crudo : crudo.slice(0, corte);
+  const consulta = new URLSearchParams(corte === -1 ? "" : crudo.slice(corte + 1));
+  const partes = camino.split("/");
+  for (const r of __rutas) {
+    const p = __casarRuta(r, partes);
+    if (p !== null) return { r, p, consulta };
+  }
+  return null;
+}
+
+// --------------------------------------------------------------------------
+// LA PETICIÓN EN CURSO
+//
+// `consulta("q")` lee la query string de SU petición. El servidor atiende
+// varias a la vez, así que "la petición actual" NO puede ser una variable de
+// módulo: entre que una página empieza y termina (y una página espera a la base
+// de datos, o a otro servicio) entra otra, la pisa, y la primera acaba leyendo
+// los filtros de la segunda. Es el fallo que no se ve en desarrollo —con un
+// solo usuario nunca hay dos peticiones a la vez— y que en producción devuelve
+// resultados de otro.
+//
+// `AsyncLocalStorage` es exactamente eso: no una global, sino un valor atado al
+// CONTEXTO ASÍNCRONO de cada petición, que Node propaga solo a través de los
+// `await` de esa cadena y de ninguna otra. Así `consulta` no necesita viajar
+// como parámetro por todas las funciones que la página llame de camino.
+// --------------------------------------------------------------------------
+
+const __contextoPeticion = new AsyncLocalStorage<{ consulta: URLSearchParams }>();
+
+export function consulta(nombre: string): string {
+  const ctx = __contextoPeticion.getStore();
+  // Fuera de una petición no hay query string que leer. Cadena vacía, que es lo
+  // mismo que devuelve un parámetro ausente: las query strings SON cadenas.
+  if (ctx === undefined) return "";
+  return ctx.consulta.get(String(nombre)) ?? "";
+}
+
+// --- `Respuesta`: lo que no es HTML ---
+//
+// Una `Respuesta` lleva su content-type dentro. El campo se llama `$respuesta`
+// por lo mismo que `$tag`: el lexer no admite '$' en un identificador, así que
+// ningún registro del programa puede fabricar uno y hacerse pasar por esto.
+
+interface __Respuesta {
+  $respuesta: { tipo: string; cuerpo: string };
+}
+
+export function textoPlano(s: string): __Respuesta {
+  return { $respuesta: { tipo: "text/plain; charset=utf-8", cuerpo: String(s) } };
+}
+
+// Exige `Html` en el fuente, y ahí está el detalle bueno: XML escapa los mismos
+// cinco caracteres que HTML, así que la garantía que el lenguaje ya da vale tal
+// cual —un nombre con un '&' no rompe el sitemap porque el tipo no deja
+// construirlo sin escapar—. En runtime `Html` es una cadena, como siempre.
+export function documentoXml(s: string): __Respuesta {
+  return { $respuesta: { tipo: "application/xml; charset=utf-8", cuerpo: String(s) } };
+}
+
+function __escribirRespuesta(res: http.ServerResponse, v: unknown, patron: string): void {
+  const obj = v !== null && typeof v === "object" ? (v as Record<string, unknown>) : null;
+  // La rama de FALLO del tipo de retorno: `Pagina | NoEncontrado` -> 404.
+  if (obj !== null && typeof obj.$tag === "string") {
+    __noEncontrado(res);
+    return;
+  }
+  const resp = obj === null ? undefined : obj.$respuesta;
+  if (resp !== undefined && resp !== null && typeof resp === "object") {
+    const r = resp as __Respuesta["$respuesta"];
+    __responder(res, 200, String(r.tipo), String(r.cuerpo));
+    return;
+  }
+  // `Pagina`: hoy, su `cuerpo` y nada más. El `<head>` con los metadatos es la
+  // ronda siguiente, y adelantarlo a medias sería peor que no tenerlo.
+  if (obj !== null && "cuerpo" in obj) {
+    __responder(res, 200, __CT_HTML, String(obj.cuerpo));
+    return;
+  }
+  console.error(`[marea] la página '${patron}' no devolvió ni Pagina ni Respuesta:`, v);
+  __responder(res, 500, __CT_HTML, __CUERPO_500);
+}
+
+async function __servirRuta(casada: __Casada, res: http.ServerResponse): Promise<void> {
+  const r = casada.r;
+  // La query string entra AQUÍ, atada al contexto asíncrono de esta petición y
+  // sólo de ésta. Todo lo que la página llame de camino —directo o tres
+  // funciones más abajo— ve la suya al leer `consulta`.
+  const contexto = { consulta: casada.consulta };
+  let v: unknown;
+  try {
+    v = await __contextoPeticion.run(contexto, () => r.fn(casada.p));
+  } catch (e) {
+    // Que el cuerpo de la página reviente es un fallo del servidor, y se dice
+    // como tal: los 404 los decide el tipo de retorno, no una excepción.
+    console.error(`[marea] la página '${r.patron}' falló:`, e);
+    __responder(res, 500, __CT_HTML, __CUERPO_500);
+    return;
+  }
+  __escribirRespuesta(res, v, r.patron);
+}
+
 export function startServer(): Promise<void> {
   return new Promise((resolve) => {
     __server = http.createServer((req, res) => {
+      // Las rutas van PRIMERO: una página puede llamarse '/robots.txt', y el
+      // servidor de estáticos contesta a todo GET —incluido un 404 por
+      // extensión desconocida—, así que detrás de él una ruta no existiría.
+      const casada = __casarPeticion(req);
+      if (casada !== null) {
+        __servirRuta(casada, res).catch((e: unknown) => {
+          console.error("[marea] no se pudo responder a la ruta:", e);
+        });
+        return;
+      }
       if (__serveStatic(req, res)) return;
       if (req.method !== "POST" || req.url !== "/__marea") {
-        res.statusCode = 404;
-        res.end();
+        __noEncontrado(res);
         return;
       }
       // Exigir JSON no es cosmético: sin esta comprobación un formulario
