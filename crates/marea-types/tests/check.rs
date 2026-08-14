@@ -1475,12 +1475,20 @@ fn e_tabla_externa_vacia() {
         "type P = { a: Int };\n\
          store productos: P from \"\";",
     );
-    assert!(has_code(&errs, "E_TABLA_EXTERNA_VACIA"), "{:?}", codes(&errs));
+    assert!(
+        has_code(&errs, "E_TABLA_EXTERNA_VACIA"),
+        "{:?}",
+        codes(&errs)
+    );
     let errs = check_src(
         "type P = { a: Int };\n\
          store productos: P from \"   \";",
     );
-    assert!(has_code(&errs, "E_TABLA_EXTERNA_VACIA"), "{:?}", codes(&errs));
+    assert!(
+        has_code(&errs, "E_TABLA_EXTERNA_VACIA"),
+        "{:?}",
+        codes(&errs)
+    );
 }
 
 // Una tabla ajena tiene COLUMNAS y el tipo es lo único que dice a qué campo va
