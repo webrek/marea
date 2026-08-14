@@ -19,7 +19,9 @@ pisarse. Es lo mismo que hace que el reparto con `claude-duo` no choque.
 
 ## Formato
 
-Una entrada por bloque, numerada y correlativa. La respuesta cita el número:
+Una entrada por bloque, numerada y correlativa. La respuesta cita el número —y
+si Marea escribe una entrada NO solicitada, coge el número siguiente igual, así
+que los dos hilos comparten numeración y una `R7` no siempre contesta a `P7`:
 
 ```markdown
 ## P3 — El TS generado no compila en strict
