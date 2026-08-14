@@ -578,3 +578,85 @@ React.
 Consecuencia para ustedes: **enrutado y metadatos bajan de urgencia**. Con un
 rediseño encima, Next se queda un rato más de todos modos. Si estaban a punto de
 atacarlos, no corran por mí.
+
+---
+
+## P10 — Los eventos funcionan, pero no sé montar una vista de Marea dentro de otra app
+
+Fecha: 2026-08-14
+
+Fui a estrenar los eventos en un componente de verdad: el filtro de precio de la
+página de categoría, que hoy es **una foto** —los `input type=range` van
+deshabilitados porque sin cliente no había nada que los moviera—. Es el caso más
+honesto que tengo: sin eventos no existe, y con eventos debería existir entero.
+
+### Lo que sale bien y no necesita nada de ustedes
+
+El filtro tiene que cambiar la URL (`?precio_min=…`), y **no hay builtin de
+navegación ni de lectura de URL**. Pensé que eso lo mataba, pero no: el botón
+"Aplicar" puede ser un enlace cuyo `href` se reconstruya solo al mover los
+pulgares. La navegación la hace el navegador; Marea sólo pinta el destino.
+
+```marea
+reactive mut lo = 0;
+reactive mut hi = 100000;
+
+@client fn sembrar(piso: Int, techo: Int) -> Unit { lo = piso; hi = techo; }
+
+@client fn vista() -> Html {
+    return `<input type="range" value="{text(lo)}" {!on("input", fn() { lo = lo + 500; })}/>
+<a href="?precio_min={!text(lo)}&precio_max={!text(hi)}">Aplicar</a>`;
+}
+```
+
+Tipa sin errores. Y de paso confirma algo que me preocupaba: **una `reactive mut`
+de módulo se puede sembrar desde una función con parámetros**, que es como le
+paso los datos que vienen del servidor. No hacía falta sintaxis nueva.
+
+### Lo que me bloquea: el punto de montaje es fijo
+
+```ts
+export function render(x: unknown): void {
+  const app = document.getElementById("app");
+  ...
+  app.innerHTML = marcado;
+}
+```
+
+`#app`, por id, y uno solo. Vigía no es una app de Marea: es una app de Next
+donde quiero **islas** de Marea —el filtro aquí, el buscador allá, la gráfica
+interactiva en otra página—. Con un `#app` por documento, sólo puede haber una
+isla por página, y además tengo que ceder un id global que el resto de la página
+no puede usar.
+
+Lo que me serviría, en orden de menos a más ambicioso:
+
+1. `render` con destino: `render(elemento, marcado)` o `mount("#filtro-precio",
+   vista)`. Con eso ya monto varias islas.
+2. Que `__podar` sea por isla y no global. Hoy poda la tabla de manejadores
+   contra el marcado que entra; si una isla se re-pinta, ¿se lleva por delante
+   los manejadores de las otras? No lo he probado porque no puedo montar dos.
+
+### Y la pregunta de verdad: ¿quién mueve el bucle de re-pintado?
+
+En una app de Marea, supongo que `main()` monta un `effect` que llama a
+`render(vista())` y la reactividad se encarga del resto. Aquí el ciclo de vida lo
+manda React: monta el `<div>` cuando quiere, lo desmonta al cambiar de ruta, y
+puede re-montarlo.
+
+No sé cuál es la forma correcta de decir desde fuera "re-pinta esta vista cuando
+cambien sus dependencias, y deja de hacerlo cuando yo te diga". `__effect` está
+exportado, pero es privado por el nombre y no sé si me toca usarlo, ni cómo se
+cancela al desmontar.
+
+**Si la respuesta es "eso no está pensado todavía", perfecto** — lo dejo escrito y
+sigo. Pero es la pieza que separa "los eventos compilan" de "hay un componente
+interactivo de Marea en producción", y prefiero preguntar antes que inventarme un
+apaño con sus símbolos privados y que luego se lo lleve un cambio suyo.
+
+### Contexto, para que midan la urgencia
+
+Con el rediseño en marcha, esto no corre prisa **esta semana**. Pero es lo que
+decide si el sitio nuevo se escribe con islas de Marea dentro de Next, o si toda
+la interacción se queda en React y Marea sólo dibuja lo estático. Esa decisión
+sí conviene tomarla antes de escribir el marcado nuevo, no después.

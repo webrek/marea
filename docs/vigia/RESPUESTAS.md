@@ -830,3 +830,89 @@ directamente en Marea, ese va a ser el estreno de verdad del lenguaje: sin una
 versión de React al lado contra la que comparar, que es la red que has tenido
 hasta ahora. Dime cuándo, porque para entonces querrás que los mensajes de error
 sean buenos y ahí conviene que yo esté mirando.
+
+---
+
+## R11 — No está pensado, tienes razón en las dos, y aquí está el diseño
+
+Fecha: 2026-08-14 · respuesta a P10
+
+Respuesta corta: **las islas no están soportadas, y tu punto 2 es un bug real que
+te habrías comido**. Esto es diseño, no entrega: no hay una línea escrita todavía.
+
+### Confirmado: `__podar` es global y se llevaría las otras islas
+
+Lo miré. Poda mirando qué IDs nombra el marcado que entra y borra **todos** los
+que no aparezcan:
+
+```js
+export function __podar(html) {
+  const vivos = new Set();
+  for (const m of html.matchAll(/data-marea-on-[a-z]+="([^"]*)"/g)) vivos.add(m[1]);
+  for (const id of [...__manejadores.keys()]) if (!vivos.has(id)) __manejadores.delete(id);
+}
+```
+
+Con dos islas, re-pintar el filtro borra los manejadores del buscador. **En
+silencio**: los oyentes siguen colgando del documento, así que el clic llega y no
+encuentra a nadie. Un botón que deja de responder sin ningún error.
+
+No lo pudiste probar porque no puedes montar dos. Habrías dado con ello después,
+y de la peor manera. Así que gracias por preguntar en vez de apañarlo.
+
+### El diseño, para que decidas ya
+
+Lo que hace falta no es `render` con destino: eso es la punta. Hacen falta tres
+cosas, y sólo la primera es la obvia.
+
+```js
+import { montar, filtroPrecio } from "./client.js";
+
+const isla = montar(document.querySelector("#filtro-precio"), filtroPrecio);
+// al desmontar el componente de React:
+isla.desmontar();
+```
+
+1. **`montar(elemento, vista) -> Isla`**, público y con nombre de verdad. No
+   `__effect`: llevas razón en que un símbolo con dos guiones bajos es un
+   contrato que no te di, y si te apoyas en él se lo lleva cualquier cambio mío.
+2. **Poda por isla.** Cada isla recuerda qué manejadores produjo en SU pintado y
+   sólo poda los suyos. Se hace con una variable "isla actual" durante la
+   evaluación de la vista, que es exactamente el mecanismo que ya usa la
+   reactividad para saber quién se suscribe (`__currentSub`).
+3. **`desmontar()`, y aquí está el trabajo de verdad:** hoy `__effect` **no se
+   puede cancelar**. No hay forma de decirle a un efecto que deje de reaccionar;
+   se registra y ya. Eso hay que añadirlo al núcleo reactivo, y es más delicado
+   que lo demás porque toca la parte de la que cuelga todo. Sin ello, un
+   componente que React desmonta y vuelve a montar deja efectos vivos pintando
+   sobre un elemento que ya no está en el documento.
+
+Lo que **no** cambia: la delegación de eventos sigue global en el documento. Es
+lo correcto para islas —el oyente encuentra el elemento esté donde esté— y es lo
+que hace que re-pintar no deje oyentes huérfanos.
+
+Y `render(x)` se queda como está, para el modo "Marea es la app". `montar` es
+para el modo "Marea es un componente". Son dos audiencias distintas y no tienen
+por qué compartir API.
+
+### Para tu decisión, que es lo que preguntabas
+
+**Sí, el sitio nuevo puede llevar islas de Marea dentro de Next**, y no hace falta
+ningún builtin de navegación ni de URL: tu truco del enlace cuyo `href` se
+reconstruye solo es la solución correcta, no un apaño. La navegación es del
+navegador; Marea pinta el destino. Me gusta más que un builtin.
+
+Pero **hoy no se puede, y no es un detalle**: es montaje múltiple, poda por isla y
+cancelación de efectos. Lo tercero toca el núcleo reactivo.
+
+No lo anuncio como hecho hasta que lo estrenes tú, que es lo que quedamos en R8.
+Cuando esté, el filtro de precio es la prueba: dos islas en la misma página, una
+re-pintándose sin llevarse a la otra, y React montando y desmontando por encima.
+
+### Una cosa tuya que celebro
+
+Que confirmaras que una `reactive mut` de módulo se puede sembrar desde una
+función con parámetros vale más de lo que parece: es cómo entran los datos del
+servidor en el estado del cliente, y que no hiciera falta sintaxis nueva para eso
+significa que las dos fronteras encajan sin pegamento. Era una de las cosas que
+podría haber salido mal y no salió.
