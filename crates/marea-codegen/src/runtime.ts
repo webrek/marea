@@ -13,7 +13,7 @@
 import http from "node:http";
 import fs from "node:fs";
 // El contexto POR PETICIÓN. Ver `__contextoPeticion`, más abajo: es lo que
-// permite que `consulta()` lea la query string de SU petición y no la de otra
+// permite que `query()` lea la query string de SU petición y no la de otra
 // que esté a medias en el mismo proceso.
 import { AsyncLocalStorage } from "node:async_hooks";
 
@@ -33,7 +33,7 @@ function __envInt(name: string, def: number): number {
   if (raw === undefined || raw === "") return def;
   const n = Number(raw);
   if (!Number.isFinite(n) || n <= 0) {
-    console.warn(`[marea] ${name}='${raw}' no es un entero positivo; se usa ${def}`);
+    console.warn(`[marea] ${name}='${raw}' no es un parseInt positivo; se usa ${def}`);
     return def;
   }
   return Math.floor(n);
@@ -194,14 +194,14 @@ function __serveStatic(req: http.IncomingMessage, res: http.ServerResponse): boo
 // que pueda variar entre dos arranques del mismo binario.
 //
 // LO QUE UNA RUTA DEVUELVE, y con qué content-type:
-//   - `Pagina`   -> text/html. HOY se emite SÓLO su `cuerpo`; los metadatos
+//   - `Page`   -> text/html. HOY se emite SÓLO su `cuerpo`; los metadatos
 //     (titulo, canonica, metas, jsonld) se tipan pero no se escriben: su
 //     criterio de aceptación es "las etiquetas que Google ya indexó", y eso se
 //     valida contra el sitio real, no aquí.
-//   - `Respuesta` -> el tipo que dijo quien la construyó (`textoPlano`,
-//     `documentoXml`): sitemap.xml y robots.txt no son HTML, y sin esto el SEO
+//   - `Response` -> el tipo que dijo quien la construyó (`plainText`,
+//     `xmlDoc`): sitemap.xml y robots.txt no son HTML, y sin esto el SEO
 //     —que es el negocio— se queda fuera.
-//   - una VARIANTE de fallo (`Pagina | NoEncontrado`) -> 404. No es un caso
+//   - una VARIANTE de fallo (`Page | NotFound`) -> 404. No es un caso
 //     especial ni una "página de error" que registrar: es la rama de fallo del
 //     tipo de retorno, que el compilador ya obliga a declarar.
 // --------------------------------------------------------------------------
@@ -332,7 +332,7 @@ function __casarRuta(r: __Ruta, partes: string[]): Record<string, unknown> | nul
 interface __Casada {
   r: __Ruta;
   p: Record<string, unknown>;
-  consulta: URLSearchParams;
+  query: URLSearchParams;
 }
 
 // El casado es SÍNCRONO y se hace antes de tocar nada: así el camino de las
@@ -344,11 +344,11 @@ function __casarPeticion(req: http.IncomingMessage): __Casada | null {
   const crudo = req.url ?? "/";
   const corte = crudo.indexOf("?");
   const camino = corte === -1 ? crudo : crudo.slice(0, corte);
-  const consulta = new URLSearchParams(corte === -1 ? "" : crudo.slice(corte + 1));
+  const query = new URLSearchParams(corte === -1 ? "" : crudo.slice(corte + 1));
   const partes = camino.split("/");
   for (const r of __rutas) {
     const p = __casarRuta(r, partes);
-    if (p !== null) return { r, p, consulta };
+    if (p !== null) return { r, p, query };
   }
   return null;
 }
@@ -356,7 +356,7 @@ function __casarPeticion(req: http.IncomingMessage): __Casada | null {
 // --------------------------------------------------------------------------
 // LA PETICIÓN EN CURSO
 //
-// `consulta("q")` lee la query string de SU petición. El servidor atiende
+// `query("q")` lee la query string de SU petición. El servidor atiende
 // varias a la vez, así que "la petición actual" NO puede ser una variable de
 // módulo: entre que una página empieza y termina (y una página espera a la base
 // de datos, o a otro servicio) entra otra, la pisa, y la primera acaba leyendo
@@ -366,23 +366,23 @@ function __casarPeticion(req: http.IncomingMessage): __Casada | null {
 //
 // `AsyncLocalStorage` es exactamente eso: no una global, sino un valor atado al
 // CONTEXTO ASÍNCRONO de cada petición, que Node propaga solo a través de los
-// `await` de esa cadena y de ninguna otra. Así `consulta` no necesita viajar
+// `await` de esa cadena y de ninguna otra. Así `query` no necesita viajar
 // como parámetro por todas las funciones que la página llame de camino.
 // --------------------------------------------------------------------------
 
-const __contextoPeticion = new AsyncLocalStorage<{ consulta: URLSearchParams }>();
+const __contextoPeticion = new AsyncLocalStorage<{ query: URLSearchParams }>();
 
-export function consulta(nombre: string): string {
+export function query(nombre: string): string {
   const ctx = __contextoPeticion.getStore();
   // Fuera de una petición no hay query string que leer. Cadena vacía, que es lo
   // mismo que devuelve un parámetro ausente: las query strings SON cadenas.
   if (ctx === undefined) return "";
-  return ctx.consulta.get(String(nombre)) ?? "";
+  return ctx.query.get(String(nombre)) ?? "";
 }
 
-// --- `Respuesta`: lo que no es HTML ---
+// --- `Response`: lo que no es HTML ---
 //
-// Una `Respuesta` lleva su content-type dentro. El campo se llama `$respuesta`
+// Una `Response` lleva su content-type dentro. El campo se llama `$respuesta`
 // por lo mismo que `$tag`: el lexer no admite '$' en un identificador, así que
 // ningún registro del programa puede fabricar uno y hacerse pasar por esto.
 
@@ -390,7 +390,7 @@ interface __Respuesta {
   $respuesta: { tipo: string; cuerpo: string };
 }
 
-export function textoPlano(s: string): __Respuesta {
+export function plainText(s: string): __Respuesta {
   return { $respuesta: { tipo: "text/plain; charset=utf-8", cuerpo: String(s) } };
 }
 
@@ -398,13 +398,13 @@ export function textoPlano(s: string): __Respuesta {
 // cinco caracteres que HTML, así que la garantía que el lenguaje ya da vale tal
 // cual —un nombre con un '&' no rompe el sitemap porque el tipo no deja
 // construirlo sin escapar—. En runtime `Html` es una cadena, como siempre.
-export function documentoXml(s: string): __Respuesta {
+export function xmlDoc(s: string): __Respuesta {
   return { $respuesta: { tipo: "application/xml; charset=utf-8", cuerpo: String(s) } };
 }
 
 function __escribirRespuesta(res: http.ServerResponse, v: unknown, patron: string): void {
   const obj = v !== null && typeof v === "object" ? (v as Record<string, unknown>) : null;
-  // La rama de FALLO del tipo de retorno: `Pagina | NoEncontrado` -> 404.
+  // La rama de FALLO del tipo de retorno: `Page | NotFound` -> 404.
   if (obj !== null && typeof obj.$tag === "string") {
     __noEncontrado(res);
     return;
@@ -415,13 +415,13 @@ function __escribirRespuesta(res: http.ServerResponse, v: unknown, patron: strin
     __responder(res, 200, String(r.tipo), String(r.cuerpo));
     return;
   }
-  // `Pagina`: hoy, su `cuerpo` y nada más. El `<head>` con los metadatos es la
+  // `Page`: hoy, su `cuerpo` y nada más. El `<head>` con los metadatos es la
   // ronda siguiente, y adelantarlo a medias sería peor que no tenerlo.
   if (obj !== null && "cuerpo" in obj) {
     __responder(res, 200, __CT_HTML, String(obj.cuerpo));
     return;
   }
-  console.error(`[marea] la página '${patron}' no devolvió ni Pagina ni Respuesta:`, v);
+  console.error(`[marea] la página '${patron}' no devolvió ni Page ni Response:`, v);
   __responder(res, 500, __CT_HTML, __CUERPO_500);
 }
 
@@ -429,8 +429,8 @@ async function __servirRuta(casada: __Casada, res: http.ServerResponse): Promise
   const r = casada.r;
   // La query string entra AQUÍ, atada al contexto asíncrono de esta petición y
   // sólo de ésta. Todo lo que la página llame de camino —directo o tres
-  // funciones más abajo— ve la suya al leer `consulta`.
-  const contexto = { consulta: casada.consulta };
+  // funciones más abajo— ve la suya al leer `query`.
+  const contexto = { query: casada.query };
   let v: unknown;
   try {
     v = await __contextoPeticion.run(contexto, () => r.fn(casada.p));

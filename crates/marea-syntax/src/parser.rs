@@ -378,13 +378,15 @@ impl Parser {
             "server" => Location::Server,
             "client" => Location::Client,
             "edge" => Location::Edge,
-            other => return Err(SyntaxError::new(
-                format!(
+            other => {
+                return Err(SyntaxError::new(
+                    format!(
                     "anotación desconocida '@{}'; usa @server, @client, @edge, @session o @page",
                     other
                 ),
-                at.span.to(span),
-            )),
+                    at.span.to(span),
+                ))
+            }
         };
         // Política: `@server(Usuario)`. Opcional en la gramática; que falte o no
         // sea aceptable lo decide el verificador, que es quien sabe si el

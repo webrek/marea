@@ -659,7 +659,7 @@ fn emit_expr(e: &Expr, ctx: &mut Ctx) -> Result<String, String> {
             // que wat2wasm rechaza. Mejor un error claro.
             if *value < i64::from(i32::MIN) || *value > i64::from(i32::MAX) {
                 return Err(format!(
-                    "el entero {value} no cabe en i32 (rango del backend WASM por ahora)"
+                    "el parseInt {value} no cabe en i32 (rango del backend WASM por ahora)"
                 ));
             }
             Ok(format!("(i32.const {value})"))

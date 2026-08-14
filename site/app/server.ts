@@ -1,5 +1,5 @@
 // Generado por Marea — lado servidor.
-import { __badRequest, print, concat, render, len, text, escape, html, on, __div, __rem, append, contains, lower, jsonText, jsonInt, jsonFloat, jsonLen, __index, __marea_is, __signal, __memo, __resource, __effect, entero, __register, __rpc, fetch, post, __store, save, all, update, remove } from "./runtime.ts";
+import { __badRequest, print, concat, render, len, text, escape, html, on, __div, __rem, append, contains, lower, jsonText, jsonInt, jsonFloat, jsonLen, __index, __marea_is, __signal, __memo, __resource, __effect, parseInt, __register, __rpc, fetch, post, __store, save, all, update, remove } from "./runtime.ts";
 
 export type Post = { autor: string; texto: string; likes: number };
 

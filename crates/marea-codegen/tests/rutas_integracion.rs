@@ -10,7 +10,7 @@
 //! invertido.
 //!
 //! Y la que no se puede hacer de ninguna otra forma: DOS PETICIONES A LA VEZ con
-//! querys distintas. `consulta("q")` lee la query string de la petición en
+//! querys distintas. `query("q")` lee la query string de la petición en
 //! curso, y el servidor atiende varias a la vez; con una variable de módulo
 //! guardando "la petición actual", dos peticiones simultáneas se pisan y una
 //! acaba leyendo los filtros de la otra. Con una sola petición eso no se ve
@@ -23,16 +23,16 @@
 use std::process::{Command, Stdio};
 
 /// El sitio de prueba: las cuatro formas de ruta que el diseño distingue
-/// (segmento tipado, ruta fija que compite con una dinámica, `Respuesta` que no
+/// (segmento tipado, ruta fija que compite con una dinámica, `Response` que no
 /// es HTML, y query string), más una `@server` para comprobar que el endpoint
 /// RPC sigue en su sitio.
 const FUENTE: &str = r#"
 @page("/modelo/:id")
-fn modelo(id: Int) -> Pagina | NoEncontrado {
+fn modelo(id: Int) -> Page | NotFound {
     if id > 100 {
-        return NoEncontrado;
+        return NotFound;
     }
-    return Pagina {
+    return Page {
         titulo: "TITULO-QUE-NO-SE-EMITE-TODAVIA",
         descripcion: "DESCRIPCION-QUE-TAMPOCO",
         canonica: "https://ejemplo.mx/CANONICA-QUE-TAMPOCO",
@@ -41,40 +41,40 @@ fn modelo(id: Int) -> Pagina | NoEncontrado {
 }
 
 @page("/tienda/:slug")
-fn tienda(slug: String) -> Pagina {
-    return Pagina { titulo: "t", cuerpo: `<h1>tienda {slug}</h1>` };
+fn tienda(slug: String) -> Page {
+    return Page { titulo: "t", cuerpo: `<h1>tienda {slug}</h1>` };
 }
 
 @page("/tienda/madrid")
-fn madrid() -> Pagina {
-    return Pagina { titulo: "t", cuerpo: `<h1>la de madrid</h1>` };
+fn madrid() -> Page {
+    return Page { titulo: "t", cuerpo: `<h1>la de madrid</h1>` };
 }
 
 @page("/par/:x/:y")
-fn par(y: String, x: String) -> Pagina {
-    return Pagina { titulo: "t", cuerpo: `<p>x={x} y={y}</p>` };
+fn par(y: String, x: String) -> Page {
+    return Page { titulo: "t", cuerpo: `<p>x={x} y={y}</p>` };
 }
 
 @page("/robots.txt")
-fn robots() -> Respuesta {
-    return textoPlano("User-agent: *");
+fn robots() -> Response {
+    return plainText("User-agent: *");
 }
 
 @page("/sitemap.xml")
-fn sitemap() -> Respuesta {
-    return documentoXml(`<urlset><url>{"tuercas & tornillos"}</url></urlset>`);
+fn sitemap() -> Response {
+    return xmlDoc(`<urlset><url>{"tuercas & tornillos"}</url></urlset>`);
 }
 
 @page("/buscar")
-fn buscar() -> Pagina {
-    let antes = consulta("q");
-    let pagina = match entero(consulta("pagina")) {
-        NoEsNumero => 1,
+fn buscar() -> Page {
+    let antes = query("q");
+    let pagina = match parseInt(query("pagina")) {
+        NotANumber => 1,
         n => n,
     };
     let eco = fetch("http://127.0.0.1:PUERTO/robots.txt");
-    let despues = consulta("q");
-    return Pagina {
+    let despues = query("q");
+    return Page {
         titulo: "t",
         cuerpo: `<p>{antes}|{despues}|{text(pagina)}|{text(len(eco))}</p>`,
     };
@@ -280,7 +280,7 @@ fn el_servidor_sirve_el_sitio() {
 
     // Una página, con su segmento convertido y su content-type.
     assert_eq!(campo(&s, "modeloStatus"), 200, "/modelo/7:\n{s}");
-    assert_eq!(campo(&s, "modeloEsHtml"), 1, "una Pagina es HTML:\n{s}");
+    assert_eq!(campo(&s, "modeloEsHtml"), 1, "una Page es HTML:\n{s}");
     assert_eq!(campo(&s, "modeloCuerpo"), 1, "el cuerpo de la ficha:\n{s}");
     assert_eq!(
         campo(&s, "sinMetadatos"),
@@ -291,7 +291,7 @@ fn el_servidor_sirve_el_sitio() {
     // Una URL con basura donde va un Int es una URL que no existe.
     for (clave, que) in [
         ("basuraStatus", "/modelo/abc"),
-        ("desbordadoStatus", "un entero que no cabe"),
+        ("desbordadoStatus", "un parseInt que no cabe"),
         ("decimalStatus", "/modelo/7.5"),
         ("hexStatus", "/modelo/0x10"),
         ("exponenteStatus", "/modelo/7e2"),
@@ -345,7 +345,7 @@ fn el_servidor_sirve_el_sitio() {
     );
 }
 
-/// La parte que sólo se rompe con carga: `consulta` bajo peticiones
+/// La parte que sólo se rompe con carga: `query` bajo peticiones
 /// simultáneas. Va en su propio test para que, cuando falle, el nombre diga qué
 /// se rompió sin tener que leer el resto.
 #[test]

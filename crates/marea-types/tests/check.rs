@@ -2352,7 +2352,7 @@ fn on_es_un_builtin_y_no_se_puede_redefinir() {
 //
 // Lo que se fija aquí son las reglas que separan una página de una función
 // cualquiera: que la ruta y la firma digan lo mismo, que sólo se devuelva
-// `Pagina` o `Respuesta`, y que una página corra donde corre un `@server` sin
+// `Page` o `Response`, y que una página corra donde corre un `@server` sin
 // que haya que escribirlo. El 404 no aparece por ningún lado a propósito: es la
 // variante de fallo del retorno, no un caso especial del enrutado.
 // ===========================================================================
@@ -2363,9 +2363,9 @@ fn on_es_un_builtin_y_no_se_puede_redefinir() {
 fn una_pagina_completa_tipa() {
     let src = r#"
 @page("/modelo/:id")
-fn modelo(id: Int) -> Pagina | NoEncontrado {
-    if id < 0 { return NoEncontrado; }
-    return Pagina {
+fn modelo(id: Int) -> Page | NotFound {
+    if id < 0 { return NotFound; }
+    return Page {
         titulo: "Un modelo",
         descripcion: "Lo que cuesta en cada tienda",
         canonica: concat("https://ahorrame.mx/modelo/", text(id)),
@@ -2385,8 +2385,8 @@ fn modelo(id: Int) -> Pagina | NoEncontrado {
 fn una_pagina_solo_exige_titulo_y_canonica() {
     let src = r#"
 @page("/")
-fn portada() -> Pagina {
-    return Pagina { titulo: "Ahórrame", canonica: "https://ahorrame.mx/" };
+fn portada() -> Page {
+    return Page { titulo: "Ahórrame", canonica: "https://ahorrame.mx/" };
 }
 "#;
     let errs = check_src(src);
@@ -2397,8 +2397,8 @@ fn portada() -> Pagina {
 fn e_campo_obligatorio_sin_titulo() {
     let src = r#"
 @page("/")
-fn portada() -> Pagina {
-    return Pagina { canonica: "https://ahorrame.mx/" };
+fn portada() -> Page {
+    return Page { canonica: "https://ahorrame.mx/" };
 }
 "#;
     let errs = check_src(src);
@@ -2409,8 +2409,8 @@ fn portada() -> Pagina {
 fn e_campo_obligatorio_sin_canonica() {
     let src = r#"
 @page("/")
-fn portada() -> Pagina {
-    return Pagina { titulo: "Ahórrame" };
+fn portada() -> Page {
+    return Page { titulo: "Ahórrame" };
 }
 "#;
     let errs = check_src(src);
@@ -2423,8 +2423,8 @@ fn portada() -> Pagina {
 fn e_ruta_sin_barra() {
     let src = r#"
 @page("precios")
-fn precios() -> Pagina {
-    return Pagina { titulo: "Precios", canonica: "c" };
+fn precios() -> Page {
+    return Page { titulo: "Precios", canonica: "c" };
 }
 "#;
     let errs = check_src(src);
@@ -2435,8 +2435,8 @@ fn precios() -> Pagina {
 fn e_ruta_param_sin_nombre() {
     let src = r#"
 @page("/modelo/:")
-fn modelo() -> Pagina {
-    return Pagina { titulo: "x", canonica: "c" };
+fn modelo() -> Page {
+    return Page { titulo: "x", canonica: "c" };
 }
 "#;
     let errs = check_src(src);
@@ -2451,8 +2451,8 @@ fn modelo() -> Pagina {
 fn e_ruta_param_repetido() {
     let src = r#"
 @page("/a/:id/b/:id")
-fn dos(id: Int) -> Pagina {
-    return Pagina { titulo: "x", canonica: "c" };
+fn dos(id: Int) -> Page {
+    return Page { titulo: "x", canonica: "c" };
 }
 "#;
     let errs = check_src(src);
@@ -2469,8 +2469,8 @@ fn dos(id: Int) -> Pagina {
 fn e_ruta_segmento_sin_param() {
     let src = r#"
 @page("/modelo/:id")
-fn modelo() -> Pagina {
-    return Pagina { titulo: "x", canonica: "c" };
+fn modelo() -> Page {
+    return Page { titulo: "x", canonica: "c" };
 }
 "#;
     let errs = check_src(src);
@@ -2487,8 +2487,8 @@ fn modelo() -> Pagina {
 fn e_param_sin_segmento() {
     let src = r#"
 @page("/modelo")
-fn modelo(id: Int) -> Pagina {
-    return Pagina { titulo: "x", canonica: "c" };
+fn modelo(id: Int) -> Page {
+    return Page { titulo: "x", canonica: "c" };
 }
 "#;
     let errs = check_src(src);
@@ -2505,8 +2505,8 @@ fn modelo(id: Int) -> Pagina {
 fn e_ruta_param_tipo() {
     let src = r#"
 @page("/precio/:p")
-fn precio(p: Float) -> Pagina {
-    return Pagina { titulo: "x", canonica: "c" };
+fn precio(p: Float) -> Page {
+    return Page { titulo: "x", canonica: "c" };
 }
 "#;
     let errs = check_src(src);
@@ -2518,8 +2518,8 @@ fn precio(p: Float) -> Pagina {
 fn un_segmento_de_texto_vale() {
     let src = r#"
 @page("/categoria/:slug")
-fn categoria(slug: String) -> Pagina {
-    return Pagina { titulo: slug, canonica: concat("https://x/", slug) };
+fn categoria(slug: String) -> Page {
+    return Page { titulo: slug, canonica: concat("https://x/", slug) };
 }
 "#;
     let errs = check_src(src);
@@ -2568,27 +2568,27 @@ fn precios() -> Int {
 fn e_pagina_retorno_pagina_y_respuesta_a_la_vez() {
     let src = r#"
 @page("/precios")
-fn precios() -> Pagina | Respuesta {
-    return textoPlano("x");
+fn precios() -> Page | Response {
+    return plainText("x");
 }
 "#;
     let errs = check_src(src);
     assert!(has_code(&errs, "E_PAGINA_RETORNO"), "{:?}", codes(&errs));
 }
 
-/// Lo que no es HTML devuelve `Respuesta`, que es donde se decide el tipo de
+/// Lo que no es HTML devuelve `Response`, que es donde se decide el tipo de
 /// contenido.
 #[test]
 fn una_ruta_puede_servir_lo_que_no_es_html() {
     let src = r#"
 @page("/robots.txt")
-fn robots() -> Respuesta {
-    return textoPlano("User-agent: *\n");
+fn robots() -> Response {
+    return plainText("User-agent: *\n");
 }
 
 @page("/sitemap.xml")
-fn sitemap() -> Respuesta {
-    return documentoXml(`<urlset></urlset>`);
+fn sitemap() -> Response {
+    return xmlDoc(`<urlset></urlset>`);
 }
 "#;
     let errs = check_src(src);
@@ -2604,8 +2604,8 @@ fn documento_xml_no_acepta_texto_sin_escapar() {
 fn crudo() -> String { return "a & b"; }
 
 @page("/sitemap.xml")
-fn sitemap() -> Respuesta {
-    return documentoXml(crudo());
+fn sitemap() -> Response {
+    return xmlDoc(crudo());
 }
 "#;
     let errs = check_src(src);
@@ -2621,8 +2621,8 @@ fn sitemap() -> Respuesta {
 fn un_json_no_es_html() {
     let src = r#"
 @page("/")
-fn portada() -> Pagina {
-    return Pagina { titulo: "x", canonica: "c", cuerpo: json("{}") };
+fn portada() -> Page {
+    return Page { titulo: "x", canonica: "c", cuerpo: json("{}") };
 }
 "#;
     let errs = check_src(src);
@@ -2633,8 +2633,8 @@ fn portada() -> Pagina {
 fn un_html_no_es_json() {
     let src = r#"
 @page("/")
-fn portada() -> Pagina {
-    return Pagina { titulo: "x", canonica: "c", jsonld: [`<b>no</b>`] };
+fn portada() -> Page {
+    return Page { titulo: "x", canonica: "c", jsonld: [`<b>no</b>`] };
 }
 "#;
     let errs = check_src(src);
@@ -2649,7 +2649,7 @@ fn portada() -> Pagina {
 fn entero_devuelve_una_union_que_hay_que_cubrir() {
     let src = r#"
 fn pagina() -> Int {
-    let n: Int = entero(consulta("pagina"));
+    let n: Int = parseInt(query("pagina"));
     return n;
 }
 "#;
@@ -2661,8 +2661,8 @@ fn pagina() -> Int {
 fn entero_con_match_da_un_int() {
     let src = r#"
 fn pagina() -> Int {
-    return match entero(consulta("pagina")) {
-        NoEsNumero => 1,
+    return match parseInt(query("pagina")) {
+        NotANumber => 1,
         n => n,
     };
 }
@@ -2682,8 +2682,8 @@ type Modelo = { nombre: String };
 store modelos: Modelo;
 
 @page("/")
-fn portada() -> Pagina {
-    return Pagina {
+fn portada() -> Page {
+    return Page {
         titulo: "Modelos",
         canonica: "https://x/",
         cuerpo: `<p>{text(len(all(modelos)))}</p>`,
@@ -2702,8 +2702,8 @@ fn una_pagina_no_puede_tocar_estado_reactivo() {
 reactive mut cuenta = 0;
 
 @page("/")
-fn portada() -> Pagina {
-    return Pagina { titulo: text(cuenta), canonica: "c" };
+fn portada() -> Page {
+    return Page { titulo: text(cuenta), canonica: "c" };
 }
 "#;
     let errs = check_src(src);
@@ -2729,8 +2729,8 @@ fn quien(token: String) -> Usuario | NoAutorizado {
 }
 
 @page("/")
-fn portada() -> Pagina {
-    return Pagina { titulo: "x", canonica: "c" };
+fn portada() -> Page {
+    return Page { titulo: "x", canonica: "c" };
 }
 "#;
     let errs = check_src(src);
@@ -2743,10 +2743,10 @@ fn portada() -> Pagina {
 fn e_ruta_duplicada() {
     let src = r#"
 @page("/precios")
-fn precios() -> Pagina { return Pagina { titulo: "a", canonica: "c" }; }
+fn precios() -> Page { return Page { titulo: "a", canonica: "c" }; }
 
 @page("/precios")
-fn otra() -> Pagina { return Pagina { titulo: "b", canonica: "c" }; }
+fn otra() -> Page { return Page { titulo: "b", canonica: "c" }; }
 "#;
     let errs = check_src(src);
     assert!(has_code(&errs, "E_RUTA_DUPLICADA"), "{:?}", codes(&errs));
@@ -2758,10 +2758,10 @@ fn otra() -> Pagina { return Pagina { titulo: "b", canonica: "c" }; }
 fn e_ruta_duplicada_aunque_el_hueco_se_llame_distinto() {
     let src = r#"
 @page("/modelo/:id")
-fn uno(id: Int) -> Pagina { return Pagina { titulo: "a", canonica: "c" }; }
+fn uno(id: Int) -> Page { return Page { titulo: "a", canonica: "c" }; }
 
 @page("/modelo/:slug")
-fn otro(slug: String) -> Pagina { return Pagina { titulo: "b", canonica: "c" }; }
+fn otro(slug: String) -> Page { return Page { titulo: "b", canonica: "c" }; }
 "#;
     let errs = check_src(src);
     assert!(has_code(&errs, "E_RUTA_DUPLICADA"), "{:?}", codes(&errs));

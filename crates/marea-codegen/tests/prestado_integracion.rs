@@ -79,14 +79,14 @@ fn sql(db: &str, sentencias: &[&str]) {
 }
 
 /// Consulta la base directamente y devuelve las filas como JSON.
-fn consulta(db: &str, q: &str) -> String {
+fn query(db: &str, q: &str) -> String {
     let g = format!(
         "const {{ DatabaseSync }} = await import(\"node:sqlite\");\n\
          const d = new DatabaseSync(\"{db}\");\n\
          console.log(\"FILAS:\" + JSON.stringify(d.prepare(`{q}`).all()));\n"
     );
     let (out, err) = node(&g);
-    assert!(out.contains("FILAS:"), "la consulta falló: {err}");
+    assert!(out.contains("FILAS:"), "la query falló: {err}");
     out.split("FILAS:").nth(1).unwrap().trim().to_string()
 }
 
@@ -170,7 +170,7 @@ fn temporal(nombre: &str) -> String {
 
 /// Las tablas que existen ahora mismo en la base, como JSON.
 fn tablas(db: &str) -> String {
-    consulta(db, "SELECT name FROM sqlite_master WHERE type='table'")
+    query(db, "SELECT name FROM sqlite_master WHERE type='table'")
 }
 
 #[test]
@@ -229,7 +229,7 @@ fn marea_lee_una_tabla_que_no_creo() {
     let t = tablas(&db);
     assert!(!t.contains("\"productos\""), "Marea creó su tabla: {t}");
     assert!(t.contains("\"products\""), "{t}");
-    let cols = consulta(&db, "PRAGMA table_info('products')");
+    let cols = query(&db, "PRAGMA table_info('products')");
     assert!(
         !cols.contains("__id") && !cols.contains("__doc"),
         "la tabla ajena no lleva columnas internas de Marea: {cols}"
@@ -373,11 +373,11 @@ fn escribir_en_un_prestado_no_toca_la_tabla_de_otro() {
         "el runtime debe rechazar la escritura:\n{err}"
     );
     // La tabla de otro sigue exactamente como estaba.
-    let filas = consulta(&db, "SELECT COUNT(*) AS n FROM products");
+    let filas = query(&db, "SELECT COUNT(*) AS n FROM products");
     assert_eq!(filas, r#"[{"n":1}]"#, "se escribió en la tabla ajena");
     // El almacén PROPIO del mismo módulo sigue escribiendo con normalidad: la
     // sólo-lectura es por almacén, no por módulo.
-    let notas = consulta(&db, "SELECT COUNT(*) AS n FROM notas");
+    let notas = query(&db, "SELECT COUNT(*) AS n FROM notas");
     assert_eq!(notas, r#"[{"n":1}]"#, "el propio debe seguir vivo");
 
     let _ = std::fs::remove_dir_all(&dir);

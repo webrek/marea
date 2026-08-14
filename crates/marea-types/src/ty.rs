@@ -29,9 +29,9 @@ pub enum Ty {
     Json,
     /// Lo que sirve una ruta que no es HTML: `sitemap.xml`, `robots.txt`. Es
     /// opaco a propósito —no tiene campos ni operaciones— y sólo se construye
-    /// con `textoPlano(...)` o `documentoXml(...)`, que es donde se decide el
+    /// con `plainText(...)` o `xmlDoc(...)`, que es donde se decide el
     /// tipo de contenido.
-    Respuesta,
+    Response,
     /// Un almacén declarado con `store nombre: T;`. Lleva su nombre (para los
     /// mensajes) y el tipo de sus elementos.
     Store(String, Box<Ty>),
@@ -70,7 +70,7 @@ impl Ty {
             Ty::Unit => "Unit".to_string(),
             Ty::Html => "Html".to_string(),
             Ty::Json => "Json".to_string(),
-            Ty::Respuesta => "Respuesta".to_string(),
+            Ty::Response => "Response".to_string(),
             Ty::Store(n, e) => format!("store {n}: {}", e.display()),
             Ty::Named(n) => n.clone(),
             Ty::Union(vs) => vs.join(" | "),

@@ -171,7 +171,7 @@ fn preguntasDe(idx: Int) -> List<Pregunta> {
 // --------------------------------------------------------------------------
 
 reactive mut resultados = [];
-reactive mut consulta = "";
+reactive mut busqueda = "";
 reactive mut categoria = "";
 reactive mut soloGratis = false;
 reactive mut carritoCant = 0;
@@ -271,12 +271,12 @@ fn vista() -> Html {
 
 @client
 fn refrescar() {
-    resultados = buscar(consulta, categoria, 0, soloGratis);
+    resultados = buscar(busqueda, categoria, 0, soloGratis);
 }
 
 @client
 fn buscarTexto(q: String) {
-    consulta = q;
+    busqueda = q;
     refrescar();
 }
 

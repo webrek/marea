@@ -296,7 +296,7 @@ impl<'a> Lexer<'a> {
         } else {
             let value: i64 = raw
                 .parse()
-                .map_err(|_| SyntaxError::new("entero fuera de rango para i64", span))?;
+                .map_err(|_| SyntaxError::new("parseInt fuera de rango para i64", span))?;
             Ok(Token::new(TokenKind::Int(value), span))
         }
     }

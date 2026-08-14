@@ -25,18 +25,18 @@ cuerpo—, calculada de una vez.
 
 ## La forma propuesta
 
-### Una página es una función anotada que devuelve `Pagina`
+### Una página es una función anotada que devuelve `Page`
 
 ```marea
 type Producto = { nombre: String, tiendas: Int, desde: Int };
 
 @page("/modelo/:id")
-fn modelo(id: Int) -> Pagina | NoEncontrado {
+fn modelo(id: Int) -> Page | NotFound {
     let p = buscarModelo(id);
     if p.tiendas < 1 {
-        return NoEncontrado;
+        return NotFound;
     }
-    return Pagina {
+    return Page {
         titulo: concat(p.nombre, " — ¿dónde está más barato? · Ahórrame"),
         descripcion: `Precio de {p.nombre} comparado en {text(p.tiendas)} tiendas`,
         canonica: concat("https://ahorrame.mx/modelo/", text(id)),
@@ -47,35 +47,35 @@ fn modelo(id: Int) -> Pagina | NoEncontrado {
 }
 ```
 
-`Pagina` es un tipo builtin (un registro con campos fijos). El compilador sabe
+`Page` es un tipo builtin (un registro con campos fijos). El compilador sabe
 armar el documento: `<head>` con las etiquetas, un `<script
 type="application/ld+json">` **por cada elemento** de `jsonld` —nunca un arreglo,
 que es lo que revienta a las herramientas que lo leen— y el `cuerpo` dentro.
 
 **El 404 sale gratis y no es un caso especial.** Es la variante de fallo del tipo
 de retorno, exactamente como el `User | NotFound` de la portada del README. El
-runtime traduce `NoEncontrado` a un 404; el compilador ya obliga a que el tipo lo
+runtime traduce `NotFound` a un 404; el compilador ya obliga a que el tipo lo
 diga. No hay una "página de error" que registrar aparte.
 
-### Lo que no es HTML devuelve `Respuesta`
+### Lo que no es HTML devuelve `Response`
 
 ```marea
 @page("/robots.txt")
-fn robots() -> Respuesta {
-    return textoPlano("User-agent: *\nSitemap: https://ahorrame.mx/sitemap.xml\n");
+fn robots() -> Response {
+    return plainText("User-agent: *\nSitemap: https://ahorrame.mx/sitemap.xml\n");
 }
 
 @page("/sitemap.xml")
-fn sitemap() -> Respuesta {
-    return documentoXml(`<urlset>{!urlsDeTodosLosModelos()}</urlset>`);
+fn sitemap() -> Response {
+    return xmlDoc(`<urlset>{!urlsDeTodosLosModelos()}</urlset>`);
 }
 ```
 
 Dos builtins y ninguna sintaxis nueva:
 
-- `textoPlano(String) -> Respuesta` — sin escapado, porque no hay marcado que
+- `plainText(String) -> Response` — sin escapado, porque no hay marcado que
   escapar.
-- `documentoXml(Html) -> Respuesta` — **exige `Html`**, y ahí está el detalle
+- `xmlDoc(Html) -> Response` — **exige `Html`**, y ahí está el detalle
   bueno: XML escapa los mismos cinco caracteres que HTML, así que la garantía que
   ya existe vale tal cual. Un nombre de producto con un `&` no rompe el sitemap
   porque el tipo no deja construirlo sin escapar.
@@ -86,19 +86,19 @@ No se inventa un tipo `Xml`. Sería un `Html` con otro nombre.
 
 ```marea
 @page("/buscar")
-fn buscar() -> Pagina {
-    let q = consulta("q");
-    let pagina = match entero(consulta("pagina")) {
-        NoEsNumero => 1,
+fn buscar() -> Page {
+    let q = query("q");
+    let pagina = match parseInt(query("pagina")) {
+        NotANumber => 1,
         n => n,
     };
     ...
 }
 ```
 
-- `consulta(nombre: String) -> String` — cadena vacía si no está. Las query
+- `query(nombre: String) -> String` — cadena vacía si no está. Las query
   strings **son** cadenas; fingir otra cosa sería mentir.
-- `entero(String) -> Int | NoEsNumero` — convertir puede fallar, así que el tipo
+- `parseInt(String) -> Int | NotANumber` — convertir puede fallar, así que el tipo
   lo dice y el `match` obliga a decidir el valor por defecto. Hoy el lenguaje no
   tiene forma de convertir texto a número: esto tapa un hueco que va más allá del
   enrutado.
@@ -131,7 +131,7 @@ animan.**
 
 ## Riesgo principal
 
-`Pagina` con campos fijos acierta hoy y envejece: en cuanto haga falta una
+`Page` con campos fijos acierta hoy y envejece: en cuanto haga falta una
 etiqueta que no está (`og:type`, `twitter:card`, `hreflang`), o se amplía el
 registro —y cada ampliación es un cambio del lenguaje— o se añade un campo de
 escape que acepte `Html` crudo en el `<head>`, y entonces la garantía de que los

@@ -9,8 +9,8 @@
 // Lo correcto sería:
 //
 //   @page("/precios")
-//   fn precios() -> Pagina {
-//       return Pagina {
+//   fn precios() -> Page {
+//       return Page {
 //           titulo: "Precios",
 //           canonica: "https://ahorrame.mx/precios",
 //           cuerpo: `<h1>Precios</h1>`,

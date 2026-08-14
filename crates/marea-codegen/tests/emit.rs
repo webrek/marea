@@ -912,9 +912,9 @@ fn la_tabla_va_de_mas_especifica_a_mas_general() {
     let p = build(
         r#"
         @page("/modelo/:id")
-        fn ficha(id: Int) -> Pagina { return Pagina { cuerpo: `a` }; }
+        fn ficha(id: Int) -> Page { return Page { cuerpo: `a` }; }
         @page("/modelo/nuevo")
-        fn nuevo() -> Pagina { return Pagina { cuerpo: `b` }; }
+        fn nuevo() -> Page { return Page { cuerpo: `b` }; }
         "#,
     );
     let rutas = tabla(&p.server);
@@ -930,7 +930,7 @@ fn los_segmentos_se_atan_por_nombre() {
     let p = build(
         r#"
         @page("/p/:x/:y")
-        fn par(y: String, x: String) -> Pagina { return Pagina { cuerpo: `z` }; }
+        fn par(y: String, x: String) -> Page { return Page { cuerpo: `z` }; }
         "#,
     );
     let rutas = tabla(&p.server);
@@ -947,7 +947,7 @@ fn el_tipo_del_segmento_viaja_a_la_tabla() {
     let p = build(
         r#"
         @page("/m/:id")
-        fn ficha(id: Int) -> Pagina { return Pagina { cuerpo: `a` }; }
+        fn ficha(id: Int) -> Page { return Page { cuerpo: `a` }; }
         "#,
     );
     let ruta = tabla(&p.server)[0];
@@ -962,7 +962,7 @@ fn el_tipo_del_segmento_viaja_a_la_tabla() {
 fn una_pagina_no_viaja_al_navegador() {
     let src = r#"
         @page("/x")
-        fn pagina() -> Pagina { return Pagina { cuerpo: `x` }; }
+        fn pagina() -> Page { return Page { cuerpo: `x` }; }
         "#;
     let p = build(src);
     assert!(p.server.contains("async function pagina"), "{}", p.server);
@@ -979,15 +979,15 @@ fn un_modulo_de_solo_paginas_lleva_servidor() {
     let p = build(
         r#"
         @page("/")
-        fn casa() -> Pagina { return Pagina { cuerpo: `h` }; }
+        fn casa() -> Page { return Page { cuerpo: `h` }; }
         "#,
     );
     for n in [
         "node:http",
         "export function __ruta",
-        "export function consulta",
-        "export function textoPlano",
-        "export function documentoXml",
+        "export function query",
+        "export function plainText",
+        "export function xmlDoc",
     ] {
         assert!(p.runtime.contains(n), "falta '{n}' en runtime.ts");
     }
@@ -1001,7 +1001,7 @@ fn un_modulo_de_solo_paginas_lleva_servidor() {
 fn sin_paginas_no_hay_tabla_ni_importaciones_de_ruta() {
     let p = build("@server fn f() -> Int { return 1; }");
     assert!(tabla(&p.server).is_empty(), "{}", p.server);
-    for n in ["__ruta", "consulta", "textoPlano", "documentoXml"] {
+    for n in ["__ruta", "query", "plainText", "xmlDoc"] {
         assert!(!p.server.contains(n), "sobra '{n}' en server.ts");
     }
 }
@@ -1030,7 +1030,7 @@ const COMPARTIDAS: [&str; 19] = [
     "append",
     "concat",
     "contains",
-    "entero",
+    "parseInt",
     "escape",
     "html",
     "len",

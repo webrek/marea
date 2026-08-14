@@ -164,24 +164,24 @@ pub fn lookup(name: &str) -> Option<Ty> {
         }),
         // `robots.txt` y compañía: no hay marcado que escapar, así que entra
         // texto tal cual.
-        "textoPlano" => Some(Ty::Fn {
+        "plainText" => Some(Ty::Fn {
             params: vec![Ty::String],
-            ret: Box::new(Ty::Respuesta),
+            ret: Box::new(Ty::Response),
             location: None,
         }),
         // El sitemap EXIGE `Html`, y no es un capricho: XML escapa los mismos
         // cinco caracteres que HTML, así que la garantía que ya existe vale tal
         // cual y un nombre con `&` no puede romper el documento. No hace falta
         // un tipo `Xml`: sería `Html` con otro nombre.
-        "documentoXml" => Some(Ty::Fn {
+        "xmlDoc" => Some(Ty::Fn {
             params: vec![Ty::Html],
-            ret: Box::new(Ty::Respuesta),
+            ret: Box::new(Ty::Response),
             location: None,
         }),
         // La query string de la petición. Devuelve cadena vacía si no está: una
         // query es opcional por definición, y un `String | NoEstá` obligaría a
         // un match en cada lectura para acabar poniendo "" en la otra rama.
-        "consulta" => Some(Ty::Fn {
+        "query" => Some(Ty::Fn {
             params: vec![Ty::String],
             ret: Box::new(Ty::String),
             location: None,
@@ -190,9 +190,9 @@ pub fn lookup(name: &str) -> Option<Ty> {
         // `match` obliga a decidir el valor por defecto. Tapa además un hueco
         // que va más allá del enrutado: hasta ahora no había forma de leer un
         // número de un texto.
-        "entero" => Some(Ty::Fn {
+        "parseInt" => Some(Ty::Fn {
             params: vec![Ty::String],
-            ret: Box::new(Ty::Union(vec!["Int".to_string(), "NoEsNumero".to_string()])),
+            ret: Box::new(Ty::Union(vec!["Int".to_string(), "NotANumber".to_string()])),
             location: None,
         }),
         // Variante nominal usable como etiqueta en uniones / patrones.
@@ -209,7 +209,7 @@ pub fn lookup(name: &str) -> Option<Ty> {
 ///
 /// Ninguno pega a la red ni al disco: son cómputo puro sobre valores que ya
 /// están en la mano (el texto de una query, una cadena que se marca como JSON).
-const SINCRONOS_DE_PAGINA: &[&str] = &["json", "textoPlano", "documentoXml", "consulta", "entero"];
+const SINCRONOS_DE_PAGINA: &[&str] = &["json", "plainText", "xmlDoc", "query", "parseInt"];
 
 /// ¿Es `name` un builtin síncrono, contando los que aún no están en la lista
 /// canónica? Lo que decide es si la llamada puede aparecer donde no hay dónde
@@ -224,11 +224,11 @@ pub(crate) fn es_sincrono_local(name: &str) -> bool {
 /// compilador sabe armar en el `<head>`: un registro abierto no se podría
 /// emitir, y una etiqueta que no está aquí no es una etiqueta que exista.
 ///
-/// `Pagina` es el retorno de una ruta que sirve HTML; `Meta` es una etiqueta
+/// `Page` es el retorno de una ruta que sirve HTML; `Meta` es una etiqueta
 /// suelta (`og:type`, `twitter:card`) para lo que no tiene campo propio.
 pub fn record_lookup(name: &str) -> Option<Vec<(String, Ty)>> {
     let campos: Vec<(&str, Ty)> = match name {
-        "Pagina" => vec![
+        "Page" => vec![
             ("titulo", Ty::String),
             ("descripcion", Ty::String),
             ("canonica", Ty::String),
@@ -239,18 +239,23 @@ pub fn record_lookup(name: &str) -> Option<Vec<(String, Ty)>> {
         "Meta" => vec![("clave", Ty::String), ("valor", Ty::String)],
         _ => return None,
     };
-    Some(campos.into_iter().map(|(n, t)| (n.to_string(), t)).collect())
+    Some(
+        campos
+            .into_iter()
+            .map(|(n, t)| (n.to_string(), t))
+            .collect(),
+    )
 }
 
 /// Los campos de un registro builtin que se pueden OMITIR al construirlo.
 ///
-/// En `Pagina` son cuatro, y la lista es la decisión: el vacío de una
+/// En `Page` son cuatro, y la lista es la decisión: el vacío de una
 /// descripción, de las metas, del JSON-LD o del cuerpo significa algo —no hay—.
 /// El de un título o el de una canónica no significa nada: es el fallo de SEO
 /// más caro que existe y no lo avisa nadie, así que hay que escribirlos.
 pub fn campos_omitibles(name: &str) -> &'static [&'static str] {
     match name {
-        "Pagina" => &["descripcion", "metas", "jsonld", "cuerpo"],
+        "Page" => &["descripcion", "metas", "jsonld", "cuerpo"],
         _ => &[],
     }
 }
@@ -259,8 +264,8 @@ pub fn campos_omitibles(name: &str) -> &'static [&'static str] {
 /// en el error: la regla sola no convence a nadie, el motivo sí.
 pub fn porque_obligatorio(tipo: &str, campo: &str) -> &'static str {
     match (tipo, campo) {
-        ("Pagina", "titulo") => "es lo que un buscador enseña como enlace",
-        ("Pagina", "canonica") => "sin ella, dos URLs con el mismo contenido compiten entre sí",
+        ("Page", "titulo") => "es lo que un buscador enseña como enlace",
+        ("Page", "canonica") => "sin ella, dos URLs con el mismo contenido compiten entre sí",
         _ => "el tipo no tiene un valor por defecto para él",
     }
 }
@@ -274,13 +279,13 @@ pub fn type_lookup(name: &str) -> Option<Ty> {
         "String" => Some(Ty::String),
         "Html" => Some(Ty::Html),
         "Unit" => Some(Ty::Unit),
-        // Los tipos de una página. `Pagina` y `Meta` son registros de campos
+        // Los tipos de una página. `Page` y `Meta` son registros de campos
         // fijos (sus campos están en `record_lookup`), así que su tipo es el
         // nombre y se resuelven como cualquier otro registro nombrado.
-        "Pagina" => Some(Ty::Named("Pagina".to_string())),
+        "Page" => Some(Ty::Named("Page".to_string())),
         "Meta" => Some(Ty::Named("Meta".to_string())),
         "Json" => Some(Ty::Json),
-        "Respuesta" => Some(Ty::Respuesta),
+        "Response" => Some(Ty::Response),
         // `Record` es el tipo registro abierto: acceso a campo → Unknown.
         "Record" => Some(Ty::Unknown),
         // Marcador de política: `@server(Public)` es decir "aquí no exijo
@@ -320,29 +325,18 @@ pub const VALUE_NAMES: &[&str] = &[
     "jsonFloat",
     "jsonLen",
     "json",
-    "textoPlano",
-    "documentoXml",
-    "consulta",
-    "entero",
+    "plainText",
+    "xmlDoc",
+    "query",
+    "parseInt",
     "NotFound",
 ];
 
 /// Todos los nombres de tipo builtin. `List` no está en `type_lookup` (se trata
 /// como caso especial por su argumento) pero sí es un nombre de tipo válido.
 pub const TYPE_NAMES: &[&str] = &[
-    "Int",
-    "Float",
-    "Bool",
-    "String",
-    "Unit",
-    "Html",
-    "Record",
-    "List",
-    "Public",
-    "Pagina",
-    "Meta",
-    "Json",
-    "Respuesta",
+    "Int", "Float", "Bool", "String", "Unit", "Html", "Record", "List", "Public", "Page", "Meta",
+    "Json", "Response",
 ];
 
 #[cfg(test)]
@@ -379,7 +373,7 @@ mod tests {
     /// haya decidido. Es el tipo de deriva que sólo se ve cuando ya molesta.
     #[test]
     fn los_campos_omitibles_existen_en_su_registro() {
-        for tipo in ["Pagina", "Meta"] {
+        for tipo in ["Page", "Meta"] {
             let campos = record_lookup(tipo).expect("es un registro builtin");
             for omitible in campos_omitibles(tipo) {
                 assert!(
@@ -391,14 +385,14 @@ mod tests {
     }
 
     /// Los dos campos que hay que escribir sí o sí son el título y la canónica:
-    /// es la decisión de diseño de `Pagina`, y aquí queda fijada.
+    /// es la decisión de diseño de `Page`, y aquí queda fijada.
     #[test]
     fn en_una_pagina_solo_titulo_y_canonica_son_obligatorios() {
-        let campos = record_lookup("Pagina").expect("Pagina es un registro builtin");
+        let campos = record_lookup("Page").expect("Page es un registro builtin");
         let obligatorios: Vec<&str> = campos
             .iter()
             .map(|(n, _)| n.as_str())
-            .filter(|n| !campos_omitibles("Pagina").contains(n))
+            .filter(|n| !campos_omitibles("Page").contains(n))
             .collect();
         assert_eq!(obligatorios, vec!["titulo", "canonica"]);
     }

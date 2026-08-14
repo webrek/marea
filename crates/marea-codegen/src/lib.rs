@@ -160,13 +160,13 @@ const BUILTINS_PURO: &[&str] = &[
     "__effect",
     // Texto a número. Vive en el núcleo compartido (es cómputo puro), así que
     // existe en los dos blancos y no depende del enrutado.
-    "entero",
+    "parseInt",
 ];
 
 /// Los que sólo existen si el módulo SIRVE PÁGINAS (`@page`). Un módulo sin
 /// rutas no tiene tabla que registrar ni petición en curso que consultar, y
 /// pedir estos nombres le importaría cosas que su runtime no exporta.
-const BUILTINS_PAGINA: &[&str] = &["__ruta", "consulta", "textoPlano", "documentoXml"];
+const BUILTINS_PAGINA: &[&str] = &["__ruta", "query", "plainText", "xmlDoc"];
 
 /// Los que sólo existen si el módulo CRUZA la frontera de red: el registro de
 /// handlers, el cliente RPC y la red saliente. Un módulo que sólo calcula y

@@ -463,18 +463,18 @@ export function contains(s/*ts: string*/, sub/*ts: string*/)/*ts: boolean*/ {
 
 // Convertir texto a número PUEDE fallar, así que el tipo lo dice
 // (`Int | NoEsNumero`) y el `match` obliga a decidir el valor por defecto en el
-// fuente. Es lo que hacía falta para leer una query string —`entero(consulta(
+// fuente. Es lo que hacía falta para leer una query string —`parseInt(query(
 // "pagina"))`—, pero el hueco que tapa es más viejo: hasta ahora el lenguaje no
 // tenía NINGUNA forma de convertir texto a número.
 //
 // Estricto como la conversión de un segmento de ruta, y por la misma razón:
 // `Number(" 7 ")` es 7 y `Number("")` es 0, de modo que delegar en `Number`
 // convertiría en enteros dos cadenas que nadie escribió como números.
-export function entero(s/*ts: string*/)/*ts: number | { $tag: string }*/ {
+export function parseInt(s/*ts: string*/)/*ts: number | { $tag: string }*/ {
   const t = String(s);
-  if (!/^-?\d+$/.test(t)) return { $tag: "NoEsNumero" };
+  if (!/^-?\d+$/.test(t)) return { $tag: "NotANumber" };
   const n = Number(t);
-  if (!Number.isSafeInteger(n)) return { $tag: "NoEsNumero" };
+  if (!Number.isSafeInteger(n)) return { $tag: "NotANumber" };
   return n;
 }
 

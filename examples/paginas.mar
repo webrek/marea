@@ -7,11 +7,11 @@
 //
 //   - Los `:huecos` de la ruta se atan a los parámetros POR NOMBRE, y sólo
 //     pueden ser Int o String: es lo que cabe en una URL.
-//   - Devuelve `Pagina` —el documento con sus metadatos— o `Respuesta` para lo
+//   - Devuelve `Page` —el documento con sus metadatos— o `Response` para lo
 //     que no es HTML (el sitemap, el robots.txt). `Html` a secas no vale: es el
 //     cuerpo de una página, no la página.
 //   - El 404 no es un caso especial: es la variante de fallo del retorno,
-//     `Pagina | NoEncontrado`, como cualquier otro fallo del lenguaje.
+//     `Page | NotFound`, como cualquier otro fallo del lenguaje.
 //
 // Una página corre en el SERVIDOR aunque no lo diga: se renderiza para que la
 // lea un buscador. Por eso puede tocar el almacén sin envolverlo en nada, y por
@@ -33,8 +33,8 @@ store modelos: Modelo;
 // metas, ni JSON-LD, ni cuerpo es un estado legítimo. Un título o una canónica
 // que faltan no lo son.
 @page("/")
-fn portada() -> Pagina {
-    return Pagina {
+fn portada() -> Page {
+    return Page {
         titulo: "Ahórrame — el precio de cada modelo en todas las tiendas",
         descripcion: "Compara en qué tienda está más barato cada modelo.",
         canonica: "https://ahorrame.mx/",
@@ -45,14 +45,14 @@ fn portada() -> Pagina {
 // La página de un modelo. `:id` se ata al parámetro `id: Int`, y el 404 sale de
 // la unión: si el modelo no está, se devuelve la variante y el runtime traduce.
 @page("/modelo/:id")
-fn modelo(id: Int) -> Pagina | NoEncontrado {
+fn modelo(id: Int) -> Page | NotFound {
     let ms = all(modelos);
     if id < 0 {
-        return NoEncontrado;
+        return NotFound;
     }
     if id < len(ms) {
         let m = ms[id];
-        return Pagina {
+        return Page {
             titulo: concat(m.nombre, " — ¿dónde está más barato?"),
             descripcion: `Precio de {m.nombre} comparado en {text(m.tiendas)} tiendas`,
             canonica: concat("https://ahorrame.mx/modelo/", text(id)),
@@ -64,21 +64,21 @@ fn modelo(id: Int) -> Pagina | NoEncontrado {
             cuerpo: ficha(m),
         };
     }
-    return NoEncontrado;
+    return NotFound;
 }
 
 // La query string se LEE; construirla no necesita nada del lenguaje, porque se
 // concatena en el href y navega el navegador.
 @page("/buscar")
-fn buscar() -> Pagina {
-    let q = consulta("q");
+fn buscar() -> Page {
+    let q = query("q");
     // Convertir texto a número puede fallar, así que el tipo lo dice y el match
     // obliga a decidir el valor por defecto aquí y no en el runtime.
-    let pagina = match entero(consulta("pagina")) {
-        NoEsNumero => 1,
+    let pagina = match parseInt(query("pagina")) {
+        NotANumber => 1,
         n => n,
     };
-    return Pagina {
+    return Page {
         titulo: concat("Buscar: ", q),
         descripcion: `Resultados para {q}, página {text(pagina)}`,
         canonica: concat("https://ahorrame.mx/buscar?q=", q),
@@ -86,19 +86,19 @@ fn buscar() -> Pagina {
     };
 }
 
-// Lo que no es HTML devuelve `Respuesta`, que es donde se decide el tipo de
+// Lo que no es HTML devuelve `Response`, que es donde se decide el tipo de
 // contenido. Sin escapado, porque no hay marcado que escapar.
 @page("/robots.txt")
-fn robots() -> Respuesta {
-    return textoPlano("User-agent: *\nSitemap: https://ahorrame.mx/sitemap.xml\n");
+fn robots() -> Response {
+    return plainText("User-agent: *\nSitemap: https://ahorrame.mx/sitemap.xml\n");
 }
 
-// `documentoXml` EXIGE `Html`, y ahí está el detalle: XML escapa los mismos
+// `xmlDoc` EXIGE `Html`, y ahí está el detalle: XML escapa los mismos
 // cinco caracteres, así que la garantía que ya existe vale tal cual y un nombre
 // con '&' no puede romper el sitemap.
 @page("/sitemap.xml")
-fn sitemap() -> Respuesta {
-    return documentoXml(`<urlset>{!urls(all(modelos))}</urlset>`);
+fn sitemap() -> Response {
+    return xmlDoc(`<urlset>{!urls(all(modelos))}</urlset>`);
 }
 
 // --------------------------------------------------------------------------

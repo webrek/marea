@@ -804,7 +804,7 @@ impl Checker {
 
         // Campos faltantes. Un registro del usuario los quiere todos —no hay
         // valores por defecto en el lenguaje—, pero uno builtin puede tener
-        // campos cuyo vacío significa algo: en `Pagina`, no tener descripción,
+        // campos cuyo vacío significa algo: en `Page`, no tener descripción,
         // metas, JSON-LD ni cuerpo es un estado legítimo. Los que quedan hay que
         // escribirlos, y el error dice por qué.
         for (fname, _) in &record_fields {

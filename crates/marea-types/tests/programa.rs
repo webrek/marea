@@ -374,12 +374,12 @@ fn dos_paginas_no_pueden_servir_la_misma_ruta() {
                 "a.mar",
                 "import { precios } from \"./b.mar\";\n\
                  @page(\"/precios\")\n\
-                 fn portada() -> Pagina { return Pagina { titulo: \"a\", canonica: \"c\" }; }\n",
+                 fn portada() -> Page { return Page { titulo: \"a\", canonica: \"c\" }; }\n",
             ),
             (
                 "b.mar",
                 "@page(\"/precios\")\n\
-                 fn precios() -> Pagina { return Pagina { titulo: \"b\", canonica: \"c\" }; }\n",
+                 fn precios() -> Page { return Page { titulo: \"b\", canonica: \"c\" }; }\n",
             ),
         ],
     );
@@ -400,12 +400,12 @@ fn dos_paginas_en_rutas_distintas_conviven() {
                 "a.mar",
                 "import { precios } from \"./b.mar\";\n\
                  @page(\"/\")\n\
-                 fn portada() -> Pagina { return Pagina { titulo: \"a\", canonica: \"c\" }; }\n",
+                 fn portada() -> Page { return Page { titulo: \"a\", canonica: \"c\" }; }\n",
             ),
             (
                 "b.mar",
                 "@page(\"/precios\")\n\
-                 fn precios() -> Pagina { return Pagina { titulo: \"b\", canonica: \"c\" }; }\n",
+                 fn precios() -> Page { return Page { titulo: \"b\", canonica: \"c\" }; }\n",
             ),
         ],
     );

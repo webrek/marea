@@ -12,12 +12,12 @@
 //!   2. **Sólo `Int` y `String` viajan en una URL.** Un `Float` o un registro en
 //!      un segmento no significan nada: no hay forma de escribirlos que el
 //!      lenguaje sepa leer de vuelta.
-//!   3. **Se devuelve `Pagina` o `Respuesta`, y nada más.** `Html` es el CUERPO
+//!   3. **Se devuelve `Page` o `Response`, y nada más.** `Html` es el CUERPO
 //!      de una página, no la página: no lleva título, ni canónica, ni tipo de
 //!      contenido, que es exactamente lo que un buscador lee.
 //!
 //! El 404 no aparece por ninguna parte, y es deliberado: es la variante de fallo
-//! del retorno (`Pagina | NoEncontrado`), igual que en cualquier otra función
+//! del retorno (`Page | NotFound`), igual que en cualquier otra función
 //! del lenguaje. No hay un registro de páginas de error que mantener.
 //!
 //! Dónde CORRE una página no se decide aquí: `ubicacion_efectiva` la trata como
@@ -192,7 +192,7 @@ impl Checker {
                 format!(
                     "'{}' recibe '{nombre}' pero la ruta \"{ruta}\" no lo menciona: a una página \
                      la invoca una URL, así que lo que no está en la ruta no se lo pasa nadie. \
-                     Añade ':{nombre}' a la ruta, o léelo con consulta(\"{nombre}\")",
+                     Añade ':{nombre}' a la ruta, o léelo con query(\"{nombre}\")",
                     f.name
                 ),
                 p.span,
@@ -200,8 +200,8 @@ impl Checker {
         }
     }
 
-    /// Dos retornos válidos y ninguno más: `Pagina` —con sus variantes de fallo,
-    /// si las hay— o `Respuesta`.
+    /// Dos retornos válidos y ninguno más: `Page` —con sus variantes de fallo,
+    /// si las hay— o `Response`.
     fn check_retorno_de_pagina(&mut self, f: &FnDecl) {
         let span = f.return_type.as_ref().map(|t| t.span()).unwrap_or(f.span);
         let ret = match &f.return_type {
@@ -209,18 +209,18 @@ impl Checker {
             None => Ty::Unit,
         };
         // Se mira el tipo RESUELTO y no lo escrito, para que un alias
-        // (`type Resultado = Pagina | NoEncontrado`) valga igual.
+        // (`type Resultado = Page | NotFound`) valga igual.
         let variantes: Vec<String> = match &ret {
             Ty::Named(n) => vec![n.clone()],
-            Ty::Respuesta => vec!["Respuesta".to_string()],
+            Ty::Response => vec!["Response".to_string()],
             Ty::Union(vs) => vs.clone(),
             _ => Vec::new(),
         };
-        let sirve_pagina = variantes.iter().any(|v| v == "Pagina");
-        let sirve_respuesta = variantes.iter().any(|v| v == "Respuesta");
+        let sirve_pagina = variantes.iter().any(|v| v == "Page");
+        let sirve_respuesta = variantes.iter().any(|v| v == "Response");
 
         // Uno de los dos y sólo uno: el resto de variantes de la unión son
-        // fallos (`NoEncontrado`), que es como el lenguaje dice "puede no estar".
+        // fallos (`NotFound`), que es como el lenguaje dice "puede no estar".
         if sirve_pagina != sirve_respuesta {
             return;
         }
@@ -228,7 +228,7 @@ impl Checker {
             self.error(TypeError::new(
                 "E_PAGINA_RETORNO",
                 format!(
-                    "'{}' declara que devuelve 'Pagina' y 'Respuesta' a la vez: una ruta sirve \
+                    "'{}' declara que devuelve 'Page' y 'Response' a la vez: una ruta sirve \
                      un documento o sirve otra cosa, y el tipo de contenido se decide al \
                      declararlo, no en cada rama",
                     f.name
@@ -244,13 +244,13 @@ impl Checker {
             format!(
                 "'{}' devuelve 'Html', que es el CUERPO de una página y no la página: no lleva \
                  título, ni canónica, ni metadatos, que es justo lo que lee un buscador. \
-                 Envuélvelo: 'Pagina {{ titulo: ..., canonica: ..., cuerpo: <tu Html> }}'",
+                 Envuélvelo: 'Page {{ titulo: ..., canonica: ..., cuerpo: <tu Html> }}'",
                 f.name
             )
         } else {
             format!(
-                "'{}' es una página y devuelve '{}': una página devuelve 'Pagina' (con sus \
-                 variantes de fallo si las tiene, como 'Pagina | NoEncontrado') o 'Respuesta' \
+                "'{}' es una página y devuelve '{}': una página devuelve 'Page' (con sus \
+                 variantes de fallo si las tiene, como 'Page | NotFound') o 'Response' \
                  para lo que no es HTML, como un sitemap o un robots.txt",
                 f.name,
                 ret.display()
