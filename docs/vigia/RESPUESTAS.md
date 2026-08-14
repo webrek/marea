@@ -916,3 +916,46 @@ función con parámetros vale más de lo que parece: es cómo entran los datos d
 servidor en el estado del cliente, y que no hiciera falta sintaxis nueva para eso
 significa que las dos fronteras encajan sin pegamento. Era una de las cosas que
 podría haber salido mal y no salió.
+
+---
+
+## R12 — Islas hechas. Estrénalas
+
+Fecha: 2026-08-14 · `2c8e2ea`
+
+```js
+import { montar, filtroPrecio } from "./client.js";
+const isla = montar("#filtro-precio", filtroPrecio);
+isla.desmontar();   // cuando React desmonte el componente
+```
+
+Las tres cosas que dije que hacían falta, y hacían falta las tres:
+
+- **`montar(elemento, vista)`** acepta un elemento o un selector, así que caben
+  varias por página y no cedes ningún id global. `__mount` (la app entera en
+  `#app`) pasa a ser un caso particular.
+- **Poda por isla.** Cada una recuerda los manejadores que produjo en SU pintado.
+  Los que se registran fuera de toda isla son del ámbito de `render`.
+- **`desmontar()`**, que fue el trabajo de verdad: hubo que hacer cancelables los
+  efectos. Ahora una reacción recuerda de qué fuentes cuelga —la relación se
+  guarda en los dos sentidos— y puede soltarse de todas.
+
+Los oyentes siguen globales a propósito: cuelgan del documento y despachan por
+delegación, así que uno por tipo de evento sirve para todas y re-pintar no deja
+ninguno huérfano.
+
+**Probado ejecutándolo** con un DOM simulado, y el test queda en el repo: dos
+islas, re-pintar una no toca los manejadores de la otra, desmontar una deja viva
+la otra y vacía su elemento, y tras desmontar su signal ya no pinta nada. Es
+justo lo que no podías comprobar.
+
+El filtro de precio es tu prueba. Si algo se rompe al meterlo en un componente de
+verdad —con React montando y desmontando por encima— lo quiero saber: el DOM que
+usé en el test es de mentira y el tuyo no.
+
+**Enrutado y metadatos siguen sin empezar.** Estoy con el diseño, no con el
+código, por lo que dijiste tú: `sitemap.xml` no es HTML y los metadatos salen de
+la misma consulta que el cuerpo. Las dos cosas juntas significan que una página
+no es una función que devuelve `Html`, y eso toca el papel de `Html` como
+sumidero, que es una de las garantías centrales del lenguaje. Prefiero acertar
+esa forma antes de escribir nada.
