@@ -32,7 +32,7 @@ export async function __rpc(fn, args) {
 // runtime.ts. Mientras se lee este archivo SIN generar, el import de abajo da lo
 // mismo que la inserción, así que `tsc --checkJs` lo comprueba igual.
 export * from "./nucleo.js";
-import { __effect, __podar } from "./nucleo.js";
+import { __effect, __podar, __soltar, __pintandoEn } from "./nucleo.js";
 // @marea:nucleo-fin
 
 // --- el puente reactividad ↔ DOM ---
@@ -46,10 +46,48 @@ import { __effect, __podar } from "./nucleo.js";
 // es lo que hace que re-pintar no deje ninguno huérfano.
 export function __mount(vista) {
   const app = typeof document !== "undefined" && document.getElementById("app");
-  if (!app) return;
-  __effect(async () => {
-    const marcado = String(await vista());
-    __podar(marcado);
-    app.innerHTML = marcado;
+  if (!app) return () => {};
+  return montar(app, vista);
+}
+
+/// Monta una vista de Marea en UN elemento y devuelve cómo desmontarla.
+///
+/// Es la forma de usar Marea como ISLA dentro de otra aplicación: el anfitrión
+/// —React, por ejemplo— manda en el ciclo de vida, monta el elemento cuando
+/// quiere y lo desmonta al cambiar de ruta. `__mount` (la app entera en `#app`)
+/// es un caso particular de esto.
+///
+/// Tres cosas por isla, y las tres hacen falta:
+///   - su ELEMENTO, así que caben varias en la misma página;
+///   - sus MANEJADORES, para que re-pintar una no borre los de las otras;
+///   - su EFECTO, cancelable, para que desmontarla deje de pintar de verdad y
+///     re-montarla no acumule un efecto más cada vez.
+///
+/// Los OYENTES no son por isla a propósito: cuelgan del documento y despachan
+/// por delegación, así que uno por tipo de evento sirve para todas y re-pintar
+/// no deja ninguno huérfano.
+export function montar(elemento, vista) {
+  const destino =
+    typeof elemento === "string"
+      ? typeof document !== "undefined" && document.querySelector(elemento)
+      : elemento;
+  if (!destino) {
+    throw new Error("[marea] montar: no existe el elemento de destino");
+  }
+  const mios = new Set();
+  const detener = __effect(async () => {
+    // La vista se evalúa ATRIBUYENDO a esta isla lo que registre. La parte
+    // síncrona es la que rastrea dependencias y la que llama a `on`, así que
+    // basta con envolver la llamada.
+    const marcado = String(await __pintandoEn(mios, vista));
+    __podar(marcado, mios);
+    destino.innerHTML = marcado;
   });
+  return {
+    desmontar() {
+      detener();
+      __soltar(mios);
+      destino.innerHTML = "";
+    },
+  };
 }

@@ -416,6 +416,9 @@ export function __marea_is(value: unknown, tag: string): boolean {
 
 interface Reaction {
   invalidate(): void;
+  // Los conjuntos de suscriptores en los que esta reacción está metida. Sin
+  // esto no se puede cancelar: la reacción no sabría de dónde quitarse.
+  fuentes: Set<Set<Reaction>>;
 }
 
 interface EffectReaction extends Reaction {
@@ -458,7 +461,13 @@ export function __signal<T>(initial: T): Cell<T> {
   const subs: Set<Reaction> = new Set();
   return {
     get(): T {
-      if (__currentSub) subs.add(__currentSub);
+      if (__currentSub) {
+        subs.add(__currentSub);
+        // La relación se guarda en los DOS sentidos: la fuente sabe quién la
+        // lee, y el lector sabe de qué fuentes cuelga. Lo segundo es lo que
+        // permite desmontarse después.
+        __currentSub.fuentes.add(subs);
+      }
       return value;
     },
     set(v: T): void {
@@ -470,8 +479,15 @@ export function __signal<T>(initial: T): Cell<T> {
   };
 }
 
-export function __effect(fn: () => void | Promise<void>): void {
+/// Registra un efecto y devuelve cómo DETENERLO.
+///
+/// Cancelar hacía falta en cuanto Marea dejó de ser siempre la app entera: un
+/// componente que el anfitrión (React, por ejemplo) desmonta y vuelve a montar
+/// dejaba efectos vivos pintando sobre un elemento que ya no está en el
+/// documento, y cada re-montaje añadía otro.
+export function __effect(fn: () => void | Promise<void>): () => void {
   const reaction: EffectReaction = {
+    fuentes: new Set(),
     execute() {
       const prev = __currentSub;
       __currentSub = reaction;
@@ -488,6 +504,13 @@ export function __effect(fn: () => void | Promise<void>): void {
     },
   };
   reaction.execute();
+  return () => {
+    // Salirse de cada fuente que lo tenía apuntado, y de la cola por si estaba
+    // pendiente de ejecutarse cuando lo detuvieron.
+    for (const subs of reaction.fuentes) subs.delete(reaction);
+    reaction.fuentes.clear();
+    __pending.delete(reaction);
+  };
 }
 
 // Un RECURSO: la composición de las dos fronteras. Arranca en `Cargando`, lanza
@@ -513,6 +536,7 @@ export function __memo<T>(fn: () => T): Cell<T> {
   let value: T;
   let dirty = true;
   const reaction: Reaction = {
+    fuentes: new Set(),
     invalidate() {
       if (!dirty) {
         dirty = true;
@@ -533,7 +557,10 @@ export function __memo<T>(fn: () => T): Cell<T> {
   return {
     get(): T {
       if (dirty) recompute();
-      if (__currentSub) subs.add(__currentSub);
+      if (__currentSub) {
+        subs.add(__currentSub);
+        __currentSub.fuentes.add(subs);
+      }
       return value;
     },
     // Un memo es DERIVADO: asignarle no significa nada, y el verificador ya
@@ -585,7 +612,7 @@ export function render(x: unknown): void {
     const marcado = String(x);
     // Podar ANTES de escribir: el marcado que entra es el que dice qué
     // manejadores siguen vivos (ver `__podar`).
-    __podar(marcado);
+    __podar(marcado, __sinIsla);
     app.innerHTML = marcado;
   } else console.log("[render]", x);
 }
@@ -632,9 +659,32 @@ let __idManejador = 0;
 // contenedor cuando el puntero pasa de un hijo a otro.
 const __SIN_BURBUJEO: Set<string> = new Set(["blur", "pointerleave"]);
 
+// La isla que está pintando ahora mismo, si hay alguna. Mismo mecanismo que
+// `__currentSub` en la reactividad: durante la evaluación de una vista, todo lo
+// que se registre queda atribuido a quien la está pintando.
+let __islaActual: Set<string> | null = null;
+
+// Los manejadores que se registran sin isla en curso: los de `render`.
+const __sinIsla: Set<string> = new Set();
+
+/// Ejecuta `f` atribuyendo a `isla` los manejadores que registre.
+export function __pintandoEn<T>(isla: Set<string>, f: () => T): T {
+  const prev = __islaActual;
+  __islaActual = isla;
+  try {
+    return f();
+  } finally {
+    __islaActual = prev;
+  }
+}
+
 export function on(evento: string, manejador: () => unknown): string {
   const id = "h" + ++__idManejador;
   __manejadores.set(id, { fn: manejador });
+  // Sin isla en curso, el manejador es del ámbito por defecto: el de `render`,
+  // que pinta la app entera en `#app`. Así cada ámbito poda lo suyo y ninguno
+  // se lleva por delante lo del otro.
+  (__islaActual ?? __sinIsla).add(id);
   __engancharRaiz(evento);
   // Un atributo por tipo de evento: dos `on` distintos en la misma etiqueta
   // serían dos atributos con el mismo nombre y el analizador de HTML se quedaría
@@ -678,12 +728,27 @@ function __despachar(evento: string, ev: Event): void {
 /// lista de los vivos, así que no hace falta llevar la cuenta de re-pintados ni
 /// adivinar cuándo caduca uno. Sin esto la tabla crecería un cierre por botón y
 /// por re-pintado —un contador pulsado mil veces dejaría mil cierres muertos.
-export function __podar(html: string): void {
+/// Saca de la tabla los manejadores que el marcado nuevo ya no nombra.
+///
+/// `mios` acota la poda a UNA isla. Cuando Marea era siempre la app entera esto
+/// no hacía falta y se podaba contra la tabla completa; con varias islas en la
+/// misma página, esa versión borraba los manejadores de las demás —y en
+/// silencio, porque los oyentes cuelgan del documento: el clic llegaba y no
+/// encontraba a nadie, así que el botón dejaba de responder sin ningún error—.
+export function __podar(html: string, mios: Set<string>): void {
   const vivos: Set<string> = new Set();
   for (const m of html.matchAll(/data-marea-on-[a-z]+="([^"]*)"/g)) vivos.add(m[1]);
-  for (const id of [...__manejadores.keys()]) {
-    if (!vivos.has(id)) __manejadores.delete(id);
+  for (const id of [...mios]) {
+    if (vivos.has(id)) continue;
+    __manejadores.delete(id);
+    mios.delete(id);
   }
+}
+
+/// Suelta todos los manejadores de una isla. Se usa al desmontarla.
+export function __soltar(mios: Set<string>): void {
+  for (const id of mios) __manejadores.delete(id);
+  mios.clear();
 }
 
 // División entera. En JS `7/0` es Infinity y `0/0` es NaN: valores que no son

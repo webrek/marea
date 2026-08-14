@@ -660,3 +660,79 @@ Con el rediseño en marcha, esto no corre prisa **esta semana**. Pero es lo que
 decide si el sitio nuevo se escribe con islas de Marea dentro de Next, o si toda
 la interacción se queda en React y Marea sólo dibuja lo estático. Esa decisión
 sí conviene tomarla antes de escribir el marcado nuevo, no después.
+
+---
+
+## P11 — Victor pide enrutado y metadatos. Aquí está medido, no descrito
+
+Fecha: 2026-08-14
+
+R11 leída. Lo de `__podar` global es un buen hallazgo suyo: un botón que deja de
+responder sin error es de los fallos que se tardan días en atribuir. Espero
+`montar` sin prisa.
+
+**Victor ha pedido explícitamente que desarrollen enrutado y metadatos.** Es la
+misma decisión de P8, ahora concreta: son los dos que quedan del nivel 2.
+
+En vez de repetirles la lista, va medido sobre el sitio que corre ahora, para que
+tengan un objetivo verificable y no una descripción.
+
+### Enrutado — lo que hay que servir
+
+| Ruta | Parámetro | Nota |
+|---|---|---|
+| `/` | — | portada |
+| `/categoria/:slug` | slug | la que más tráfico recibe de Google |
+| `/modelo/:id` | id entero | |
+| `/p/:id` | id entero | ficha de una tienda |
+| `/buscar?q=…` | query string | lee `q`, y también `precio_min`, `precio_max`, `marca`, `tienda`, `pagina` |
+| `/api/alerts` | — | **POST** con JSON; sospecho que les sale gratis con `@server` |
+| `/sitemap.xml` | — | XML generado desde la base |
+| `/robots.txt` | — | texto plano |
+| 404 | — | cualquier id que no existe |
+
+Dos cosas que no son "una ruta más":
+
+- **La query string.** Hoy los filtros y la paginación viven ahí, y todo el
+  estado de la página de categoría es la URL. Sin poder leerla, la mitad del
+  sitio no se puede servir. Y sin poder *construirla*, tampoco: mi filtro de
+  precio funciona porque el botón "Aplicar" es un enlace cuyo href se arma con
+  los valores. Leer y escribir query strings es tan importante como la ruta.
+- **`sitemap.xml` y `robots.txt` no son páginas HTML.** Necesitan responder con
+  su propio `content-type`. Si el enrutado sólo sabe devolver `Html`, esos dos se
+  quedan fuera y con ellos el SEO.
+
+### Metadatos — lo que emite hoy, tal cual
+
+Esto es lo que sale ahora mismo de `/modelo/1495`. Es el listón:
+
+```
+title       TELEVISOR HISENSE MOD. 40A4NV… — ¿dónde está más barato? · Ahórrame
+description Precio de TELEVISOR HISENSE… comparado en 4 tiendas (Walmart, …)
+canonical   https://…/modelo/1495
+og:title    …   og:image  https://storage.googleapis.com/vigia-img-…
+og:type     website
+json-ld     8 bloques
+```
+
+Tres de las cinco páginas los calculan **a partir de los datos** (el título lleva
+el nombre del producto, la descripción cuenta en cuántas tiendas está y desde
+cuánto). O sea que no vale un bloque estático por ruta: hace falta que los
+metadatos salgan de una función que ya consultó la base, igual que el cuerpo.
+
+Y el JSON-LD son 8 bloques por página (Product, AggregateOffer, BreadcrumbList,
+Organization, WebSite). Hoy es un `<script type="application/ld+json">` por
+objeto — eso lo aprendí por las malas: en un arreglo, las herramientas que lo
+leen revientan.
+
+### El criterio de aceptación, y es duro a propósito
+
+**Las etiquetas nuevas tienen que ser idénticas a las de hoy**, comparadas con el
+mismo método que uso para el marcado. No "equivalentes": iguales. Vigía existe
+para Google y un cambio silencioso en las canónicas o en el JSON-LD no se nota
+hasta que el tráfico cae dos semanas después, cuando ya nadie lo relaciona.
+
+Cuando tengan algo, aunque sea sólo el enrutado sin metadatos, lo estreno igual y
+les reporto qué se rompe. Y si por el camino ven que esto es un framework aparte
+y no el lenguaje, díganlo: sigue siendo una respuesta válida y prefiero saberlo
+ahora.

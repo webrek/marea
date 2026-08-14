@@ -128,7 +128,7 @@ fn el_despacho_por_delegacion_funciona_en_los_dos_runtimes() {
         return;
     }
     let guion = r#"
-import { on, __podar } from "{RUNTIME}";
+import { on, __podar, __pintandoEn } from "{RUNTIME}";
 import { oyentes, preventDefault, elemento, disparar } from "./dom.mjs";
 
 const EVENTOS = ["click", "submit", "change", "input", "keydown", "keyup", "blur",
@@ -136,8 +136,11 @@ const EVENTOS = ["click", "submit", "change", "input", "keydown", "keyup", "blur
 
 const disparados = [];
 const atributos = {};
+// Los manejadores se registran DENTRO de una isla, que es como ocurre de verdad:
+// `montar` envuelve la evaluación de la vista para poder podar sólo lo suyo.
+const mios = new Set();
 for (const e of EVENTOS) {
-  const attr = on(e, () => disparados.push(e));
+  const attr = __pintandoEn(mios, () => on(e, () => disparados.push(e)));
   const m = /^data-marea-on-([a-z]+)="([^"]+)"$/.exec(attr);
   if (!m) throw new Error("atributo con forma inesperada: " + attr);
   if (m[1] !== e) throw new Error("el atributo no lleva su evento: " + attr);
@@ -160,7 +163,7 @@ const trasNoBurbujeo = disparados.length;
 disparar("click", elemento({ "data-marea-on-click": "h999" }, null));
 
 // Podar con un marcado que solo nombra el manejador del clic tira los demás.
-__podar(`<button data-marea-on-click="${atributos["data-marea-on-click"]}"></button>`);
+__podar(`<button data-marea-on-click="${atributos["data-marea-on-click"]}"></button>`, mios);
 disparar("change", boton);
 const trasPodar = disparados.length;
 disparar("click", boton);
@@ -323,5 +326,94 @@ console.log("RESULTADO:" + JSON.stringify({
     assert!(
         json.contains(r#""oyentesClick":1"#),
         "re-pintar no puede acumular oyentes: {json}"
+    );
+}
+
+/// Dos islas en la misma página, que es el caso que no se podía ni montar.
+///
+/// Marea dejó de ser siempre la app entera: un consumidor la mete como ISLA
+/// dentro de su app de Next —el filtro aquí, el buscador allá—. Antes había un
+/// solo punto de montaje (`#app`, por id) y la poda de manejadores era GLOBAL,
+/// así que re-pintar una isla borraba los manejadores de las otras. Y en
+/// silencio: los oyentes cuelgan del documento, así que el clic llegaba y no
+/// encontraba a nadie. Un botón que deja de responder sin ningún error.
+///
+/// Se comprueban las tres propiedades que hacen falta a la vez, porque cada una
+/// tapa un fallo distinto: la poda por isla, el desmontaje que suelta lo suyo, y
+/// la cancelación del efecto —sin ella, un componente que el anfitrión desmonta
+/// y vuelve a montar deja efectos pintando sobre un elemento que ya no está—.
+#[test]
+fn dos_islas_no_se_pisan_y_desmontar_de_verdad_desmonta() {
+    if !hay_node() {
+        eprintln!("sin node en el PATH: se omite");
+        return;
+    }
+    let guion = r##"
+const oyentes = {};
+const nodos = { "#a": { innerHTML: "" }, "#b": { innerHTML: "" } };
+globalThis.document = {
+  addEventListener: (ev, fn) => { (oyentes[ev] ||= []).push(fn); },
+  querySelector: (sel) => nodos[sel],
+  getElementById: () => null,
+};
+const { montar, __signal, on } = await import("./browser.js");
+
+const a = __signal(0), b = __signal(0);
+const iA = montar("#a", () => `<button ${on("click", () => a.set(a.get() + 1))}>A</button>${a.get()}`);
+montar("#b", () => `<button ${on("click", () => b.set(b.get() + 1))}>B</button>${b.get()}`);
+
+const clic = (sel) => {
+  const m = /data-marea-on-click="([^"]*)"/.exec(nodos[sel].innerHTML);
+  const target = { getAttribute: (k) => (k === "data-marea-on-click" ? m[1] : null), parentNode: null };
+  for (const fn of oyentes.click) fn({ target });
+};
+const t = () => new Promise((r) => setTimeout(r, 5));
+await t();
+clic("#a"); await t();          // re-pinta A, que antes borraba los manejadores de B
+clic("#b"); await t();
+const traspoda = { a: a.get(), b: b.get() };
+iA.desmontar(); await t();
+clic("#b"); await t();          // B sigue vivo tras desmontar A
+const trasDesmontar = { b: b.get(), a_html: nodos["#a"].innerHTML };
+a.set(99); await t();           // y el efecto de A ya no reacciona
+console.log("RESULTADO:" + JSON.stringify({
+  traspoda, trasDesmontar, a_html_final: nodos["#a"].innerHTML,
+}));
+"##;
+    let dir = std::env::temp_dir().join("marea-islas");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("browser.js"), marea_codegen::browser_rt()).unwrap();
+    std::fs::write(dir.join("t.mjs"), guion).unwrap();
+    let salida = Command::new("node")
+        .arg("t.mjs")
+        .current_dir(&dir)
+        .output()
+        .expect("no se pudo lanzar node");
+    let texto = format!(
+        "{}{}",
+        String::from_utf8_lossy(&salida.stdout),
+        String::from_utf8_lossy(&salida.stderr)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    let json = texto
+        .lines()
+        .find_map(|l| l.strip_prefix("RESULTADO:"))
+        .unwrap_or_else(|| panic!("el guion falló:\n{texto}"));
+
+    // Los dos a 1: re-pintar A no se llevó el manejador de B.
+    assert!(
+        json.contains(r#""traspoda":{"a":1,"b":1}"#),
+        "la poda no es por isla:\n{json}"
+    );
+    // B sigue respondiendo tras desmontar A, y el hueco de A queda vacío.
+    assert!(
+        json.contains(r#""b":2"#) && json.contains(r#""a_html":""#),
+        "desmontar A afectó a B, o no limpió su elemento:\n{json}"
+    );
+    // Y el efecto de A está cancelado: cambiar su signal ya no pinta nada.
+    assert!(
+        json.contains(r#""a_html_final":""#),
+        "el efecto sigue vivo tras desmontar:\n{json}"
     );
 }
