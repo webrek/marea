@@ -121,7 +121,7 @@ impl Checker {
         let Expr::Ident { name, .. } = callee.as_ref() else {
             return None;
         };
-        if es_sincrono(name) {
+        if builtins::es_sincrono_local(name) {
             return None;
         }
         let sig = self.fns.get(name)?;
@@ -361,7 +361,7 @@ impl Checker {
         // del usuario se compila a `async`.
         if let Some(ctx) = self.init_context {
             let nombre = callee_name(callee);
-            if !crate::eventos::es_sincrono_con_eventos(&nombre) {
+            if !builtins::es_sincrono_local(&nombre) {
                 self.error(TypeError::new(
                     "E_BOUNDARY_IN_INIT",
                     format!(
@@ -802,15 +802,34 @@ impl Checker {
             provided.insert(fi.name.clone(), vty);
         }
 
-        // Campos faltantes.
+        // Campos faltantes. Un registro del usuario los quiere todos —no hay
+        // valores por defecto en el lenguaje—, pero uno builtin puede tener
+        // campos cuyo vacío significa algo: en `Pagina`, no tener descripción,
+        // metas, JSON-LD ni cuerpo es un estado legítimo. Los que quedan hay que
+        // escribirlos, y el error dice por qué.
         for (fname, _) in &record_fields {
-            if !provided.contains_key(fname) {
+            if provided.contains_key(fname) {
+                continue;
+            }
+            if builtins::campos_omitibles(name).contains(&fname.as_str()) {
+                continue;
+            }
+            if builtins::record_lookup(name).is_some() {
                 self.error(TypeError::new(
-                    "E_ARG_TYPE",
-                    format!("falta el campo '{fname}' en el literal de tipo '{name}'"),
+                    "E_CAMPO_OBLIGATORIO",
+                    format!(
+                        "falta el campo '{fname}' de '{name}': {}",
+                        builtins::porque_obligatorio(name, fname)
+                    ),
                     span,
                 ));
+                continue;
             }
+            self.error(TypeError::new(
+                "E_ARG_TYPE",
+                format!("falta el campo '{fname}' en el literal de tipo '{name}'"),
+                span,
+            ));
         }
 
         Ty::Named(name.to_string())

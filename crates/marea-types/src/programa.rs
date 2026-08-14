@@ -62,6 +62,7 @@ pub fn check_program_with_boundaries(
     comprobar_almacenes_del_programa(program, &mut errores);
     comprobar_tablas_del_programa(program, &mut errores);
     comprobar_nombres_unicos(program, &mut errores);
+    comprobar_rutas_del_programa(program, &mut errores);
 
     for m in &program.modulos {
         let deps = deps_por_ruta(program, m);
@@ -79,6 +80,7 @@ pub fn check_program_with_boundaries(
         inyectar(&mut ch, m, &deps, &exportado, &mut errores, Fase::Valores);
 
         ch.check_politicas(&m.modulo);
+        ch.check_paginas(&m.modulo);
         ch.check_bodies(&m.modulo);
 
         for e in ch.errors.drain(..) {
@@ -372,6 +374,46 @@ fn comprobar_tablas_del_programa(program: &Program, errores: &mut Vec<ProgramTyp
                         destino,
                         (name.clone(), m.nombre.clone(), tabla_externa.is_some()),
                     );
+                }
+            }
+        }
+    }
+}
+
+/// Dos páginas no pueden servir la misma ruta, aunque vivan en archivos
+/// distintos.
+///
+/// Es lo análogo a `comprobar_almacenes_del_programa`, y por el mismo motivo: la
+/// tabla de rutas es UNA, del programa entero, así que dos `@page("/precios")`
+/// en dos módulos son dos respuestas para la misma URL y el despachador se
+/// queda con la que llegue primero —en silencio, y la que llegue primero depende
+/// del orden en que se recorra el grafo—. Dentro de un módulo ya lo dice
+/// `check_paginas`; esto lo extiende al programa, que es donde deja de verse:
+/// los dos archivos no se abren nunca a la vez.
+fn comprobar_rutas_del_programa(program: &Program, errores: &mut Vec<ProgramTypeError>) {
+    // Ruta canónica -> (ruta escrita, módulo, id del módulo).
+    let mut visto: HashMap<String, (String, String, usize)> = HashMap::new();
+    for m in &program.modulos {
+        for item in &m.modulo.items {
+            let Item::Fn(f) = item else { continue };
+            let Some(ruta) = &f.ruta else { continue };
+            let canon = crate::paginas::canonica(ruta);
+            match visto.get(&canon) {
+                // El choque dentro de un mismo módulo ya lo reportó
+                // `check_paginas`, con el mismo mensaje: repetirlo aquí sólo
+                // haría salir dos veces el mismo error.
+                Some((_, _, id)) if *id == m.id => {}
+                Some((previa, donde, _)) => errores.push(ProgramTypeError {
+                    modulo: m.id,
+                    error: crate::paginas::ruta_duplicada(
+                        ruta,
+                        previa,
+                        &format!("'{donde}'"),
+                        f.ruta_span.unwrap_or(f.span),
+                    ),
+                }),
+                None => {
+                    visto.insert(canon, (ruta.clone(), m.nombre.clone(), m.id));
                 }
             }
         }

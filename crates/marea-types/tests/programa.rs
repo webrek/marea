@@ -361,6 +361,57 @@ fn dos_modulos_no_pueden_declarar_el_mismo_nombre() {
     );
 }
 
+/// La tabla de rutas es UNA, del programa entero: dos páginas en la misma ruta
+/// son dos respuestas para la misma URL y el despachador se queda con la que
+/// llegue primero, en silencio. Dentro de un módulo salta a la vista; repartidas
+/// en dos archivos que nadie abre a la vez, no.
+#[test]
+fn dos_paginas_no_pueden_servir_la_misma_ruta() {
+    let errs = check_modulos(
+        "ruta-doble",
+        &[
+            (
+                "a.mar",
+                "import { precios } from \"./b.mar\";\n\
+                 @page(\"/precios\")\n\
+                 fn portada() -> Pagina { return Pagina { titulo: \"a\", canonica: \"c\" }; }\n",
+            ),
+            (
+                "b.mar",
+                "@page(\"/precios\")\n\
+                 fn precios() -> Pagina { return Pagina { titulo: \"b\", canonica: \"c\" }; }\n",
+            ),
+        ],
+    );
+    // Una sola vez: el choque es uno, aunque lo miren dos comprobaciones —la del
+    // módulo y la del programa—, y decirlo dos veces sólo sería ruido.
+    assert_eq!(codigos(&errs), vec!["E_RUTA_DUPLICADA"]);
+}
+
+/// Rutas distintas en módulos distintos son lo normal: un sitio se reparte en
+/// archivos. Sin esto, la comprobación de arriba podría estar prohibiendo el
+/// caso bueno y el test no lo notaría.
+#[test]
+fn dos_paginas_en_rutas_distintas_conviven() {
+    let errs = check_modulos(
+        "rutas-distintas",
+        &[
+            (
+                "a.mar",
+                "import { precios } from \"./b.mar\";\n\
+                 @page(\"/\")\n\
+                 fn portada() -> Pagina { return Pagina { titulo: \"a\", canonica: \"c\" }; }\n",
+            ),
+            (
+                "b.mar",
+                "@page(\"/precios\")\n\
+                 fn precios() -> Pagina { return Pagina { titulo: \"b\", canonica: \"c\" }; }\n",
+            ),
+        ],
+    );
+    assert!(errs.is_empty(), "{:?}", codigos(&errs));
+}
+
 /// Importar un nombre no es declararlo: reutilizarlo no puede contar como
 /// duplicado, o `import` sería inservible.
 #[test]

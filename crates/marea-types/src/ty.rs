@@ -20,6 +20,18 @@ pub enum Ty {
     /// `escapar(...)`, por `html("...")` (confianza explícita) o desde un
     /// literal del propio fuente, que es de confianza por construcción.
     Html,
+    /// Un fragmento de JSON ya construido, para el `<script
+    /// type="application/ld+json">` de una página. NO es `Html` con otro nombre,
+    /// y la diferencia es de corrección: `Html` escapa `&` a `&amp;`, y dentro
+    /// de un bloque de JSON-LD eso corrompe el JSON —el `&` de un nombre de
+    /// producto deja de leerse—. Su única puerta es `json("...")`, confianza
+    /// explícita como la de `html(...)`.
+    Json,
+    /// Lo que sirve una ruta que no es HTML: `sitemap.xml`, `robots.txt`. Es
+    /// opaco a propósito —no tiene campos ni operaciones— y sólo se construye
+    /// con `textoPlano(...)` o `documentoXml(...)`, que es donde se decide el
+    /// tipo de contenido.
+    Respuesta,
     /// Un almacén declarado con `store nombre: T;`. Lleva su nombre (para los
     /// mensajes) y el tipo de sus elementos.
     Store(String, Box<Ty>),
@@ -57,6 +69,8 @@ impl Ty {
             Ty::String => "String".to_string(),
             Ty::Unit => "Unit".to_string(),
             Ty::Html => "Html".to_string(),
+            Ty::Json => "Json".to_string(),
+            Ty::Respuesta => "Respuesta".to_string(),
             Ty::Store(n, e) => format!("store {n}: {}", e.display()),
             Ty::Named(n) => n.clone(),
             Ty::Union(vs) => vs.join(" | "),

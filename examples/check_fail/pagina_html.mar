@@ -1,0 +1,23 @@
+// DEBE FALLAR: E_PAGINA_RETORNO
+//
+// La confusión que esta regla existe para atajar: devolver el CUERPO creyendo
+// que es la página. `Html` es marcado seguro y nada más —no lleva título, ni
+// canónica, ni metadatos—, y eso es justo lo que un buscador lee. Una página que
+// sólo sabe devolver `Html` no puede decir cómo se indexa, así que el tipo lo
+// impide y el error explica cómo envolverlo.
+//
+// Lo correcto sería:
+//
+//   @page("/precios")
+//   fn precios() -> Pagina {
+//       return Pagina {
+//           titulo: "Precios",
+//           canonica: "https://ahorrame.mx/precios",
+//           cuerpo: `<h1>Precios</h1>`,
+//       };
+//   }
+
+@page("/precios")
+fn precios() -> Html {
+    return `<h1>Precios</h1>`;
+}

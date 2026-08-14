@@ -343,7 +343,7 @@ impl Checker {
                     FnSig {
                         params,
                         ret,
-                        location: f.location,
+                        location: ubicacion_efectiva(f),
                         ret_nombres,
                     },
                 );

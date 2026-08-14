@@ -59,16 +59,6 @@ pub(crate) fn es_llamada_a_on(e: &Expr) -> bool {
     }
 }
 
-/// `on` es SÍNCRONO: registra un cierre y devuelve texto, sin tocar ni la red ni
-/// el disco. La lista canónica de builtins síncronos vive en
-/// `marea_syntax::builtins::SINCRONOS`, que es de la otra mitad del reparto, así
-/// que hasta que `on` entre ahí la excepción vive aquí —y otra igual en el
-/// emisor—. Cuando se pueda tocar ese crate, esto se borra y `on` se añade a la
-/// lista, que es donde le toca.
-pub(crate) fn es_sincrono_con_eventos(name: &str) -> bool {
-    es_sincrono(name) || name == ON
-}
-
 impl Checker {
     /// Chequea `on(evento, manejador)`.
     ///
