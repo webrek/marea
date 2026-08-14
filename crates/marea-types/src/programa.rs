@@ -37,6 +37,11 @@ struct Exportaciones {
     fns: HashMap<String, FnSig>,
     aliases: HashMap<String, Type>,
     stores: HashMap<String, Ty>,
+    /// Qué almacenes de los exportados son PRESTADOS, y de qué tabla. Viaja con
+    /// el almacén porque la regla viaja con él: importar `productos` no lo
+    /// convierte en tuyo, y `save(productos, p)` en el módulo de al lado sigue
+    /// siendo escribir en la tabla de otro.
+    prestados: HashMap<String, String>,
     globals: HashMap<String, (Ty, bool)>,
 }
 
@@ -55,6 +60,7 @@ pub fn check_program_with_boundaries(
 
     let sesion = resolver_sesion(program, &mut errores);
     comprobar_almacenes_del_programa(program, &mut errores);
+    comprobar_tablas_del_programa(program, &mut errores);
     comprobar_nombres_unicos(program, &mut errores);
 
     for m in &program.modulos {
@@ -91,6 +97,7 @@ pub fn check_program_with_boundaries(
                 fns: ch.fns,
                 aliases: ch.aliases,
                 stores: ch.stores,
+                prestados: ch.stores_prestados,
                 globals: ch.globals,
             },
         );
@@ -136,7 +143,8 @@ fn inyectar(
     // Se acumula antes de insertar para no tener `ch` prestado dos veces.
     let mut tipos: Vec<(String, Type, Span)> = Vec::new();
     let mut fns: Vec<(String, FnSig, Span)> = Vec::new();
-    let mut stores: Vec<(String, Ty, Span)> = Vec::new();
+    // El almacén viaja con su marca de prestado: es parte de lo que promete.
+    let mut stores: Vec<(String, Ty, Option<String>, Span)> = Vec::new();
     let mut globals: Vec<(String, (Ty, bool), Span)> = Vec::new();
 
     for imp in &m.modulo.imports {
@@ -155,7 +163,12 @@ fn inyectar(
                         fns.push((n.name.clone(), sig.clone(), n.span));
                     }
                     if let Some(t) = dep.stores.get(&n.name) {
-                        stores.push((n.name.clone(), t.clone(), n.span));
+                        stores.push((
+                            n.name.clone(),
+                            t.clone(),
+                            dep.prestados.get(&n.name).cloned(),
+                            n.span,
+                        ));
                     }
                     if let Some(g) = dep.globals.get(&n.name) {
                         globals.push((n.name.clone(), g.clone(), n.span));
@@ -179,10 +192,13 @@ fn inyectar(
         }
         ch.fns.insert(nombre, sig);
     }
-    for (nombre, t, span) in stores {
+    for (nombre, t, prestado, span) in stores {
         if ch.stores.contains_key(&nombre) {
             errores.push(colision(m.id, &nombre, span));
             continue;
+        }
+        if let Some(tabla) = prestado {
+            ch.stores_prestados.insert(nombre.clone(), tabla);
         }
         ch.stores.insert(nombre, t);
     }
@@ -287,6 +303,75 @@ fn comprobar_almacenes_del_programa(program: &Program, errores: &mut Vec<Program
                 }),
                 None => {
                     visto.insert(name.clone(), m.nombre.clone());
+                }
+            }
+        }
+    }
+}
+
+/// Dos almacenes no pueden apuntar a la misma TABLA, aunque se llamen distinto
+/// y vivan en archivos distintos.
+///
+/// `comprobar_almacenes_del_programa` mira los nombres, que es lo que decide la
+/// tabla de un almacén PROPIO. Con `from "products"` el nombre deja de decirlo:
+/// dos almacenes con nombres perfectamente distintos —y hasta con tipos
+/// distintos— pueden estar mirando la misma tabla ajena. Serían dos vistas del
+/// mismo sitio, y el día que una de las dos se quede atrás respecto al esquema
+/// real nadie lo vería, porque nada compara los dos tipos entre sí.
+///
+/// Dentro de un módulo ya lo cubre `E_TABLA_EXTERNA_DUPLICADA` en la Fase A;
+/// esto lo extiende al programa, que es justo donde deja de ser evidente: los
+/// dos `store` están en archivos que nadie abre a la vez.
+fn comprobar_tablas_del_programa(program: &Program, errores: &mut Vec<ProgramTypeError>) {
+    // tabla normalizada -> (almacén, módulo, ¿prestado?).
+    let mut visto: HashMap<String, (String, String, bool)> = HashMap::new();
+    for m in &program.modulos {
+        for item in &m.modulo.items {
+            let Item::Store {
+                name,
+                name_span,
+                tabla_externa,
+                tabla_span,
+                ..
+            } = item
+            else {
+                continue;
+            };
+            // La tabla de un almacén propio se deriva del nombre en minúsculas;
+            // la de uno prestado la escribió el programador.
+            let destino = match tabla_externa {
+                Some(t) => t.trim().to_lowercase(),
+                None => name.to_lowercase(),
+            };
+            if destino.is_empty() {
+                continue;
+            }
+            match visto.get(&destino) {
+                // Dos almacenes PROPIOS que chocan es el mismo nombre, y eso ya
+                // lo dice `comprobar_almacenes_del_programa` con un mensaje que
+                // habla de nombres; aquí sólo hablamos de tablas prestadas.
+                Some((previo, donde, previo_prestado))
+                    if *previo_prestado || tabla_externa.is_some() =>
+                {
+                    errores.push(ProgramTypeError {
+                        modulo: m.id,
+                        error: TypeError::new(
+                            "E_TABLA_EXTERNA_DUPLICADA",
+                            format!(
+                                "'{name}' apunta a la tabla '{destino}', que ya mapea '{previo}' \
+                                 en '{donde}': serían dos vistas del mismo sitio con dos tipos, y \
+                                 la deriva entre ellas no la vería nadie. Declara el almacén en \
+                                 un solo módulo e impórtalo"
+                            ),
+                            tabla_span.unwrap_or(*name_span),
+                        ),
+                    });
+                }
+                _ => {
+                    visto.insert(
+                        destino,
+                        (name.clone(), m.nombre.clone(), tabla_externa.is_some()),
+                    );
                 }
             }
         }

@@ -5,6 +5,18 @@
 
 use super::*;
 
+/// Un `store` visto en Fase A, a la espera de que los alias estén registrados
+/// para poder resolver su tipo.
+struct StoreDecl<'a> {
+    nombre: String,
+    /// El del NOMBRE: es lo que se subraya en los errores del almacén.
+    span: Span,
+    ty: &'a Type,
+    /// `Some(tabla)` si se escribió `from "tabla"`: el almacén es prestado.
+    tabla: Option<&'a str>,
+    tabla_span: Option<Span>,
+}
+
 impl Checker {
     /// Registra las variables de nivel superior (`let`/`reactive` de módulo) como
     /// globales, tipándolas por su anotación o por su inicializador. Corre tras
@@ -88,8 +100,8 @@ impl Checker {
         // Spans de la primera declaración de cada nombre, para notas de duplicado.
         let mut fn_spans: HashMap<String, Span> = HashMap::new();
         let mut type_spans: HashMap<String, Span> = HashMap::new();
-        // Tipo sintáctico del `store T;` (se resuelve tras registrar los alias).
-        let mut store_decls: Vec<(String, Span, &Type)> = Vec::new();
+        // Los `store` vistos (se resuelven tras registrar los alias).
+        let mut store_decls: Vec<StoreDecl> = Vec::new();
 
         for item in &module.items {
             match item {
@@ -137,17 +149,24 @@ impl Checker {
                     name,
                     name_span,
                     ty,
+                    tabla_externa,
+                    tabla_span,
                     span,
-                    ..
                 } => {
-                    if store_decls.iter().any(|(n, _, _)| n == name) {
+                    if store_decls.iter().any(|d| &d.nombre == name) {
                         self.error(TypeError::new(
                             "E_DUPLICATE_STORE",
                             format!("el almacén '{name}' ya fue declarado"),
                             *span,
                         ));
                     } else {
-                        store_decls.push((name.clone(), *name_span, ty));
+                        store_decls.push(StoreDecl {
+                            nombre: name.clone(),
+                            span: *name_span,
+                            ty,
+                            tabla: tabla_externa.as_deref(),
+                            tabla_span: *tabla_span,
+                        });
                     }
                 }
             }
@@ -160,7 +179,20 @@ impl Checker {
 
         // Resuelve los tipos de los almacenes ahora que los alias ya están
         // registrados.
-        for (nombre, span, ty) in store_decls {
+        //
+        // `tablas` lleva a qué tabla va a parar cada almacén —la prestada, o la
+        // que Marea deriva del nombre para uno propio— para que dos no acaben en
+        // el mismo sitio. Guarda además si era prestado: dos propios que chocan
+        // ya lo dicen mejor los duplicados de nombre.
+        let mut tablas: HashMap<String, (String, bool)> = HashMap::new();
+        for StoreDecl {
+            nombre,
+            span,
+            ty,
+            tabla,
+            tabla_span,
+        } in store_decls
+        {
             self.validate_type_exists(ty);
             let elem = self.ty_from_syntax(ty);
             if builtins::lookup(&nombre).is_some() || es_interno_del_runtime(&nombre) {
@@ -213,6 +245,69 @@ impl Checker {
                     format!("'{nombre}' ya está declarada como función"),
                     span,
                 ));
+            }
+            // `store p: T from "tabla";` — el almacén es PRESTADO: la tabla ya
+            // existe y la escribe otro. Marea deja de mandar en su esquema, así
+            // que se le exige más al fuente que a un almacén propio.
+            if let Some(tabla) = tabla {
+                let sp = tabla_span.unwrap_or(span);
+                let limpia = tabla.trim();
+                if limpia.is_empty() {
+                    self.error(TypeError::new(
+                        "E_TABLA_EXTERNA_VACIA",
+                        format!(
+                            "'{nombre}' toma prestada una tabla sin nombre; escribe el nombre \
+                             exacto de la tabla ajena, como en 'store {nombre}: T from \
+                             \"products\";'"
+                        ),
+                        sp,
+                    ));
+                }
+                // Una tabla ajena tiene COLUMNAS, y el tipo es lo único que dice
+                // a qué campo va cada una. Un almacén propio sí admite un escalar
+                // —Marea manda en el esquema y lo guarda en una columna suya—;
+                // prestado no hay dónde meterlo ni de dónde sacarlo.
+                if !matches!(elem, Ty::Record(_) | Ty::Named(_) | Ty::Unknown) {
+                    self.error(TypeError::new(
+                        "E_STORE_PRESTADO_NO_REGISTRO",
+                        format!(
+                            "'{nombre}' toma prestada la tabla '{limpia}' pero su tipo es '{}', \
+                             que no tiene campos: una tabla ajena tiene columnas y hace falta \
+                             decir a qué campo va cada una",
+                            elem.display()
+                        ),
+                        span,
+                    ));
+                }
+                self.stores_prestados
+                    .insert(nombre.clone(), limpia.to_string());
+            }
+            // El nombre de la tabla se compara en minúsculas porque en minúsculas
+            // se deriva la de un almacén propio, y porque la mayoría de motores
+            // no distingue caja en los identificadores sin comillas.
+            let destino = match tabla {
+                Some(t) => t.trim().to_lowercase(),
+                None => nombre.to_lowercase(),
+            };
+            if !destino.is_empty() {
+                match tablas.get(&destino) {
+                    // Dos vistas del mismo sitio con dos tipos: la deriva entre
+                    // ellos no se vería, porque nadie los compara nunca.
+                    Some((previo, previo_prestado)) if *previo_prestado || tabla.is_some() => {
+                        self.error(TypeError::new(
+                            "E_TABLA_EXTERNA_DUPLICADA",
+                            format!(
+                                "'{nombre}' y '{previo}' apuntan a la misma tabla '{destino}': \
+                                 serían dos vistas del mismo sitio con dos tipos, y la deriva \
+                                 entre ellas no la vería nadie. Deja un solo almacén por tabla"
+                            ),
+                            tabla_span.unwrap_or(span),
+                        ));
+                    }
+                    _ => {
+                        tablas.insert(destino, (nombre.clone(), tabla.is_some()));
+                    }
+                }
             }
             self.stores.insert(nombre, elem);
         }
