@@ -81,23 +81,16 @@ fn main() -> ExitCode {
         // todos los módulos y APLANARLOS. La salida de Marea es un bundle plano,
         // así que emitir módulo a módulo daría una copia del runtime por archivo
         // y ninguna forma de que una función llame a otra.
-        "build" if tiene_imports(&src) => {
-            let out_dir = out_arg.unwrap_or("marea-out");
-            match frontend_programa(path, no_check) {
-                Ok(module) => build(&module, out_dir),
-                Err(code) => code,
-            }
-        }
         "build" => {
             let out_dir = out_arg.unwrap_or("marea-out");
-            match frontend(&src, no_check) {
+            match front(path, &src, no_check) {
                 Ok(module) => build(&module, out_dir),
                 Err(code) => code,
             }
         }
         "build-wasm" => {
             let out = out_arg.unwrap_or("module.wat");
-            match frontend(&src, no_check) {
+            match front(path, &src, no_check) {
                 Ok(module) => match marea_wasm::emit_wat(&module) {
                     Ok(wat) => match std::fs::write(out, wat) {
                         Ok(()) => {
@@ -123,21 +116,14 @@ fn main() -> ExitCode {
         }
         "build-web" => {
             let out_dir = out_arg.unwrap_or("marea-web");
-            match frontend(&src, no_check) {
+            match front(path, &src, no_check) {
                 Ok(module) => build_web(&module, out_dir),
-                Err(code) => code,
-            }
-        }
-        "build-app" if tiene_imports(&src) => {
-            let out_dir = out_arg.unwrap_or("marea-app");
-            match frontend_programa(path, no_check) {
-                Ok(module) => build_app(&module, out_dir),
                 Err(code) => code,
             }
         }
         "build-app" => {
             let out_dir = out_arg.unwrap_or("marea-app");
-            match frontend(&src, no_check) {
+            match front(path, &src, no_check) {
                 Ok(module) => build_app(&module, out_dir),
                 Err(code) => code,
             }
@@ -147,6 +133,21 @@ fn main() -> ExitCode {
             print_usage();
             ExitCode::FAILURE
         }
+    }
+}
+
+/// El front-end que le toca a este archivo: si declara `import`, hay que
+/// resolver el grafo y aplanarlo; si no, basta con parsearlo.
+///
+/// Existe para que no haya que acordarse comando por comando. Cuando el grafo se
+/// cableó, `check`, `build` y `build-app` lo aprendieron y `build-web` y
+/// `build-wasm` no, así que el mismo archivo compilaba en uno y fallaba en otro
+/// con "'pesos' no está definido".
+fn front(path: &str, src: &str, no_check: bool) -> Result<marea_syntax::Module, ExitCode> {
+    if tiene_imports(src) {
+        frontend_programa(path, no_check)
+    } else {
+        frontend(src, no_check)
     }
 }
 

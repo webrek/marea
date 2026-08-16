@@ -1088,3 +1088,45 @@ fn el_nucleo_llega_como_js_al_navegador_y_como_ts_a_node() {
         p.runtime
     );
 }
+
+/// Una constante de módulo en MAYÚSCULAS no es una variante.
+///
+/// El codegen decidía qué era una variante nominal por una heurística —empieza
+/// por mayúscula— y se equivocaba con cualquier constante escrita así:
+/// `let PASO = 50000;` se DECLARABA bien y luego, al usarla, se emitía
+/// `{ $tag: "PASO" }`. No reventaba, que es lo peor: sumaba un objeto a un
+/// número y seguía, así que un precio acababa en NaN sin un solo error. Lo
+/// encontró un consumidor al escribir un filtro.
+///
+/// Ahora se calcula qué nombres SON variantes leyendo las uniones del módulo, y
+/// deja de ser una adivinanza.
+#[test]
+fn una_constante_en_mayusculas_no_es_una_variante() {
+    let p = build("let PASO = 50000;\n@client fn suma(x: Int) -> Int { return x + PASO; }");
+    assert!(
+        p.client.contains("(x + PASO)"),
+        "la constante se emitió como variante:\n{}",
+        p.client
+    );
+    assert!(
+        !p.client.contains(r#"$tag: "PASO""#),
+        "quedó como variante:\n{}",
+        p.client
+    );
+}
+
+/// Y las variantes DE VERDAD se siguen emitiendo etiquetadas: el arreglo no
+/// puede llevarse por delante la representación que hace infalsificable una
+/// variante (el campo `$tag`, que el lexer impide escribir a mano).
+#[test]
+fn una_variante_de_una_union_si_lleva_etiqueta() {
+    let p = build(
+        "type U = { n: Int };\n\
+         @server fn dame(i: Int) -> U | NotFound { return NotFound; }",
+    );
+    assert!(
+        p.server.contains(r#"{ $tag: "NotFound" }"#),
+        "la variante perdió su etiqueta:\n{}",
+        p.server
+    );
+}

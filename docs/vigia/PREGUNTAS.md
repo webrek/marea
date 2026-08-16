@@ -736,3 +736,143 @@ Cuando tengan algo, aunque sea sólo el enrutado sin metadatos, lo estreno igual
 les reporto qué se rompe. Y si por el camino ven que esto es un framework aparte
 y no el lenguaje, díganlo: sigue siendo una respuesta válida y prefiero saberlo
 ahora.
+
+---
+
+## P12 — Estrenadas las islas. Un bug serio, dos comandos desalineados y una pregunta de diseño
+
+Fecha: 2026-08-16
+
+Fui a montar la primera isla de verdad: el filtro de precio de la página de
+categoría, que lleva desde el principio siendo una foto. Va lo que salió, en
+orden de gravedad.
+
+### 🐛 1. Una constante de módulo se compila como VARIANTE
+
+Cuatro líneas:
+
+```marea
+let PASO = 50000;
+
+@client
+fn suma(x: Int) -> Int {
+    return x + PASO;
+}
+```
+
+`marea check` dice que tipa. Y el `client.ts` sale así:
+
+```ts
+const PASO = 50000;              // la constante se emite BIEN
+return (x + { $tag: "PASO" });   // pero al usarla, se vuelve una variante
+```
+
+La declaración es correcta; **la referencia dentro de la función es la que se
+convierte en `{ $tag: "PASO" }`**. Supongo que al resolver el nombre gana la rama
+de "variante nominal" (la de `NotFound`) sobre la del `let` de módulo.
+
+En ejecución no explota: suma un objeto a un número y sigue. Mi filtro habría
+movido el precio a `NaN` o a `"[object Object]"` sin un solo error, que es
+exactamente la clase de fallo que este montaje sirve para encontrar. Lo he
+esquivado poniendo el número a mano.
+
+### 🐛 2. `build-web` no resuelve los `import` (check y build sí)
+
+```
+error[E_UNRESOLVED_NAME]: 'pesos' no está definido
+```
+
+Con `import { pesos } from "./numeros.mar";` en la cabecera. `marea check` y
+`marea build` lo resuelven desde R5; `build-web` se quedó atrás. Es el mismo
+fallo que ya arreglaron una vez, en otro comando: el grafo se resuelve en unos
+puntos de entrada y en otros no.
+
+(Para el filtro acabé copiando cuatro funciones de `numeros.mar` a mano, con un
+comentario que dice que se borran cuando esto se arregle.)
+
+### 3. `montar` no está donde dice R12, y mis funciones no se exportan
+
+R12 documenta:
+
+```js
+import { montar, filtroPrecio } from "./client.js";
+```
+
+Lo que encuentro:
+
+- `marea build` → `runtime.ts` **sin `montar`** (sí trae sus tripas: `__islaActual`,
+  la poda por isla).
+- `marea build-web` → WebAssembly; ni siquiera admite plantillas.
+- `marea build-app` → `client.js` **con `montar`**, pero mis funciones **no se
+  exportan**: acaban en `globalThis.marea = { …, filtroPrecio }`.
+
+O sea que el ejemplo de R12 no compila hoy: `montar` sí se puede importar,
+`filtroPrecio` no.
+
+Entiendo por qué: `build-app` produce una app suelta, y ahí `globalThis` basta.
+Lo que necesito para una isla es lo otro: **un módulo ESM con las funciones
+`@client` exportadas**, para importarlo desde un componente de React y llamar
+`montar(elemento, filtroPrecio)`. Si el camino correcto es otro comando o una
+bandera, díganmelo y lo uso; si no existe, esto es lo que falta para que las
+islas se puedan estrenar de verdad.
+
+### 4. Pregunta de diseño: el manejador no recibe nada
+
+`on` toma un cierre sin parámetros. Con eso **no se puede hacer un deslizador ni
+un campo de texto**: el manejador no ve el evento ni el elemento, así que no hay
+forma de leer el valor.
+
+Rehíce el filtro con lo que sí se puede —botones de ±$500 y un enlace que se
+reconstruye solo— y honestamente en un teléfono se acierta mejor que arrastrando
+un pulgar. Pero el sitio tiene un buscador y una casilla de correo para alertas,
+y esos no tienen salida: sin leer lo que el usuario escribe, no existen.
+
+No pido una API concreta. La pregunta es si el plan es pasar algo al cierre
+(el valor, el elemento, un objeto de evento acotado) o si hay otra idea para
+entradas de texto. Lo que decida eso me dice si el buscador y las alertas pueden
+ser de Marea o se quedan en React para siempre.
+
+### Y una nota buena
+
+El mensaje del verificador cuando una función lee estado reactivo sin ser
+`@client` es de los mejores que he visto: dice el nombre, por qué no existe en el
+servidor y las dos salidas (marcarla o pasarlo como argumento). Me arregló el
+error antes de que entendiera que lo tenía.
+
+---
+
+## P13 — Las islas funcionan en un anfitrión real. Ya hay una en Vigía
+
+Fecha: 2026-08-16
+
+Apéndice corto a P12, porque es la parte que les interesa y la enterré entre los
+bugs: **con el rodeo de `globalThis.marea`, las islas funcionan**. Ya hay una
+montada en Vigía.
+
+El filtro de precio, que llevaba desde el principio siendo una foto, ahora
+reacciona. Verificado ejecutando la lógica en Node con un DOM mínimo que captura
+los oyentes y dispara un clic como lo haría el navegador:
+
+```
+antes:    $3,000.00   href: /categoria/televisores
+después:  $3,500.00   href: /categoria/televisores?precio_min=350000&
+```
+
+Evento → estado reactivo → repintado → enlace nuevo. El ciclo entero, y el enlace
+conserva los demás filtros activos.
+
+Dos cosas que quiero que sepan porque validan decisiones suyas:
+
+- **El despacho por delegación se comporta.** Mi primera simulación falló porque
+  supuse que usaban `closest()`; suben por `parentNode` leyendo el atributo. Que
+  dispare **sólo el primero** que encuentran, y no los de todos los contenedores
+  de encima, es la decisión correcta y está comentada en el código.
+- **La mejora progresiva sale gratis** con este diseño: el servidor pinta la
+  versión estática con las mismas funciones de Marea y `montar` la sustituye si
+  hay JavaScript. Sin JS se queda la estática, que sigue enseñando el rango.
+
+Así que de P12, lo único que me bloquea de verdad es **el bug de la constante de
+módulo** (silencioso, y el peor de los tres) y **la pregunta del manejador sin
+parámetros**, que decide si el buscador y el formulario de alertas pueden ser
+alguna vez de Marea. Lo de exportar las `@client` como ESM es incomodidad, no
+bloqueo: `globalThis.marea` me sirve mientras tanto.

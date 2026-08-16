@@ -553,6 +553,7 @@ pub fn emit(module: &Module) -> Project {
     let runtime = runtime_de(module);
     let builtins = builtins_de(module);
     let tipos = emit_type_decls(module);
+    let variantes = variantes_de(module);
     let sesion = session_fn(module);
     let paginas = paginas(module);
 
@@ -568,8 +569,16 @@ pub fn emit(module: &Module) -> Project {
             sesion: sesion.as_deref(),
             builtins: &builtins,
             tipos: &tipos,
+            variantes: &variantes,
         }),
-        client: emit_client(&remote, &local, &plain_globals, &builtins, &tipos),
+        client: emit_client(
+            &remote,
+            &local,
+            &plain_globals,
+            &builtins,
+            &tipos,
+            &variantes,
+        ),
         demo: emit_demo(&local, es_puro(module)),
     }
 }
@@ -611,6 +620,7 @@ pub fn emit_app(module: &Module) -> AppProject {
     let sesion = session_fn(module);
     let builtins = builtins_de(module);
     let tipos = emit_type_decls(module);
+    let variantes = variantes_de(module);
     let paginas = paginas(module);
 
     AppProject {
@@ -625,6 +635,7 @@ pub fn emit_app(module: &Module) -> AppProject {
             sesion: sesion.as_deref(),
             builtins: &builtins,
             tipos: &tipos,
+            variantes: &variantes,
         }),
         serve,
         client_js: emit_client_js(
@@ -633,6 +644,7 @@ pub fn emit_app(module: &Module) -> AppProject {
             &top_reactives,
             &reactive_names,
             &plain_globals,
+            &variantes,
         ),
         index_html: APP_HTML.to_string(),
     }
@@ -646,6 +658,7 @@ fn emit_client_js(
     top_reactives: &[&LetStmt],
     reactive: &HashSet<String>,
     globals: &[&LetStmt],
+    variantes: &HashSet<String>,
 ) -> String {
     let mut s = String::new();
     s.push_str("// Generado por Marea — cliente de navegador (no editar).\n");
@@ -660,14 +673,14 @@ fn emit_client_js(
             s.push_str(&format!(
                 "const {} = {};\n",
                 l.name,
-                emit_expr(&l.value, &no_reactive)
+                emit_expr(&l.value, &no_reactive, variantes)
             ));
         }
     }
 
     // Estado reactivo de nivel superior: signal (mutable) o memo (derivado).
     for l in top_reactives {
-        let init = emit_expr(&l.value, reactive);
+        let init = emit_expr(&l.value, reactive, variantes);
         if l.mutable {
             s.push_str(&format!("const {} = __signal({init});\n", l.name));
         } else {
@@ -689,7 +702,7 @@ fn emit_client_js(
     }
     // Funciones @client y locales, como JS sin anotaciones de tipo.
     for f in local {
-        s.push_str(&emit_fn_def_js(f, reactive));
+        s.push_str(&emit_fn_def_js(f, reactive, variantes));
     }
 
     // Arranque: expone las funciones en window.marea (para onclick), corre main()
@@ -714,9 +727,9 @@ fn emit_client_js(
 
 /// Una función @client/local como JS de navegador: sin tipos, parámetros por
 /// nombre, cuerpo idéntico al del transpilador (que ya no emite tipos).
-fn emit_fn_def_js(f: &FnDecl, reactive: &HashSet<String>) -> String {
+fn emit_fn_def_js(f: &FnDecl, reactive: &HashSet<String>, variantes: &HashSet<String>) -> String {
     let params: Vec<String> = f.params.iter().map(|p| p.name.clone()).collect();
-    let body = emit_block_inner(&f.body, 1, reactive);
+    let body = emit_block_inner(&f.body, 1, reactive, variantes);
     format!(
         "async function {}({}) {{\n{}\n}}\n",
         f.name,
@@ -1085,6 +1098,8 @@ struct Servidor<'a> {
     builtins: &'a str,
     /// Las declaraciones `export type` del módulo y sus nombres.
     tipos: &'a Tipos,
+    /// Los nombres que SON variantes nominales en este módulo.
+    variantes: &'a HashSet<String>,
     /// Las `@page` del módulo, ya ordenadas de más específica a más general.
     /// Están además en `shared`: la tabla las REGISTRA, no las define.
     paginas: &'a [&'a FnDecl],
@@ -1101,6 +1116,7 @@ fn emit_server(s_: &Servidor) -> String {
         builtins,
         tipos,
         paginas,
+        variantes,
     } = *s_;
     let mut s = String::new();
     s.push_str("// Generado por Marea — lado servidor.\n");
@@ -1122,18 +1138,18 @@ fn emit_server(s_: &Servidor) -> String {
         s.push_str(&format!(
             "const {} = {};\n",
             l.name,
-            emit_expr(&l.value, &no_reactive)
+            emit_expr(&l.value, &no_reactive, variantes)
         ));
     }
     if !globals.is_empty() {
         s.push('\n');
     }
     for f in shared {
-        s.push_str(&emit_fn_def(f, false, &tipos.nombres));
+        s.push_str(&emit_fn_def(f, false, &tipos.nombres, variantes));
         s.push('\n');
     }
     for f in remote {
-        s.push_str(&emit_fn_def(f, false, &tipos.nombres));
+        s.push_str(&emit_fn_def(f, false, &tipos.nombres, variantes));
         s.push('\n');
         // El transporte ya garantiza que 'args' es un arreglo; aquí exigimos la
         // aridad exacta para que un argumento faltante no se cuele como undefined.
@@ -1211,6 +1227,7 @@ fn emit_client(
     globals: &[&LetStmt],
     builtins: &str,
     tipos: &Tipos,
+    variantes: &HashSet<String>,
 ) -> String {
     let mut s = String::new();
     s.push_str("// Generado por Marea — lado cliente.\n");
@@ -1221,7 +1238,7 @@ fn emit_client(
         s.push_str(&format!(
             "const {} = {};\n",
             l.name,
-            emit_expr(&l.value, &no_reactive)
+            emit_expr(&l.value, &no_reactive, variantes)
         ));
     }
     if !globals.is_empty() {
@@ -1232,7 +1249,7 @@ fn emit_client(
         s.push('\n');
     }
     for f in local {
-        s.push_str(&emit_fn_def(f, true, &tipos.nombres));
+        s.push_str(&emit_fn_def(f, true, &tipos.nombres, variantes));
         s.push('\n');
     }
     s
@@ -1314,7 +1331,12 @@ fn ts_return_type(f: &FnDecl, declarados: &HashSet<String>) -> Option<String> {
     }
 }
 
-fn emit_fn_def(f: &FnDecl, export: bool, declarados: &HashSet<String>) -> String {
+fn emit_fn_def(
+    f: &FnDecl,
+    export: bool,
+    declarados: &HashSet<String>,
+    variantes: &HashSet<String>,
+) -> String {
     let params = ts_params_handler(f);
     let kw = if export {
         "export async function"
@@ -1323,7 +1345,7 @@ fn emit_fn_def(f: &FnDecl, export: bool, declarados: &HashSet<String>) -> String
     };
     // El conjunto de variables reactivas se construye incrementalmente por
     // bloque (respetando el alcance léxico), arrancando vacío.
-    let body = emit_block_inner(&f.body, 1, &HashSet::new());
+    let body = emit_block_inner(&f.body, 1, &HashSet::new(), variantes);
     // La función se emite `async`, así que lo anotado es la promesa.
     let ret = match ts_return_type(f, declarados) {
         Some(t) => format!(": Promise<{t}>"),
@@ -1391,7 +1413,71 @@ fn ts_params_handler(f: &FnDecl) -> String {
 
 // --- sentencias ---
 
-fn emit_block_inner(block: &Block, indent: usize, reactive: &HashSet<String>) -> String {
+/// Los nombres que SON variantes nominales en este módulo.
+///
+/// Antes esto se decidía por una heurística —identificador que empieza por
+/// mayúscula— y se equivocaba con cualquier constante de módulo escrita en
+/// mayúsculas: `let PASO = 50000;` se declaraba bien y luego, al USARLA, se
+/// emitía `{ $tag: "PASO" }`. No reventaba: sumaba un objeto a un número y
+/// seguía, así que un precio acababa en NaN sin un solo error.
+///
+/// Una variante es un nombre que aparece en una UNIÓN —en un `type` o en el
+/// retorno de una función—, más las que trae el lenguaje. Eso se puede saber
+/// leyendo el módulo, así que se sabe en vez de adivinarse.
+fn variantes_de(module: &Module) -> HashSet<String> {
+    fn recoger(t: &Type, out: &mut HashSet<String>) {
+        match t {
+            Type::Union { variants, .. } => {
+                for v in variants {
+                    if let Type::Name { name, args, .. } = v {
+                        if args.is_empty() {
+                            out.insert(name.clone());
+                        }
+                    }
+                    recoger(v, out);
+                }
+            }
+            Type::Name { args, .. } => {
+                for a in args {
+                    recoger(a, out);
+                }
+            }
+            Type::Record { fields, .. } => {
+                for f in fields {
+                    recoger(&f.ty, out);
+                }
+            }
+        }
+    }
+    // Las del lenguaje: los estados de un recurso y los fallos que ya existen.
+    let mut out: HashSet<String> = ["NotFound", "Loading", "Failed", "NotANumber"]
+        .into_iter()
+        .map(String::from)
+        .collect();
+    for it in &module.items {
+        match it {
+            Item::Type(td) => recoger(&td.aliased, &mut out),
+            Item::Fn(f) => {
+                if let Some(r) = &f.return_type {
+                    recoger(r, &mut out);
+                }
+                for prm in &f.params {
+                    recoger(&prm.ty, &mut out);
+                }
+            }
+            Item::Store { ty, .. } => recoger(ty, &mut out),
+            Item::Let(_) => {}
+        }
+    }
+    out
+}
+
+fn emit_block_inner(
+    block: &Block,
+    indent: usize,
+    reactive: &HashSet<String>,
+    variantes: &HashSet<String>,
+) -> String {
     // `current` arranca con las reactivas del alcance externo y se actualiza al
     // procesar cada sentencia: un `reactive` añade el nombre; un `let`/binding
     // no-reactivo del mismo nombre lo SOMBREA (lo quita) para el resto del
@@ -1401,7 +1487,7 @@ fn emit_block_inner(block: &Block, indent: usize, reactive: &HashSet<String>) ->
     for stmt in &block.stmts {
         // La sentencia se emite con el alcance ANTERIOR a su propio binding
         // (el RHS de `let n = ...` ve la `n` externa, no la que declara).
-        lines.push(emit_stmt(stmt, indent, &current));
+        lines.push(emit_stmt(stmt, indent, &current, variantes));
         if let Stmt::Let(l) = stmt {
             if l.reactive {
                 current.insert(l.name.clone());
@@ -1449,7 +1535,12 @@ fn es_recurso(e: &Expr) -> bool {
     }
 }
 
-fn emit_stmt(stmt: &Stmt, indent: usize, reactive: &HashSet<String>) -> String {
+fn emit_stmt(
+    stmt: &Stmt,
+    indent: usize,
+    reactive: &HashSet<String>,
+    variantes: &HashSet<String>,
+) -> String {
     let p = pad(indent);
     match stmt {
         Stmt::Let(l) if l.reactive => {
@@ -1459,7 +1550,7 @@ fn emit_stmt(stmt: &Stmt, indent: usize, reactive: &HashSet<String>) -> String {
             // solo. Un memo no serviría —su cuerpo es síncrono— y era justo lo
             // que antes generaba `__memo(() => (await f()))`, un await dentro de
             // una arrow no-async, o sea un SyntaxError.
-            let init = emit_expr(&l.value, reactive);
+            let init = emit_expr(&l.value, reactive, variantes);
             if l.mutable {
                 format!("{p}const {} = __signal({init});", l.name)
             } else if es_recurso(&l.value) {
@@ -1470,11 +1561,15 @@ fn emit_stmt(stmt: &Stmt, indent: usize, reactive: &HashSet<String>) -> String {
         }
         Stmt::Let(l) => {
             let kw = if l.mutable { "let" } else { "const" };
-            format!("{p}{kw} {} = {};", l.name, emit_expr(&l.value, reactive))
+            format!(
+                "{p}{kw} {} = {};",
+                l.name,
+                emit_expr(&l.value, reactive, variantes)
+            )
         }
         // Asignar a una variable reactiva = invocar su setter; si no, asignación normal.
         Stmt::Assign { name, value, .. } => {
-            let v = emit_expr(value, reactive);
+            let v = emit_expr(value, reactive, variantes);
             if reactive.contains(name) {
                 format!("{p}{name}.set({v});")
             } else {
@@ -1491,29 +1586,34 @@ fn emit_stmt(stmt: &Stmt, indent: usize, reactive: &HashSet<String>) -> String {
         } => {
             // Bucle clásico sobre índice; el elemento y el índice son `const`
             // porque dentro del bucle son inmutables.
-            let it = emit_expr(iter, reactive);
+            let it = emit_expr(iter, reactive, variantes);
             let i = index.clone().unwrap_or_else(|| "__i".to_string());
-            let cuerpo = emit_block_inner(body, indent + 2, reactive);
+            let cuerpo = emit_block_inner(body, indent + 2, reactive, variantes);
             format!(
                 "{p}{{\n{p}  const __xs = {it};\n{p}  for (let {i} = 0; {i} < __xs.length; {i}++) {{\n{p}    const {var} = __xs[{i}];\n{cuerpo}\n{p}  }}\n{p}}}"
             )
         }
         Stmt::Effect { body, .. } => {
-            let inner = emit_block_inner(body, indent + 1, reactive);
+            let inner = emit_block_inner(body, indent + 1, reactive, variantes);
             format!("{p}__effect(async () => {{\n{inner}\n{p}}});")
         }
         Stmt::Return { value, .. } => match value {
-            Some(v) => format!("{p}return {};", emit_expr(v, reactive)),
+            Some(v) => format!("{p}return {};", emit_expr(v, reactive, variantes)),
             None => format!("{p}return;"),
         },
         Stmt::Expr(e) => match e {
-            Expr::If { .. } | Expr::Match { .. } => emit_control(e, indent, reactive),
-            _ => format!("{p}{};", emit_expr(e, reactive)),
+            Expr::If { .. } | Expr::Match { .. } => emit_control(e, indent, reactive, variantes),
+            _ => format!("{p}{};", emit_expr(e, reactive, variantes)),
         },
     }
 }
 
-fn emit_control(e: &Expr, indent: usize, reactive: &HashSet<String>) -> String {
+fn emit_control(
+    e: &Expr,
+    indent: usize,
+    reactive: &HashSet<String>,
+    variantes: &HashSet<String>,
+) -> String {
     let p = pad(indent);
     match e {
         Expr::If {
@@ -1522,19 +1622,24 @@ fn emit_control(e: &Expr, indent: usize, reactive: &HashSet<String>) -> String {
             else_branch,
             ..
         } => {
-            let mut s = format!("{p}if ({}) {{\n", emit_expr(cond, reactive));
-            s.push_str(&emit_block_inner(then_branch, indent + 1, reactive));
+            let mut s = format!("{p}if ({}) {{\n", emit_expr(cond, reactive, variantes));
+            s.push_str(&emit_block_inner(
+                then_branch,
+                indent + 1,
+                reactive,
+                variantes,
+            ));
             s.push_str(&format!("\n{p}}}"));
             if let Some(eb) = else_branch {
                 match eb.as_ref() {
                     ElseBranch::Block(b) => {
                         s.push_str(" else {\n");
-                        s.push_str(&emit_block_inner(b, indent + 1, reactive));
+                        s.push_str(&emit_block_inner(b, indent + 1, reactive, variantes));
                         s.push_str(&format!("\n{p}}}"));
                     }
                     ElseBranch::If(inner) => {
                         s.push_str(" else ");
-                        s.push_str(emit_control(inner, indent, reactive).trim_start());
+                        s.push_str(emit_control(inner, indent, reactive, variantes).trim_start());
                     }
                 }
             }
@@ -1542,8 +1647,8 @@ fn emit_control(e: &Expr, indent: usize, reactive: &HashSet<String>) -> String {
         }
         Expr::Match {
             scrutinee, arms, ..
-        } => emit_match(scrutinee, arms, indent, reactive, false),
-        _ => format!("{p}{};", emit_expr(e, reactive)),
+        } => emit_match(scrutinee, arms, indent, reactive, variantes, false),
+        _ => format!("{p}{};", emit_expr(e, reactive, variantes)),
     }
 }
 
@@ -1555,22 +1660,32 @@ fn emit_match(
     arms: &[MatchArm],
     indent: usize,
     reactive: &HashSet<String>,
+    variantes: &HashSet<String>,
     returning: bool,
 ) -> String {
     let p = pad(indent);
     let pin = pad(indent + 1);
-    let mut s = format!("{p}{{\n{pin}const __m = {};\n", emit_expr(scrut, reactive));
+    let mut s = format!(
+        "{p}{{\n{pin}const __m = {};\n",
+        emit_expr(scrut, reactive, variantes)
+    );
     let mut chained = false; // ¿ya emitimos algún if/else-if?
     let mut caught_all = false; // ¿ya se emitió una rama atrapa-todo?
     for arm in arms {
         let body = match &arm.body {
-            Expr::If { .. } | Expr::Match { .. } => emit_control(&arm.body, indent + 2, reactive),
+            Expr::If { .. } | Expr::Match { .. } => {
+                emit_control(&arm.body, indent + 2, reactive, variantes)
+            }
             _ if returning => format!(
                 "{}return {};",
                 pad(indent + 2),
-                emit_expr(&arm.body, reactive)
+                emit_expr(&arm.body, reactive, variantes)
             ),
-            _ => format!("{}{};", pad(indent + 2), emit_expr(&arm.body, reactive)),
+            _ => format!(
+                "{}{};",
+                pad(indent + 2),
+                emit_expr(&arm.body, reactive, variantes)
+            ),
         };
         // Tras una rama atrapa-todo el resto es inalcanzable: emitirlas daría
         // `else if` después de un `else` (JS inválido).
@@ -1637,7 +1752,7 @@ fn emit_match(
 
 // --- expresiones ---
 
-fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
+fn emit_expr(e: &Expr, reactive: &HashSet<String>, variantes: &HashSet<String>) -> String {
     match e {
         // Un cierre se emite como función flecha, y `async` como todas las del
         // usuario: su cuerpo puede llamar a cualquier cosa, y el emisor de
@@ -1653,7 +1768,7 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
             format!(
                 "(async ({}) => {{\n{}\n}})",
                 ps.join(", "),
-                emit_block_inner(body, 1, reactive)
+                emit_block_inner(body, 1, reactive, variantes)
             )
         }
         Expr::Int { value, .. } => value.to_string(),
@@ -1664,7 +1779,7 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
             if reactive.contains(name) {
                 // Leer una reactiva = su getter (rastrea dependencias).
                 format!("{name}.get()")
-            } else if name.chars().next().is_some_and(|c| c.is_uppercase()) {
+            } else if variantes.contains(name) {
                 // Variante nominal usada como valor (errores como valores). Se
                 // representa con una etiqueta en el campo reservado `$tag`: el
                 // lexer no admite `$` en un identificador, así que ningún
@@ -1677,7 +1792,7 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
             }
         }
         Expr::Unary { op, expr, .. } => {
-            let inner = emit_expr(expr, reactive);
+            let inner = emit_expr(expr, reactive, variantes);
             match op {
                 UnaryOp::Neg => format!("-({inner})"),
                 UnaryOp::Not => format!("!({inner})"),
@@ -1686,8 +1801,8 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
         Expr::Binary {
             op, left, right, ..
         } => {
-            let l = emit_expr(left, reactive);
-            let r = emit_expr(right, reactive);
+            let l = emit_expr(left, reactive, variantes);
+            let r = emit_expr(right, reactive, variantes);
             match op {
                 // División entera: trunca hacia cero, igual que i32.div_s de WASM.
                 // JS '/' daría flotante (7/2=3.5) y rompería el contrato Int.
@@ -1705,8 +1820,11 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
         // (el cuerpo del effect se suspendería y __currentSub se restauraría
         // antes de leer los signals).
         Expr::Call { callee, args, .. } => {
-            let a: Vec<String> = args.iter().map(|x| emit_expr(x, reactive)).collect();
-            let callee_ts = emit_expr(callee, reactive);
+            let a: Vec<String> = args
+                .iter()
+                .map(|x| emit_expr(x, reactive, variantes))
+                .collect();
+            let callee_ts = emit_expr(callee, reactive, variantes);
             // Builtins SÍNCRONOS (no se 'await'). Los de estado (save/all/
             // update/remove) son async (pegan a la BD) y SÍ se awaitan.
             let is_sync_builtin = matches!(
@@ -1719,14 +1837,16 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
                 format!("(await {}({}))", callee_ts, a.join(", "))
             }
         }
-        Expr::Member { object, field, .. } => format!("{}.{}", emit_expr(object, reactive), field),
+        Expr::Member { object, field, .. } => {
+            format!("{}.{}", emit_expr(object, reactive, variantes), field)
+        }
         // 'match' en posición de expresión: IIFE que RETORNA el valor de la rama.
         Expr::Match {
             scrutinee, arms, ..
         } => {
             format!(
                 "(await (async () => {{\n{}\n}})())",
-                emit_match(scrutinee, arms, 1, reactive, true)
+                emit_match(scrutinee, arms, 1, reactive, variantes, true)
             )
         }
         // 'if' en posición de expresión: IIFE (las ramas-bloque no tienen valor
@@ -1734,20 +1854,23 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
         Expr::If { .. } => {
             format!(
                 "(await (async () => {{\n{}\n}})())",
-                emit_control(e, 1, reactive)
+                emit_control(e, 1, reactive, variantes)
             )
         }
         // Literal de registro -> objeto JS.
         Expr::Record { fields, .. } => {
             let parts: Vec<String> = fields
                 .iter()
-                .map(|f| format!("{}: {}", f.name, emit_expr(&f.value, reactive)))
+                .map(|f| format!("{}: {}", f.name, emit_expr(&f.value, reactive, variantes)))
                 .collect();
             format!("{{ {} }}", parts.join(", "))
         }
         // Literal de lista -> arreglo JS.
         Expr::List { elements, .. } => {
-            let parts: Vec<String> = elements.iter().map(|x| emit_expr(x, reactive)).collect();
+            let parts: Vec<String> = elements
+                .iter()
+                .map(|x| emit_expr(x, reactive, variantes))
+                .collect();
             format!("[{}]", parts.join(", "))
         }
         // Indexado -> acceso con verificación de rango (lanza si está fuera).
@@ -1761,7 +1884,7 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
                 match parte {
                     TemplatePart::Lit(t) => out.push_str(&escapar_plantilla(t)),
                     TemplatePart::Interp { expr, raw } => {
-                        let e = emit_expr(expr, reactive);
+                        let e = emit_expr(expr, reactive, variantes);
                         if *raw {
                             out.push_str(&format!("${{{e}}}"));
                         } else {
@@ -1776,8 +1899,8 @@ fn emit_expr(e: &Expr, reactive: &HashSet<String>) -> String {
         Expr::Index { object, index, .. } => {
             format!(
                 "__index({}, {})",
-                emit_expr(object, reactive),
-                emit_expr(index, reactive)
+                emit_expr(object, reactive, variantes),
+                emit_expr(index, reactive, variantes)
             )
         }
     }
@@ -1938,18 +2061,23 @@ mod tests {
     fn el_await_lo_decide_la_lista_compartida() {
         let no_reactive = HashSet::new();
         let m = marea_syntax::parse("fn f() -> Int { return len(concat(\"a\", \"b\")); }").unwrap();
+        let variantes = variantes_de(&m);
         let Item::Fn(f) = &m.items[0] else { panic!() };
         let Stmt::Return { value: Some(e), .. } = &f.body.stmts[0] else {
             panic!()
         };
-        assert_eq!(emit_expr(e, &no_reactive), "len(concat(\"a\", \"b\"))");
+        assert_eq!(
+            emit_expr(e, &no_reactive, &variantes),
+            "len(concat(\"a\", \"b\"))"
+        );
 
         let m =
             marea_syntax::parse("@server fn g() { print(1); }\n@client fn h() { g(); }").unwrap();
+        let variantes = variantes_de(&m);
         let Item::Fn(h) = &m.items[1] else { panic!() };
         let Stmt::Expr(e) = &h.body.stmts[0] else {
             panic!()
         };
-        assert!(emit_expr(e, &no_reactive).starts_with("(await "));
+        assert!(emit_expr(e, &no_reactive, &variantes).starts_with("(await "));
     }
 }
