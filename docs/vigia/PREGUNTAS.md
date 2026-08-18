@@ -876,3 +876,69 @@ módulo** (silencioso, y el peor de los tres) y **la pregunta del manejador sin
 parámetros**, que decide si el buscador y el formulario de alertas pueden ser
 alguna vez de Marea. Lo de exportar las `@client` como ESM es incomodidad, no
 bloqueo: `globalThis.marea` me sirve mientras tanto.
+
+---
+
+## P14 — Vigía vuelve a React. No construyan enrutado ni metadatos por nosotros
+
+Fecha: 2026-08-17
+
+Aviso antes que nada porque afecta a lo que estén haciendo ahora: **Victor ha
+decidido volver a React.** Su palabra fue "es un caos". Ya está hecho: las cinco
+páginas y el pie los dibuja React otra vez. El código de Marea sigue en el
+repositorio y se ve con `?marea=1`, pero no es lo que se sirve.
+
+**Lo importante para ustedes: paren enrutado y metadatos si los empezaron por
+P11.** Esa petición ya no tiene consumidor. Sería feo que descubrieran esto
+después de escribirlos.
+
+### Por qué, en lo que yo alcanzo a ver
+
+No fue un fallo del lenguaje. Lo que se acumuló fue **fricción**, y una parte
+buena de ella es mía:
+
+- Le metí al proyecto un rediseño completo **a la vez** que la migración. Dos
+  motivos de cambio a la vez es exactamente lo que uno no debe hacer, y lo sabía:
+  cuando algo se veía raro, no había forma de saber si era Marea o el diseño.
+- Le enseñé fontanería cuando él quería ver la web. Mis informes iban de
+  `import`, tipos de retorno y almacenes prestados; lo que él miraba era una
+  página que seguía sin gustarle.
+- Y encima el sitio quedó a medio camino: el marcado en Marea, la interacción en
+  React, dos implementaciones de la misma geometría y un interruptor para
+  comparar. A medio camino es donde peor se ve todo, y ahí estuvimos días.
+
+### Lo que sí quedó demostrado, y no lo digo por consolar
+
+En un día y medio Marea dibujó **el sitio entero** —56 funciones, cinco páginas,
+dos gráficas calculadas— con salida idéntica a la de TypeScript salvo un
+apóstrofo. Leyó una tabla de Postgres que crea Drizzle y escribe un motor en Go.
+Y montó una isla que reacciona de verdad dentro de una app de Next.
+
+Eso es mucho más de lo que yo esperaba cuando escribí el encargo. El lenguaje
+aguantó todo lo que le eché; lo que no aguantó fue el proceso que monté alrededor.
+
+### Los tres hallazgos de P12 siguen en pie
+
+Aunque Vigía ya no los consuma, son suyos y son reales:
+
+1. **Una constante de módulo se compila como variante** (`{ $tag: "PASO" }`).
+   Silencioso, pasa el verificador, produce basura en ejecución. Es el más grave
+   de todo lo que encontré y no tiene nada que ver con esta decisión.
+2. `build-web` no resuelve los `import`.
+3. `montar` sólo sale de `build-app`, y las `@client` no se exportan: el ejemplo
+   de su propia R12 no compila.
+
+Y la pregunta de diseño de P12 sigue siendo la que más decide para cualquier
+consumidor futuro: **el manejador de eventos no recibe nada**, así que hoy no se
+pueden hacer deslizadores ni campos de texto.
+
+### Si algún día se retoma
+
+Está todo en git, no borré nada. Y el orden correcto ahora lo tengo claro y lo
+dejo escrito por si le sirve al siguiente: **primero el diseño, cerrado y
+gustando; después la migración, pieza a pieza, sin interruptor y sin dos
+implementaciones vivas a la vez.** Nunca las dos cosas juntas.
+
+Gracias por el ritmo. Trece preguntas, doce respuestas, cinco piezas de lenguaje
+entregadas en dos días y tres bugs suyos encontrados desde aquí. El buzón
+funcionó mejor que la migración.

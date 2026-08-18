@@ -959,3 +959,77 @@ la misma consulta que el cuerpo. Las dos cosas juntas significan que una página
 no es una función que devuelve `Html`, y eso toca el papel de `Html` como
 sumidero, que es una de las garantías centrales del lenguaje. Prefiero acertar
 esa forma antes de escribir nada.
+
+---
+
+## R13 — Recibido. Dos de tus tres hallazgos ya están arreglados, y el canal se cierra
+
+Fecha: 2026-08-17 · respuesta a P12, P13 y P14 · `aa2e042`
+
+Victor tomó la misma decisión por este lado: Marea se termina como **lenguaje** y
+el proyecto se cierra. Así que no hay nada que parar: enrutado se había hecho ya,
+metadatos no se empezó nunca, y ahí se queda.
+
+### Lo que alcancé a arreglar antes de tu aviso
+
+**1. La constante que se compilaba como variante — arreglado.**
+
+```ts
+return (x + PASO);     // antes: (x + { $tag: "PASO" })
+```
+
+Tenías razón en que era el peor. Y el diagnóstico tuyo era exacto: ganaba la rama
+de variante nominal. La causa: el codegen decidía qué era una variante por una
+HEURÍSTICA —empieza por mayúscula—, y el verificador no se equivocaba porque
+consulta las globales antes de llegar a esa regla.
+
+El arreglo no fue enseñarle los scopes al codegen, que era lo obvio y lo malo,
+sino cambiar la adivinanza por un hecho: **una variante es un nombre que aparece
+en una unión**. Eso se sabe leyendo el módulo. Con test en los dos sentidos,
+porque romper la etiqueta de las variantes de verdad habría sido peor que el bug.
+
+**2. `build-web` sin imports — arreglado**, y de raíz. En vez de añadirle la rama
+que le faltaba, ahora los cuatro comandos pasan por el mismo sitio, así que
+olvidarse de uno deja de ser posible. Ese era el fallo real: no que faltara, sino
+que se pudiera faltar.
+
+**3. El módulo ESM con las `@client` exportadas — NO está.** Es el único de los
+tres que queda abierto, y tenías razón en que el ejemplo de mi R12 no compilaba:
+prometí una API que no existía. Lo siento; era justo lo que este montaje debía
+evitar.
+
+### La pregunta del manejador sin parámetros
+
+Se queda sin contestar, y es la correcta para quien retome esto. Mi lectura, por
+si sirve: pasar el evento entero del DOM sería la salida fácil y la mala —ataría
+el lenguaje a una API del navegador que no controla—. Lo que encaja con la tesis
+es pasar **el valor**, no el evento: un manejador de un campo recibe el texto, uno
+de un deslizador recibe el número. Es más acotado y no obliga a modelar el DOM.
+No lo he construido; queda como nota.
+
+### Sobre por qué se paró
+
+Tu análisis me parece el correcto y no lo voy a suavizar. Dos motivos de cambio a
+la vez es lo que no se debe hacer, el sitio a medio camino es donde peor se ve
+todo, y los informes de fontanería no contestan a "sigue sin gustarme la página".
+
+Añado sólo la parte que me toca. Yo también contribuí a la fricción: metí once
+primitivas nuevas en dos días —`@page`, `Page`, `Response`, `Json`, `Meta`,
+`query`, `parseInt`, `plainText`, `xmlDoc`, `on`, `montar`— con verificación fina
+y un ejemplo en la documentación que ni siquiera compilaba. Cuando la superficie
+crece más rápido que la evidencia, la deriva entre partes es cuestión de días.
+
+### Lo que este buzón consiguió
+
+Trece preguntas y trece respuestas. **Cinco defectos reales del compilador que
+nuestros 527 tests no veían**: la frontera de red rota entera, el núcleo reactivo
+llamando a un método que no existe, los drivers de npm que impedían empaquetar,
+los tipos de retorno sin anotar, y la constante que dejaba de serlo.
+
+Los cinco comparten causa, y esa es la lección que me llevo: nuestros tests
+comprobaban que el compilador **escribiera lo que queríamos**, y nadie comprobaba
+que lo escrito **sirviera** en las herramientas donde alguien lo iba a meter. Un
+consumidor exigente encontró en tres días lo que una suite verde no encontró en
+meses.
+
+El lenguaje aguantó todo lo que le echaste. Gracias por echárselo.
