@@ -1,6 +1,15 @@
 # Enrutado y metadatos: propuesta de diseño
 
-**Estado: propuesta.** No hay una línea escrita. Esto existe para decidir la
+> **Estado: SUPERADO.** El enrutado de este documento se implementó y funciona.
+> Los **metadatos no**, y ya no se van a construir: el proyecto se cerró como
+> lenguaje. Se conserva porque el razonamiento sigue siendo válido para quien
+> retome esto —en particular por qué una página no puede ser una función que
+> devuelve `Html`, y por qué el JSON-LD necesita su propio escapado—.
+>
+> El riesgo del final resultó ser el correcto: `Page` con campos fijos acierta
+> hoy y envejece. Nunca llegó a probarse contra una etiqueta que no estuviera.
+
+**Estado original de este documento: propuesta.** No había una línea escrita. Esto existe para decidir la
 forma antes de construir, porque construir sobre la forma equivocada aquí sale
 caro: toca el papel de `Html` como sumidero, que es una de las garantías
 centrales del lenguaje.

@@ -531,6 +531,40 @@ render al DOM, **sin Node ni tipos**) y `runtime.ts`/`server.ts`/`serve.ts`
 `reactive mut` de nivel superior es el estado compartido entre la vista y los
 manejadores; `vista()` se monta en un `effect` que re-pinta `#app` al cambiar.
 
+## Estado del proyecto
+
+**Marea es un lenguaje, y se termina como lenguaje.** Lo que hay funciona y está
+probado; lo que no hay, no está a medias por descuido sino por una decisión.
+
+Hubo un intento de convertirlo además en **framework** —enrutado, metadatos, un
+sitio entero servido desde aquí—. Se probó contra un sitio real y **se dio marcha
+atrás**. La sección de abajo explica por qué, y sigue siendo la guía.
+
+De aquel intento queda una capa de **enrutado** (`@page("/modelo/:id")`, `Page`,
+`Response`) que funciona: sirve rutas con parámetros, distingue tipos de
+contenido y traduce a 404 la variante de fallo del retorno. Lo que **nunca se
+construyó** son los metadatos: `Page` acepta y verifica `titulo`, `canonica`,
+`metas` y `jsonld`, pero **el `<head>` no se emite** —sólo el cuerpo—. Está así a
+propósito y documentado: su criterio de aceptación era "etiquetas idénticas a las
+que un buscador ya indexó", y eso no se entrega a medias.
+
+Quien retome esto tiene dos puertas honestas: completar esa capa, o quitarla y
+quedarse con el lenguaje.
+
+### Lo que aprendió este proyecto sobre sí mismo
+
+Un consumidor real —un sitio de comparación de precios— usó Marea durante unos
+días y encontró **cinco defectos que 527 tests en verde no veían**: la frontera de
+red rota entera, el núcleo reactivo llamando a un método inexistente, unos
+drivers de npm que impedían empaquetar la salida, tipos de retorno sin anotar, y
+una constante de módulo que se compilaba como variante.
+
+Los cinco comparten causa: **la suite comprobaba que el compilador escribiera lo
+que queríamos, y nadie comprobaba que lo escrito sirviera** en las herramientas
+donde alguien lo iba a meter. De ahí salieron dos cosas que sí quedan: tests que
+EJECUTAN lo generado y comparan su salida, y un paso de CI que pasa por
+`tsc --strict` tanto el TypeScript que escribimos como el que emitimos.
+
 ## Qué NO es Marea
 
 Marea vuelve primitivas del lenguaje las dos fronteras de la web. **No es un
@@ -579,9 +613,31 @@ mejor que sea un proyecto aparte.
       donde las `@server` se llaman por RPC y el estado `reactive` de módulo re-pinta el DOM
 - [x] **Política, fase 1 (verificador)** — `@session` + `@server(T)`/`@server(Public)`;
       `@server` sin decidir deja de compilar en cuanto el programa declara identidad
-- [ ] **Política, fase 2 (runtime)** — el endpoint RPC resuelve el token, inyecta la
-      identidad y responde 401; hasta entonces la garantía es sólo de compilación
-- [ ] **Módulos** — `import`, para que un programa deje de ser un archivo
+- [x] **Política, fase 2 (runtime)** — el endpoint resuelve el token, inyecta la identidad
+      y responde 401 antes de ejecutar el cuerpo
+- [x] **Módulos** — `import { X } from "./otro.mar";` en `check`, `build` y el LSP; los
+      módulos se aplanan en un solo bundle DESPUÉS de verificar, así que el aislamiento es
+      real y la salida sigue siendo plana
+- [x] **Cierres** — `fn(a: Int) -> Int { ... }` como expresión, capturando por valor
+- [x] **Eventos** — `on("click", fn() { ... })` devuelve el atributo que ata un elemento a
+      su manejador; despacho por delegación desde la raíz
+- [x] **Islas** — `montar(elemento, vista)` para usar Marea como componente dentro de otra
+      aplicación, con poda de manejadores por isla y efectos cancelables
+- [x] **Almacén prestado** — `store productos: P from "products";` lee una tabla que Marea
+      no creó, en sólo lectura
+- [x] **Runtime sin Node** — un módulo que no cruza la frontera ni guarda estado emite un
+      runtime sin `node:*` ni `process`
+- [x] **Enrutado** — `@page("/modelo/:id")`, con 404 como variante de fallo del retorno
+
+Y lo que se decidió NO hacer:
+
+- [ ] **Metadatos y SEO** — `Page` los verifica pero el `<head>` no se emite. Ver
+      «Estado del proyecto», arriba
+- [ ] **Exportar las `@client` como módulo ESM** — hoy salen en `globalThis.marea`, así que
+      montar una isla desde otro proyecto pide ese rodeo
+- [ ] **Manejadores con parámetros** — `on` recibe un cierre sin argumentos, así que no se
+      pueden leer campos de texto ni deslizadores. Es la decisión que más pesa para
+      cualquiera que retome esto
 
 ## Licencia
 
